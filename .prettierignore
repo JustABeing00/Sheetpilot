@@ -1,0 +1,8 @@
+node_modules
+dist
+build
+coverage
+.data
+package-lock.json
+packages/db/drizzle
+*.md

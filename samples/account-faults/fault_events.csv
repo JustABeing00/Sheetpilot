@@ -1,0 +1,14 @@
+Account Number,Fault Date,Fault Description,Source
+1001,2026-03-01 08:00:00,No power detected at site,SCADA
+1002,2026-03-01 09:00:00,Sensor fault on channel 2,SCADA
+1002,2026-03-02 10:30:00,Battery low warning repeated,SCADA
+1004,2026-03-02 11:15:00,Unknown telemetry anomaly,SCADA
+1005,2026-03-03 09:00:00,Power fail indication,SCADA
+1005,2026-03-03 14:00:00,No power detected,SCADA
+1006,2026-03-03 12:00:00,Intermittent fault detected,SCADA
+1007,2026-03-02 07:00:00,Device reset by watchdog,SCADA
+1007,2026-03-02 09:30:00,Device reset by watchdog,SCADA
+1008,2026-03-03 16:20:00,Case open alarm,SCADA
+1009,2026-03-04 10:00:00,No signal from unit,SCADA
+1009,2026-03-04 10:00:00,Power fail indication,SCADA
+9999,2026-03-03 13:00:00,No signal from unit,SCADA
