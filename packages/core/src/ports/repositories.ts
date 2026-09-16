@@ -15,6 +15,7 @@ import type {
 } from '../domain/entities.js';
 import type { RunStatus, ReviewItemStatus } from '../domain/enums.js';
 import type { StoredRuleSet } from '../domain/rules.js';
+import type { DatasetRepository } from './datasets.js';
 
 export interface FileRepository {
   create(asset: FileAsset): Promise<FileAsset>;
@@ -92,6 +93,7 @@ export interface RuleSetRepository {
 
 export interface Repositories {
   files: FileRepository;
+  datasets: DatasetRepository;
   workflows: WorkflowRepository;
   runs: RunRepository;
   steps: StepRunRepository;

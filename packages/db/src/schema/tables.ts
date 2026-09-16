@@ -9,7 +9,12 @@ import {
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
-import type { WorkflowConfigField } from '@sheetpilot/core';
+import type {
+  DatasetColumn,
+  DatasetWarning,
+  SampleRow,
+  WorkflowConfigField,
+} from '@sheetpilot/core';
 
 const timestampColumn = (name: string) =>
   timestamp(name, { withTimezone: true, mode: 'date' }).notNull();
@@ -58,6 +63,31 @@ export const files = pgTable(
     uploadedAt: timestampColumn('uploaded_at'),
   },
   (table) => [index('files_checksum_idx').on(table.checksum)],
+);
+
+export const datasets = pgTable(
+  'datasets',
+  {
+    id: text('id').primaryKey(),
+    fileId: text('file_id').notNull(),
+    kind: text('kind').notNull(),
+    originalName: text('original_name').notNull(),
+    format: text('format').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    checksum: text('checksum').notNull(),
+    sheetNames: jsonb('sheet_names').$type<string[]>().notNull(),
+    sheetName: text('sheet_name'),
+    rowCount: integer('row_count').notNull(),
+    rowCountExact: boolean('row_count_exact').notNull(),
+    truncated: boolean('truncated').notNull(),
+    scanLimit: integer('scan_limit').notNull(),
+    columns: jsonb('columns').$type<DatasetColumn[]>().notNull(),
+    sampleRows: jsonb('sample_rows').$type<SampleRow[]>().notNull(),
+    warnings: jsonb('warnings').$type<DatasetWarning[]>().notNull(),
+    inspectedAt: timestampColumn('inspected_at'),
+  },
+  (table) => [index('datasets_file_idx').on(table.fileId)],
 );
 
 export const runs = pgTable(
@@ -154,6 +184,7 @@ export const schema = {
   workflows,
   ruleSets,
   files,
+  datasets,
   runs,
   runSteps,
   runDecisions,

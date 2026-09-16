@@ -1,6 +1,8 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.js';
 import { DashboardPage } from '../pages/DashboardPage.js';
+import { DatasetDetailPage } from '../pages/DatasetDetailPage.js';
+import { DatasetsPage } from '../pages/DatasetsPage.js';
 import { NewRunPage } from '../pages/NewRunPage.js';
 import { NotFoundPage } from '../pages/NotFoundPage.js';
 import { ReviewQueuePage } from '../pages/ReviewQueuePage.js';
@@ -18,6 +20,8 @@ export const router = createBrowserRouter([
       { path: 'runs', element: <RunsPage /> },
       { path: 'runs/new', element: <NewRunPage /> },
       { path: 'runs/:runId', element: <RunDetailPage /> },
+      { path: 'datasets', element: <DatasetsPage /> },
+      { path: 'datasets/:datasetId', element: <DatasetDetailPage /> },
       { path: 'review', element: <ReviewQueuePage /> },
       { path: 'workflows', element: <WorkflowsPage /> },
       { path: 'workflows/:slug', element: <WorkflowDetailPage /> },

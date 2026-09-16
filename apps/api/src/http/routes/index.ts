@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppContainer } from '../../container.js';
 import { registerArtifactRoutes } from './artifacts.js';
+import { registerDatasetRoutes } from './datasets.js';
 import { registerFileRoutes } from './files.js';
 import { registerHealthRoutes } from './health.js';
 import { registerMetaRoutes } from './meta.js';
@@ -17,6 +18,7 @@ export function registerRoutes(
   registerMetaRoutes(app, container);
   registerWorkflowRoutes(app, container);
   registerFileRoutes(app, container);
+  registerDatasetRoutes(app, container);
   registerRunRoutes(app, container);
   registerReviewItemRoutes(app, container);
   registerArtifactRoutes(app, container);

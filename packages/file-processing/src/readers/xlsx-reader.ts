@@ -1,7 +1,12 @@
 import type { Readable } from 'node:stream';
 import ExcelJS from 'exceljs';
 import { cellToString, type CellValue, type Row } from '../table.js';
-import type { ReadOptions, TabularReader } from './tabular-reader.js';
+import type {
+  DescribeOptions,
+  ReadOptions,
+  SourceDescription,
+  TabularReader,
+} from './tabular-reader.js';
 
 function excelValueToCellValue(value: ExcelJS.CellValue): CellValue {
   if (value === null || value === undefined) {
@@ -31,6 +36,16 @@ function excelValueToCellValue(value: ExcelJS.CellValue): CellValue {
   return null;
 }
 
+function selectWorksheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string | undefined,
+): ExcelJS.Worksheet | undefined {
+  if (sheetName !== undefined) {
+    return workbook.getWorksheet(sheetName);
+  }
+  return workbook.worksheets[0];
+}
+
 export class XlsxTabularReader implements TabularReader {
   readonly format = 'xlsx' as const;
 
@@ -38,10 +53,7 @@ export class XlsxTabularReader implements TabularReader {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.read(source);
 
-    const worksheet = options.sheetName
-      ? workbook.getWorksheet(options.sheetName)
-      : workbook.worksheets[0];
-
+    const worksheet = selectWorksheet(workbook, options.sheetName);
     if (!worksheet) {
       return;
     }
@@ -73,5 +85,29 @@ export class XlsxTabularReader implements TabularReader {
     for (const row of collected) {
       yield row;
     }
+  }
+
+  async describe(source: Readable, options: DescribeOptions = {}): Promise<SourceDescription> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.read(source);
+
+    const sheetNames = workbook.worksheets.map((worksheet) => worksheet.name);
+    const worksheet = selectWorksheet(workbook, options.sheetName);
+    if (!worksheet) {
+      return { sheetNames, headers: [] };
+    }
+
+    const headers: string[] = [];
+    worksheet.getRow(1).eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+      headers[columnNumber - 1] = cellToString(excelValueToCellValue(cell.value)).trim();
+    });
+
+    for (let index = 0; index < headers.length; index += 1) {
+      if (headers[index] === undefined) {
+        headers[index] = '';
+      }
+    }
+
+    return { sheetNames, headers };
   }
 }

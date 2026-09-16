@@ -47,6 +47,8 @@ export const envSourceSchema = z.object({
   STORAGE_DRIVER: storageDriverSchema.default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/storage'),
   MAX_UPLOAD_MB: z.coerce.number().min(0.1).max(1024).default(50),
+  DATASET_SAMPLE_ROWS: z.coerce.number().int().min(1).max(500).default(10),
+  DATASET_MAX_SCAN_ROWS: z.coerce.number().int().min(100).max(5_000_000).default(200_000),
   AI_PROVIDER: aiProviderIdSchema.default('noop'),
   OPENAI_API_KEY: z.string().default(''),
   AI_MODEL: z.string().default(''),
@@ -69,6 +71,10 @@ export interface AppConfig {
     driver: StorageDriver;
     localDir: string;
     maxUploadBytes: number;
+  };
+  dataset: {
+    sampleRows: number;
+    maxScanRows: number;
   };
   ai: {
     provider: AiProviderId;
@@ -151,6 +157,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       driver: source.STORAGE_DRIVER,
       localDir: source.STORAGE_LOCAL_DIR,
       maxUploadBytes: Math.round(source.MAX_UPLOAD_MB * 1024 * 1024),
+    },
+    dataset: {
+      sampleRows: source.DATASET_SAMPLE_ROWS,
+      maxScanRows: source.DATASET_MAX_SCAN_ROWS,
     },
     ai: {
       provider: source.AI_PROVIDER,

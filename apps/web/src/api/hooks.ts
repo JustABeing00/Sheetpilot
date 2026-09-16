@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   artifactListResponseSchema,
+  datasetAnalysisResponseSchema,
+  datasetDtoSchema,
+  datasetListResponseSchema,
+  datasetRowsResponseSchema,
   decisionListResponseSchema,
   fileAssetDtoSchema,
   fileListResponseSchema,
@@ -29,6 +33,11 @@ export const queryKeys = {
   artifacts: (runId: string) => ['runs', runId, 'artifacts'] as const,
   reviewQueue: (status: string) => ['review-items', status] as const,
   files: ['files'] as const,
+  datasets: ['datasets'] as const,
+  dataset: (id: string) => ['datasets', id] as const,
+  datasetAnalysis: (id: string, sheet: string) => ['datasets', id, 'analysis', sheet] as const,
+  datasetRows: (id: string, sheet: string, offset: number) =>
+    ['datasets', id, 'rows', sheet, offset] as const,
 };
 
 export function useHealth() {
@@ -128,6 +137,72 @@ export function useUploadFile() {
       form.set('kind', input.kind);
       form.set('file', input.file);
       return apiUpload('/api/v1/files', form, fileAssetDtoSchema);
+    },
+  });
+}
+
+export function useDatasets() {
+  return useQuery({
+    queryKey: queryKeys.datasets,
+    queryFn: () => apiGet('/api/v1/datasets?limit=100', datasetListResponseSchema),
+  });
+}
+
+export function useDataset(datasetId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.dataset(datasetId ?? ''),
+    queryFn: () => apiGet(`/api/v1/datasets/${datasetId}`, datasetDtoSchema),
+    enabled: Boolean(datasetId),
+  });
+}
+
+export function useDatasetAnalysis(datasetId: string | undefined, sheetName: string | null) {
+  const sheet = sheetName ?? '';
+  return useQuery({
+    queryKey: queryKeys.datasetAnalysis(datasetId ?? '', sheet),
+    queryFn: () =>
+      apiGet(
+        `/api/v1/datasets/${datasetId}/analysis${sheet ? `?sheet=${encodeURIComponent(sheet)}` : ''}`,
+        datasetAnalysisResponseSchema,
+      ),
+    enabled: Boolean(datasetId),
+  });
+}
+
+export function useDatasetRows(
+  datasetId: string | undefined,
+  sheetName: string | null,
+  limit: number,
+  offset: number,
+) {
+  const sheet = sheetName ?? '';
+  return useQuery({
+    queryKey: queryKeys.datasetRows(datasetId ?? '', sheet, offset),
+    queryFn: () =>
+      apiGet(
+        `/api/v1/datasets/${datasetId}/rows?limit=${limit}&offset=${offset}${
+          sheet ? `&sheet=${encodeURIComponent(sheet)}` : ''
+        }`,
+        datasetRowsResponseSchema,
+      ),
+    enabled: Boolean(datasetId),
+  });
+}
+
+export function useUploadDataset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { kind: string; file: File; sheet?: string }) => {
+      const form = new FormData();
+      form.set('kind', input.kind);
+      form.set('file', input.file);
+      if (input.sheet) {
+        form.set('sheet', input.sheet);
+      }
+      return apiUpload('/api/v1/datasets', form, datasetDtoSchema);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.datasets });
     },
   });
 }

@@ -1,6 +1,9 @@
 import type {
   Artifact,
   ArtifactRepository,
+  DatasetListOptions,
+  DatasetProfile,
+  DatasetRepository,
   DecisionListOptions,
   DecisionRecord,
   DecisionRepository,
@@ -41,6 +44,7 @@ function paginate<T>(items: T[], options?: { limit?: number; offset?: number }):
 
 export function createInMemoryRepositories(): Repositories {
   const fileStore = new Map<string, FileAsset>();
+  const datasetStore = new Map<string, DatasetProfile>();
   const workflowStore = new Map<string, Workflow>();
   const runStore = new Map<string, WorkflowRun>();
   const stepStore = new Map<string, StepRun[]>();
@@ -60,6 +64,21 @@ export function createInMemoryRepositories(): Repositories {
         paginate(
           byDateDesc([...fileStore.values()], (asset) => asset.uploadedAt),
           { limit },
+        ),
+      ),
+  };
+
+  const datasets: DatasetRepository = {
+    create: (dataset) => {
+      datasetStore.set(dataset.id, dataset);
+      return Promise.resolve(dataset);
+    },
+    getById: (id) => Promise.resolve(datasetStore.get(id) ?? null),
+    list: (options?: DatasetListOptions) =>
+      Promise.resolve(
+        paginate(
+          byDateDesc([...datasetStore.values()], (dataset) => dataset.inspectedAt),
+          options,
         ),
       ),
   };
@@ -199,6 +218,7 @@ export function createInMemoryRepositories(): Repositories {
 
   return {
     files,
+    datasets,
     workflows,
     runs,
     steps,

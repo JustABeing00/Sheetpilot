@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq } from 'drizzle-orm';
 import {
   artifactSchema,
+  datasetProfileSchema,
   decisionRecordSchema,
   fileAssetSchema,
   reviewItemSchema,
@@ -9,6 +10,7 @@ import {
   workflowRunSchema,
   workflowSchema,
   type Artifact,
+  type DatasetProfile,
   type DecisionRecord,
   type FileAsset,
   type Repositories,
@@ -21,6 +23,7 @@ import {
 import type { Database } from '../../client.js';
 import {
   artifacts,
+  datasets,
   files,
   reviewItems,
   ruleSets,
@@ -31,6 +34,8 @@ import {
 } from '../../schema/tables.js';
 
 const toFileAsset = (row: typeof files.$inferSelect): FileAsset => fileAssetSchema.parse(row);
+const toDataset = (row: typeof datasets.$inferSelect): DatasetProfile =>
+  datasetProfileSchema.parse(row);
 const toWorkflow = (row: typeof workflows.$inferSelect): Workflow => workflowSchema.parse(row);
 const toRun = (row: typeof runs.$inferSelect): WorkflowRun => workflowRunSchema.parse(row);
 const toStepRun = (row: typeof runSteps.$inferSelect): StepRun =>
@@ -58,6 +63,26 @@ export function createPostgresRepositories(db: Database): Repositories {
         const query = db.select().from(files).orderBy(desc(files.uploadedAt));
         const rows = limit === undefined ? await query : await query.limit(limit);
         return rows.map(toFileAsset);
+      },
+    },
+
+    datasets: {
+      async create(dataset) {
+        const [row] = await db.insert(datasets).values(dataset).returning();
+        return toDataset(row!);
+      },
+      async getById(id) {
+        const [row] = await db.select().from(datasets).where(eq(datasets.id, id)).limit(1);
+        return row ? toDataset(row) : null;
+      },
+      async list(options) {
+        const rows = await db
+          .select()
+          .from(datasets)
+          .orderBy(desc(datasets.inspectedAt))
+          .limit(options?.limit ?? 100)
+          .offset(options?.offset ?? 0);
+        return rows.map(toDataset);
       },
     },
 

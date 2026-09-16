@@ -14,12 +14,12 @@
 ```mermaid
 flowchart TB
   subgraph UI["apps/web — Frontend / UI"]
-    pages["Dashboard · New run · Runs · Run detail · Review queue · Workflows"]
+    pages["Dashboard · Datasets · New run · Runs · Run detail · Review queue · Workflows"]
   end
 
   subgraph API["apps/api — API / application layer"]
     routes["HTTP routes (Fastify)"]
-    services["FileService · RunService"]
+    services["DatasetService · FileService · RunService"]
     container["Composition root (container.ts)"]
   end
 
@@ -63,8 +63,11 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 
 ## Request / run lifecycle
 
-1. `POST /api/v1/files` (multipart) → `FileService` detects the format, stores the file, reads the header
-   row and row count, persists a `FileAsset`.
+1. `POST /api/v1/files` (multipart) → `FileService` delegates to `DatasetService`, which validates the
+   upload (extension, content type, size, magic bytes), stores it under a generated id, inspects its
+   structure and persists both a `FileAsset` (used by runs) and a `DatasetProfile` (used for preview).
+   `POST /api/v1/datasets` returns the richer dataset DTO directly; `GET /api/v1/datasets/:id/rows`
+   pages rows from storage so the browser never receives the full table.
 2. `POST /api/v1/runs` → `RunService.createRun` validates the workflow + files, persists a `queued` run
    and returns **202** immediately; execution happens in the background.
 3. `RunService.execute` builds a `StepContext`, creates the run's step records, then calls
@@ -85,7 +88,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `RegisteredWorkflow` | `packages/workflow-engine/src/registry.ts` | What the API/registry know about a workflow; executes it and returns generic `WorkflowOutputs` |
 | `Repositories` (8 interfaces) | `packages/core/src/ports/repositories.ts` | Persistence ports implemented by in-memory and Postgres adapters |
 | `FileStorage` | `packages/core/src/ports/file-storage.ts` | Object storage port; `LocalFileStorage`, `InMemoryFileStorage` today, S3 later |
-| `TabularReader` / `TabularWriter` | `packages/file-processing/src/readers`, `writers` | Streaming async-generator contract; CSV is fully streaming, XLSX is buffered today |
+| `TabularReader` / `TabularWriter` | `packages/file-processing/src/readers`, `writers` | Streaming async-generator contract with `describe()` for sheets/headers; CSV is fully streaming, XLSX is buffered today |
+| `inspectDataset` | `packages/file-processing/src/inspection.ts` | Bounded one-pass analysis producing inferred types, emptiness/uniqueness stats, samples and warnings |
+| `DatasetService` / `DatasetProfile` | `apps/api/src/services/dataset-service.ts`, `packages/core/src/domain/dataset.ts` | Normalized, persisted dataset representation consumed by later workflow stages |
+| `DatasetRepository` | `packages/core/src/ports/datasets.ts` | Persistence port for dataset profiles (in-memory and Postgres adapters) |
 | `Rule`, `ConditionGroup`, `RuleAction` | `packages/core/src/domain/rules.ts` | Business rules are data with zod validation, versioned in `RuleSet`s |
 | `evaluateRules` | `packages/rule-engine/src/evaluate.ts` | Deterministic winner: priority ↓, specificity ↓, rule id ↑; conflicts reported |
 | `ClassificationProvider` | `packages/core/src/ports/classification.ts` | AI port; `NoopClassificationProvider` today |
@@ -115,6 +121,7 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | S3/blob storage | Implement `FileStorage`; `createContainer` selects the driver |
 | Background queue / scheduling | Replace the fire-and-forget call in `RunService.createRun` with a queue; run state already lives in the `runs` table |
 | Large XLSX streaming | Swap `XlsxTabularReader` for an ExcelJS streaming reader behind the same `TabularReader` interface |
+| DuckDB / chunked inspection | Replace the `inspectDataset` pass behind `DatasetService`; the persisted `DatasetProfile` contract stays the same |
 | Multi-tenant isolation | Add `tenantId` to entities/ports and scope repositories |
 
 ## Deliberate non-goals in this foundation

@@ -3,6 +3,7 @@ dist
 build
 coverage
 .data
+.overnight-run
 package-lock.json
 packages/db/drizzle
 *.md

@@ -1,6 +1,8 @@
 import type {
   Artifact,
   DecisionRecord,
+  DatasetProfile,
+  DatasetSummary,
   FileAsset,
   ReviewItem,
   RunDto,
@@ -11,6 +13,8 @@ import type {
 import type { RegisteredWorkflow } from '@sheetpilot/workflow-engine';
 import type {
   ArtifactDto,
+  DatasetDto,
+  DatasetSummaryDto,
   DecisionDto,
   FileAssetDto,
   ReviewItemDto,
@@ -18,6 +22,48 @@ import type {
   WorkflowDetailDto,
   WorkflowSummaryDto,
 } from '@sheetpilot/core';
+
+export function toDatasetDto(dataset: DatasetProfile): DatasetDto {
+  return {
+    id: dataset.id,
+    fileId: dataset.fileId,
+    kind: dataset.kind,
+    originalName: dataset.originalName,
+    format: dataset.format,
+    mimeType: dataset.mimeType,
+    sizeBytes: dataset.sizeBytes,
+    checksum: dataset.checksum,
+    sheetNames: dataset.sheetNames,
+    sheetName: dataset.sheetName,
+    rowCount: dataset.rowCount,
+    rowCountExact: dataset.rowCountExact,
+    truncated: dataset.truncated,
+    scanLimit: dataset.scanLimit,
+    columns: dataset.columns,
+    sampleRows: dataset.sampleRows,
+    warnings: dataset.warnings,
+    inspectedAt: dataset.inspectedAt.toISOString(),
+    rowPreviewUrl: `/api/v1/datasets/${dataset.id}/rows`,
+  };
+}
+
+export function toDatasetSummaryDto(dataset: DatasetSummary): DatasetSummaryDto {
+  return {
+    id: dataset.id,
+    fileId: dataset.fileId,
+    kind: dataset.kind,
+    originalName: dataset.originalName,
+    format: dataset.format,
+    sizeBytes: dataset.sizeBytes,
+    sheetName: dataset.sheetName,
+    rowCount: dataset.rowCount,
+    rowCountExact: dataset.rowCountExact,
+    truncated: dataset.truncated,
+    columnCount: dataset.columnCount,
+    warningCount: dataset.warningCount,
+    inspectedAt: dataset.inspectedAt.toISOString(),
+  };
+}
 
 export function toFileAssetDto(asset: FileAsset): FileAssetDto {
   return {

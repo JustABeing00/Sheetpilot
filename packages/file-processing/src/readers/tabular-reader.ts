@@ -8,9 +8,23 @@ export interface ReadOptions {
   signal?: AbortSignal;
 }
 
+export interface DescribeOptions {
+  sheetName?: string;
+}
+
+/**
+ * Format-level metadata read from a source without materialising its rows.
+ * `headers` preserves source order, duplicates and blank header cells.
+ */
+export interface SourceDescription {
+  sheetNames: string[];
+  headers: string[];
+}
+
 export interface TabularReader {
   readonly format: 'csv' | 'xlsx';
   read(source: Readable, options?: ReadOptions): AsyncGenerator<Row>;
+  describe(source: Readable, options?: DescribeOptions): Promise<SourceDescription>;
 }
 
 export async function readAllRows(

@@ -111,3 +111,26 @@ mapping UI and error messages. Detection by content prevents silently treating a
 
 **Consequences.** Uploads are parsed once for preview and once for counting; large-file streaming
 ingestion is a future optimization behind the same reader interface.
+
+## ADR-010 — Ingestion produces a persisted, bounded dataset profile
+
+**Decision.** Uploading a file and inspecting its structure are a single operation
+(`DatasetService.ingest`), which validates the upload, stores it under a generated internal id and
+persists a `DatasetProfile`: sheet names, columns with inferred types, emptiness/uniqueness statistics,
+likely date/identifier flags, a bounded set of sample rows and validation warnings. Full rows are never
+persisted or sent to the browser; they stay in object storage and are paged on demand through
+`GET /api/v1/datasets/:id/rows` (and re-analysed per sheet through
+`GET /api/v1/datasets/:id/analysis`).
+
+**Why.** The first real product capability is "what did the system detect?", and later stages (mapping,
+matching, classification) need a normalized structural representation. Persisting the profile makes that
+representation reusable and auditable, while paging keeps the browser and the API memory-bounded
+regardless of file size.
+
+**Consequences.** Every upload creates two linked records (the `FileAsset` used by runs and the
+`DatasetProfile` used for inspection). Inspection reads the source once with a hard
+`DATASET_MAX_SCAN_ROWS` cap, so for very large files `rowCount` is a lower bound and `truncated` is set.
+Uniqueness tracking is additionally capped, so `uniqueCount` can be approximate on huge columns. Legacy
+`.xls` is rejected with guidance. The reader contract gained `describe()` (sheets + headers) so the
+inspection logic is format-agnostic and a streaming/DuckDB implementation can replace it later behind
+the same `TabularReader` interface.

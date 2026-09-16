@@ -5,8 +5,8 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-15 (session 1 — foundation)
-**Repository:** local working copy at `D:\deepseekmodeltestingforexcelproj` (git initialized, no commits yet)
+**Last updated:** 2026-09-16 (product session 1 — file ingestion & dataset inspection)
+**Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
 ---
@@ -24,9 +24,17 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Session 1 objective: a production-quality foundation.** Architecture, repository structure, typed
-contracts, deterministic rule engine, file processing, workflow engine, persistence strategy, API, UI shell
-and one fully working end-to-end workflow — verified by tests and a smoke run. **Status: achieved** (see §8).
+**Product session 1 objective: production-quality file ingestion and dataset inspection.** Users can
+upload `.csv`/`.xlsx`/`.xlsm` files, the server validates, stores and analyses them, and a dataset
+preview UI shows the original filename next to the internal dataset id, detected sheets, columns,
+inferred types, row counts and validation warnings. **Status: achieved** (see §8, verified in §9). The
+architecture deliberately keeps rows in object storage and pages them so no stage loads a full dataset
+into browser memory, and keeps inspection behind a `TabularReader`/`inspectDataset` seam so it can be
+swapped for streaming/chunked/DuckDB processing later.
+
+**Next (product session 2):** column mapping and workflow configuration — assign dataset roles, map
+semantic roles (entity id, timestamp, description, output columns) to real detected columns, validate
+compatibility and persist a reusable, versionable workflow configuration. See §15.
 
 ## 3. Product Vision
 
@@ -55,11 +63,12 @@ core workflow is excellent.
 | Backend | Node.js 22+ (developed on 24.6), TypeScript 5.x strict, Fastify 5.12 | `@fastify/multipart` uploads, `@fastify/cors`, pino logs |
 | Validation/contracts | zod 4.6 (`@sheetpilot/core`) | Same schemas used by API and web |
 | Database | Postgres 16 via Drizzle ORM 0.45 + drizzle-kit; in-memory repositories by default | SQL migrations generated; no live Postgres verified yet |
-| File processing | `csv-parse` / `csv-stringify` (streaming), `exceljs` (buffered) | Behind `TabularReader`/`TabularWriter` async generator interfaces |
+| File processing | `csv-parse` / `csv-stringify` (streaming), `exceljs` (buffered) | Behind `TabularReader`/`TabularWriter` async generator interfaces; readers also expose `describe()` for sheets+headers |
+| Dataset inspection | `inspectDataset` in `@sheetpilot/file-processing` | Bounded one-pass scan → `DatasetProfile` (types, emptiness, uniqueness, samples, warnings); persisted via `DatasetRepository` |
 | Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
 | Rules | Custom DSL in `@sheetpilot/rule-engine` | priority → specificity → id winner selection, explanation templates |
 | AI | `ClassificationProvider` port + `NoopClassificationProvider` + policy function | Real provider intentionally not implemented yet |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 86 tests, 12 files, all green |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 112 tests, 15 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -82,6 +91,9 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
 ```
 
 Dependency rule: inner layers never import outer layers; `web` only consumes `core` DTO schemas.
+Ingestion lifecycle: `POST /api/v1/datasets` (or `/files`) → `DatasetService.ingest` validates the
+upload, stores it, runs bounded `inspectDataset`, persists `FileAsset` + `DatasetProfile` → the UI reads
+the profile and pages rows via `GET /api/v1/datasets/:id/rows`.
 Run lifecycle: `POST /files` → `POST /runs` (202, queued) → background `RunService.execute` →
 step traces + artifacts + decision log + review items → run `succeeded`.
 
@@ -94,11 +106,12 @@ apps/
     container.ts           composition root; seeds workflow + rule set into the repositories
     server.ts              Fastify factory, CORS, multipart, error mapping, 404 handler
     logger.ts              pino logger
-    services/file-service.ts   upload validation, format detection, metadata (rows, columns)
+    services/file-service.ts   thin compatibility wrapper (delegates upload to DatasetService)
+    services/dataset-service.ts  validate → store → inspect → persist; paged row reads
     services/run-service.ts    run creation/execution, step persistence, artifacts, review resolution
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
-    http/routes/*.ts       health, meta, workflows, files, runs, review-items, artifacts
+    http/routes/*.ts       health, meta, workflows, files, datasets, runs, review-items, artifacts
     fixtures.ts            reads the sample CSVs for tests
     server.test.ts         API integration + E2E test (upload → run → artifacts → review resolve)
   web/src/
@@ -108,21 +121,24 @@ apps/
     components/AppShell.tsx        sidebar shell, API status, open-review counter
     components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
     components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
-    pages/*.tsx            Dashboard, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, NotFound
-    lib/format.ts, lib/rules.ts, lib/status.ts   formatting, condition descriptions, badge tones
+    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, NotFound
+    lib/format.ts, lib/rules.ts, lib/status.ts, lib/datasets.ts   formatting, condition descriptions, badge tones, dataset column/flag helpers
     styles/app.css         design tokens + component styles (light professional theme)
 packages/
   core/src/
     domain/enums.ts        RunStatus, ReviewReason, AiPolicy, file/artifact formats …
     domain/entities.ts     Workflow, FileAsset, WorkflowRun, StepRun, DecisionRecord, ReviewItem, Artifact…
+    domain/dataset.ts      DatasetProfile/Analysis/Column/Warning schemas, DatasetSummary
     domain/rules.ts        Rule, ConditionGroup, RuleAction, RuleSet, RuleEvaluation
     api/contracts.ts       HTTP request/response schemas shared with the web app
-    ports/                 repositories, file-storage, classification, logger, clock
+    ports/                 repositories, datasets, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
   config/src/schema.ts     zod env schema, .env discovery, fail-fast validation
   file-processing/src/
     table.ts, normalize.ts (keys, timestamps, Excel serials), inference.ts (column type detection)
-    readers/               csv (streaming), xlsx (buffered), shared TabularReader
+    inspection.ts          bounded one-pass dataset analysis (types, emptiness, uniqueness, samples, warnings)
+    upload.ts              untrusted-filename sanitisation + extension/mime/size/magic validation
+    readers/               csv (streaming), xlsx (buffered), shared TabularReader with describe()/sheets
     writers/               csv, xlsx, buffer collection
     storage/               local-file-storage (traversal-safe), memory-file-storage
     registry.ts            format detection + reader/writer factories
@@ -134,7 +150,7 @@ packages/
     workflows/account-faults/  types.ts (config/state/columns), rules.ts (taxonomy + 7 rules),
                                steps.ts (5 steps), workflow.ts (program + registered workflow)
   db/src/
-    schema/tables.ts       workflows, rule_sets, files, runs, run_steps, run_decisions, review_items, artifacts
+    schema/tables.ts       workflows, rule_sets, files, datasets, runs, run_steps, run_decisions, review_items, artifacts
     client.ts, migrations.ts, scripts/migrate.ts
     repositories/memory/   full in-memory implementation of every port (used by default + tests)
     repositories/postgres/ Drizzle implementation (type-checks; NOT yet run against a live database)
@@ -150,6 +166,7 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | --- | --- | --- |
 | `Workflow` | A registered workflow definition | slug, name, version, steps, configFields |
 | `FileAsset` | An uploaded input file | kind (primary/events/generic), format, size, checksum, rowCount, columnNames, storageKey |
+| `DatasetProfile` | Normalized structural view of an uploaded file (the pre-mapping representation) | sheetNames/sheetName, rowCount (+exact/truncated), scanLimit, columns[] (type, empty/unique counts, samples, duplicate/date/identifier flags), sampleRows, warnings, fileId |
 | `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, config, stats, error, timestamps |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, confidence, reviewReasons, outputValues, evidence |
@@ -165,7 +182,41 @@ Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
 confidence, review status, review reasons, explanation), 7 default rules over a 7-option taxonomy.
 
-## 8. Completed (session 1)
+## 8. Completed
+
+### Product session 1 — File ingestion & dataset inspection (2026-09-16)
+
+- [x] `@sheetpilot/core`: `DatasetProfile`/`DatasetAnalysis`/`DatasetColumn`/`DatasetWarning` zod schemas
+      (new `domain/dataset.ts`), `DatasetRepository` port (new `ports/datasets.ts`, added to `Repositories`),
+      dataset HTTP DTOs (`datasetDtoSchema`, `datasetSummaryDtoSchema`, `datasetRowsResponseSchema`,
+      `datasetAnalysisResponseSchema`, `datasetListResponseSchema`), and new error types
+      `InvalidFileError` (400), `CorruptFileError` (422), `EmptyDatasetError` (422), `OversizedFileError` (413).
+- [x] `@sheetpilot/file-processing`: `TabularReader` gained `describe()` (sheet names + raw headers in
+      source order, duplicates preserved) implemented for CSV and XLSX; new `inspection.ts` performs a
+      single bounded streaming pass and derives inferred column types (`string|number|boolean|date|empty|mixed`),
+      empty/unique counts and ratios, sample values, sample rows, duplicate-column detection, likely
+      date/time and identifier flags, and validation warnings; new `upload.ts` sanitises untrusted
+      filenames, allowlists extensions/content types, enforces the size limit and checks magic bytes
+      (PK zip for XLSX, NUL-free for delimited text).
+- [x] `@sheetpilot/db`: new `datasets` table (18 columns, indexed by `file_id`) with generated migration
+      `drizzle/0001_pretty_dorian_gray.sql`; full in-memory and Postgres dataset repositories.
+- [x] `apps/api`: `DatasetService` (validate → store → inspect → persist; `analyze` and paged `readRows`),
+      new routes `POST/GET /api/v1/datasets`, `GET /api/v1/datasets/:id`, `GET /api/v1/datasets/:id/analysis`,
+      `GET /api/v1/datasets/:id/rows`, dataset DTO mappers, container wiring; `POST /api/v1/files` now
+      delegates to `DatasetService` (same response shape); multipart size-limit errors map to a clean
+      413 `payload_too_large` body.
+- [x] `apps/web`: new **Datasets** page (upload + ingested list) and **Dataset detail** page (original
+      filename vs internal dataset id, stat cards, warnings, sheet selector, column analysis table,
+      paginated row preview); nav + router entries; `lib/datasets.ts` helpers; CSS.
+- [x] Tests: +26 (112 total, 15 files) — `packages/file-processing/src/inspection.test.ts` (9),
+      `packages/file-processing/src/upload.test.ts` (11), `apps/api/src/dataset.test.ts` (6 API tests).
+- [x] Docs: ADR-010, `docs/architecture.md` (ingestion lifecycle, new abstractions/extensions),
+      `.env.example`, README, this file.
+- [x] Environment repair: the workspace `node_modules/@sheetpilot/*` links pointed at the previous repo
+      path (the project folder was moved); `npm install` relinked them so typecheck/tests/build resolve
+      the current source.
+
+### Foundation (2026-09-15)
 
 - [x] Monorepo scaffolding: npm workspaces, strict TypeScript base config, ESLint 9 (type-aware flat
       config), Prettier, EditorConfig, `.gitignore`, `.env.example`, docker-compose for Postgres.
@@ -203,15 +254,17 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 9 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 12 files / 86 tests passed |
+| Tests | `npm test` | 15 files / 112 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
-| Migrations | `npm run db:generate` | generated `packages/db/drizzle/0000_lying_jigsaw.sql` for 8 tables |
+| Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables) + `0001_pretty_dorian_gray.sql` (`datasets`) |
 
-Working end to end: upload CSV/XLSX → inspect metadata → start run (202, background execution) → step
-traces → deterministic classification with the latest-fault selection → output CSV/XLSX + review queue CSV
-→ decision log → review queue with accept/override/dismiss → review counters.
+Working end to end: upload a dataset (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
+in the **Datasets** UI → upload CSV/XLSX → inspect metadata → start run (202, background execution) →
+step traces → deterministic classification with the latest-fault selection → output CSV/XLSX + review
+queue CSV → decision log → review queue with accept/override/dismiss → review counters.
 
 Sample run results (canonical `samples/account-faults` files): 9 accounts, 13 events, 10 output rows,
 2 auto-approved, 7 review items (conflicting history, no events, no rule match, low confidence, duplicate
@@ -244,6 +297,22 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
     `apps/api/src/fixtures.ts` and the account-faults test.
 12. **Bundle size warnings** — the web bundle is ~480 KB (143 KB gzip) with everything included; consider
     route-level code splitting when the UI grows.
+13. **Dataset inspection is bounded, so counts can be approximate.** The scan stops at
+    `DATASET_MAX_SCAN_ROWS` (default 200,000); past that `rowCount` is a lower bound and the profile sets
+    `truncated: true` (surfaced as a `truncated_scan` warning and a `+` in the UI). `uniqueCount` is
+    approximate when a column has more than 5,000 distinct values within the scanned rows.
+14. **XLSX inspection parses the workbook per operation** (sheet list + headers, then rows; re-analysis
+    parses again). Fine for operational files, not for very large workbooks — the `TabularReader`/
+    `inspectDataset` seam is the intended replacement point (streaming reader or DuckDB).
+15. **Uploads are buffered in memory server-side** (`file.toBuffer()` in the routes) up to
+    `MAX_UPLOAD_MB`; rows are not buffered, but streaming the upload straight to object storage is a
+    later optimization. The browser never receives full datasets (rows are paged).
+16. **Legacy `.xls`/`.xlsb` are rejected** with guidance to save as `.xlsx`/`.csv`. `ExcelJS` cannot read
+    the legacy binary format; this is intentional rather than silent corruption.
+17. **Two ingest endpoints.** `POST /api/v1/files` returns the legacy `FileAssetDto` (used by the run
+    wizard) and `POST /api/v1/datasets` returns the rich `DatasetDto`; both create a `FileAsset` and a
+    `DatasetProfile`. Session 2 should build column mapping on the dataset profile and may deprecate the
+    `/files` route for new UI.
 
 ## 11. Technical Decisions
 
@@ -258,6 +327,7 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-007 rule-declared confidence + thresholds decide review routing.
 - ADR-008 explainability is persisted (decision log + review evidence + `__` output columns).
 - ADR-009 uploads validated on ingestion (format sniffing, row count, column names).
+- ADR-010 ingestion produces a persisted, bounded dataset profile; rows stay in storage and are paged.
 
 Additional decisions made during implementation:
 
@@ -279,6 +349,11 @@ Implemented:
 - **Path traversal protection** in `LocalFileStorage` (rejects `..`, normalizes separators) and uploaded
   file names are reduced to their basename via `path.basename`.
 - **Upload limits** enforced by `@fastify/multipart` (`MAX_UPLOAD_MB`) and a 2 MB JSON body limit.
+  Oversized uploads return a clean `413 payload_too_large` body.
+- **Upload validation before storage** (`validateUpload`): extension allowlist, declared content-type
+  allowlist, size limit, filename sanitisation (basename + control-character stripping), and magic-byte
+  checks (PK zip signature for XLSX, NUL-free for delimited text). Uploaded content is only ever parsed
+  by `csv-parse`/`exceljs`; it is never executed, and storage keys are generated from internal UUIDs.
 - **CSV/Excel formula injection guard** — strings starting with `= + - @` are written as plain text (rich
   text run) in XLSX.
 - **Strict validation** at every boundary: zod for HTTP bodies, workflow inputs, workflow config (strict
@@ -296,7 +371,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 86 tests / 12 files passing (`npm test`).** Coverage by area:
+**Status: 112 tests / 15 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -306,6 +381,9 @@ Not yet implemented (risks acknowledged):
 | CSV | `packages/file-processing/src/csv.test.ts` | quoted delimiters, embedded newlines, BOM, limits, round-trip writing |
 | XLSX | `packages/file-processing/src/xlsx.test.ts` | type round-trip (string/number/boolean/date/null), formula-injection guard, empty sheets |
 | Inference/detection | `packages/file-processing/src/inference.test.ts` | column typing, nullability, format sniffing, reader/writer factories |
+| Dataset inspection | `packages/file-processing/src/inspection.test.ts` | types, empties, dates, identifiers, leading zeros, duplicate columns, mixed types, scan truncation, empty/headerless errors, multi-sheet XLSX, corrupt workbook |
+| Upload validation | `packages/file-processing/src/upload.test.ts` | filename sanitisation, extension/content-type/size/magic-byte rejections |
+| Dataset API | `apps/api/src/dataset.test.ts` | ingest + list + detail, row paging, re-analysis, traversal-safe names, 415/422/404/413 error states |
 | Rules | `packages/rule-engine/src/rule-engine.test.ts` | 15 operators, tie-breaks, conflicts, actions, validation |
 | AI policy | `packages/ai/src/ai.test.ts` | policy decisions, noop provider, fail-fast factory |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
@@ -313,9 +391,9 @@ Not yet implemented (risks acknowledged):
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
 
-Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate), rule
-engine property/fuzz tests, load test for large CSV uploads, Playwright browser test for the new-run flow,
-and coverage reporting in CI.
+Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
+including `datasets`), rule engine property/fuzz tests, a load test for large CSV/`DATASET_MAX_SCAN_ROWS`
+inspection, Playwright browser tests for the datasets/new-run flows, and coverage reporting in CI.
 
 ## 14. Environment
 
@@ -330,7 +408,8 @@ npm run dev                 # API :4000, web :5173
 Variables (defaults in parentheses): `NODE_ENV` (development), `API_HOST`/`API_PORT` (127.0.0.1/4000),
 `LOG_LEVEL` (info), `LOG_PRETTY` (false), `CORS_ORIGIN` (http://localhost:5173),
 `REPOSITORY_DRIVER` (memory) + `DATABASE_URL` (required for postgres), `STORAGE_DRIVER` (local) +
-`STORAGE_LOCAL_DIR` (.data/storage), `MAX_UPLOAD_MB` (50), `AI_PROVIDER` (noop), `OPENAI_API_KEY` (empty),
+`STORAGE_LOCAL_DIR` (.data/storage), `MAX_UPLOAD_MB` (50), `DATASET_SAMPLE_ROWS` (10),
+`DATASET_MAX_SCAN_ROWS` (200000), `AI_PROVIDER` (noop), `OPENAI_API_KEY` (empty),
 `AI_MODEL` (empty). Web: `VITE_API_BASE_URL` (empty → Vite dev proxy to the API), `VITE_API_TARGET`
 (proxy target, default `http://127.0.0.1:4000`).
 
@@ -339,30 +418,28 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Priority 1 (recommended first): verify and harden the Postgres path.** Start `docker compose up -d postgres`,
-run `npm run db:push`, then `REPOSITORY_DRIVER=postgres npm run dev:api` and repeat `npm run smoke`.
-Fix whatever surfaces in `packages/db/src/repositories/postgres/index.ts` and add integration tests gated
-by `process.env.DATABASE_URL` (skip when absent). Until this passes, do not claim Postgres support.
+**Product session 2: column mapping & workflow configuration** (queue `02-session.md`). Build on the
+`DatasetProfile` from session 1:
 
-**Priority 2: make reviews affect the output.** After resolving review items, regenerate the run artifacts
-from the recorded resolutions (recompute output rows for the affected entities, write a new artifact
-version or overwrite with an incremented revision) and expose it via the existing artifacts endpoint.
+1. **Dataset roles as data, not hardcoded names.** Model roles (`primary`, `events`, …) as domain objects
+   (`DatasetRole`) rather than "File 1/File 2" so new workflows can define their own roles. The existing
+   `FileKind` enum (`primary|events|generic`) is a starting point but should become configurable.
+2. **Semantic column mapping.** Define mapping models (e.g. `entityKey`, `timestamp`, `description`,
+   `outputColumns[]`) in `@sheetpilot/core` and resolve them against `DatasetProfile.columns` (use the
+   `likelyIdentifier`/`likelyDate` flags as safe defaults). Persist mappings so later runs reuse them.
+3. **Match configuration + validation.** Validate compatibility: required columns exist, mapped
+   identifier columns don't hold incompatible data (e.g. dates), timestamp columns are parseable, and
+   warn/require confirmation on ambiguous mappings. Feed the deterministic classification steps by
+   replacing the workflow's `configFields` string keys with the mapped column names.
+4. **Persistent, serializable, versionable workflow configuration model** (new entity + repository +
+   DTOs, following the `DatasetProfile` pattern) — do **not** bury configuration in UI components.
+5. **Setup UX**: upload datasets → assign roles → map columns with detected-column pickers → validate →
+   continue to processing. Keep it legible for a nontechnical Excel user, with defaults, inline
+   validation feedback and explicit confirmation for ambiguous mappings.
+6. Not yet: the full classification engine (still deferred).
 
-**Priority 3: rule management.** `rule_sets` already persists rule sets; add CRUD endpoints
-(validate with `validateRuleSet`), version bumps, and an active-rule-set selector per workflow, then a
-read-only → editable rules screen in the web app.
-
-**Priority 4: review queue ergonomics.** Filtering by reason/severity/workflow, pagination, bulk accept,
-and surfacing AI suggestions in the UI when a provider exists.
-
-**Priority 5: scheduling / automated ingestion.** A watched-folder or cron trigger that creates runs for
-new files, plus notifications; keep it behind a feature flag and reuse `RunService.createRun`.
-
-**Priority 6: real AI provider.** Implement an OpenAI `ClassificationProvider` with structured output,
-wire it through `createClassificationProvider`, and keep the rule-first policy intact.
-
-Also worth doing when convenient: cancellation endpoint, per-step progress events, route-level code
-splitting in the web bundle, coverage reporting, and a Playwright test for the new-run wizard.
+Then keep the previously identified priorities (Postgres verification, review→artifact regeneration,
+rule management, review ergonomics, scheduling, real AI provider) as the backlog.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -393,11 +470,26 @@ splitting in the web bundle, coverage reporting, and a Playwright test for the n
   `__ReviewStatus` in output files is `AUTO_APPROVED` or `REVIEW_REQUIRED`.
 - **Roadmap guardrail:** don't add enterprise features (SSO, billing, complex RBAC) before the core
   workflow, review loop and Postgres durability are excellent.
-- **Files a new agent should read first:** this file → `docs/architecture.md` → `packages/core/src/domain/entities.ts`
-  → `packages/workflow-engine/src/workflows/account-faults/{types,steps}.ts` → `apps/api/src/services/run-service.ts`.
+- **Dataset ingestion is the front door.** All uploads flow through
+  `apps/api/src/services/dataset-service.ts` → `packages/file-processing/src/inspectDataset` → a persisted
+  `DatasetProfile`. Rows live only in object storage and are paged via `DatasetService.readRows`; never
+  read a whole dataset into the API response or the browser. Reuse `DatasetProfile.columns` (types,
+  emptiness, `likelyDate`, `likelyIdentifier`) when building session 2's mapping UI.
+- **Upload validation lives in `packages/file-processing/src/upload.ts`.** It sanitises filenames and
+  enforces extension/content-type/size/magic-byte rules; add new formats there and in
+  `TabularReader.describe`/`read`, not in route handlers.
+- **Environment note:** this working copy was moved from `D:\deepseekmodeltestingforexcelproj` to
+  `D:\ExcelProjectBydeepseek`; the workspace `node_modules/@sheetpilot/*` links had to be relinked with
+  `npm install`. If module resolution fails after moving the repo again, re-run `npm install`.
+- **Files a new agent should read first:** this file → `docs/architecture.md` →
+  `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` →
+  `packages/file-processing/src/inspection.ts` → `apps/api/src/services/dataset-service.ts` →
+  `packages/workflow-engine/src/workflows/account-faults/{types,steps}.ts` →
+  `apps/api/src/services/run-service.ts`.
 
 ### Session log
 
 | Session | Date | Summary |
 | --- | --- | --- |
-| 1 | 2026-09-15 | Foundation: monorepo, core/domain/ports, config, file-processing, rule engine, AI seam, workflow engine + account-fault-triage workflow, Drizzle schema + in-memory/Postgres repositories, Fastify API, React SPA, samples, smoke script, docs. Verified: lint/typecheck/86 tests/build/smoke/dev servers. |
+| Foundation | 2026-09-15 | Monorepo, core/domain/ports, config, file-processing, rule engine, AI seam, workflow engine + account-fault-triage workflow, Drizzle schema + in-memory/Postgres repositories, Fastify API, React SPA, samples, smoke script, docs. Verified: lint/typecheck/86 tests/build/smoke/dev servers. |
+| Product 1 | 2026-09-16 | File ingestion & dataset inspection: dataset domain + port + DTOs + errors, `TabularReader.describe()`, `inspectDataset` (types/emptiness/uniqueness/samples/warnings/flags), `validateUpload`, `datasets` table + migration + repositories, `DatasetService` + dataset API, Datasets upload/detail UI, +26 tests (112 total). Verified: lint/typecheck/112 tests/build. |

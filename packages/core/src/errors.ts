@@ -55,6 +55,30 @@ export class UnsupportedFormatError extends AppError {
   }
 }
 
+export class InvalidFileError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'invalid_file', statusCode: 400, details });
+  }
+}
+
+export class CorruptFileError extends AppError {
+  constructor(message: string, details?: unknown, cause?: unknown) {
+    super(message, { code: 'corrupt_file', statusCode: 422, details, cause });
+  }
+}
+
+export class EmptyDatasetError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'empty_dataset', statusCode: 422, details });
+  }
+}
+
+export class OversizedFileError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'payload_too_large', statusCode: 413, details });
+  }
+}
+
 export class ProcessingError extends AppError {
   constructor(message: string, details?: unknown, cause?: unknown) {
     super(message, { code: 'processing_error', statusCode: 422, details, cause });

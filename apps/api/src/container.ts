@@ -17,6 +17,7 @@ import { createInMemoryRepositories } from '@sheetpilot/db';
 import { LocalFileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
 import { FileService } from './services/file-service.js';
+import { DatasetService } from './services/dataset-service.js';
 import { RunService } from './services/run-service.js';
 
 export interface AppContainer {
@@ -28,6 +29,7 @@ export interface AppContainer {
   classifier: ClassificationProvider;
   registry: WorkflowRegistry;
   fileService: FileService;
+  datasetService: DatasetService;
   runService: RunService;
   close(): Promise<void>;
 }
@@ -112,7 +114,18 @@ export async function createContainer(
   });
   await seedRegisteredWorkflows(repositories, registry, clock, logger);
 
-  const fileService = new FileService({ repositories, storage, clock, logger });
+  const datasetService = new DatasetService({
+    repositories,
+    storage,
+    clock,
+    logger,
+    limits: {
+      maxUploadBytes: config.storage.maxUploadBytes,
+      sampleRows: config.dataset.sampleRows,
+      maxScanRows: config.dataset.maxScanRows,
+    },
+  });
+  const fileService = new FileService({ repositories, datasetService });
   const runService = new RunService({ repositories, storage, registry, clock, logger });
 
   return {
@@ -124,6 +137,7 @@ export async function createContainer(
     classifier,
     registry,
     fileService,
+    datasetService,
     runService,
     async close() {
       await databaseHandle?.close();

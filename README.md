@@ -2,8 +2,12 @@
 
 SheetPilot turns recurring Excel/CSV operational workflows into repeatable, explainable pipelines:
 
-> upload daily files → match & group records → select the latest record → apply deterministic rules →
-> generate the completed output → review only the unusual cases.
+> upload daily files → inspect what was detected → match & group records → select the latest record →
+> apply deterministic rules → generate the completed output → review only the unusual cases.
+
+Uploaded files are ingested into a normalized, persisted **dataset profile** (sheets, columns, inferred
+types, emptiness/uniqueness, samples and validation warnings); rows stay in object storage and are paged
+on demand, so no stage loads a whole dataset into browser memory.
 
 The first workflow implemented is **account fault triage**: a primary file lists accounts with columns
 that need to be filled in, an events file contains fault reports (the same account may appear many
@@ -29,7 +33,7 @@ apps/
 packages/
   core/                Domain model, zod schemas, API contracts, ports (zero runtime deps except zod)
   config/              Typed environment loading/validation (fail-fast, no secrets in code)
-  file-processing/     CSV/XLSX readers & writers, schema inference, normalization, file storage drivers
+  file-processing/     CSV/XLSX readers & writers, schema inference, dataset inspection, upload validation, storage drivers
   rule-engine/         Rule DSL evaluation, deterministic winner selection, explanations, validation
   ai/                  ClassificationProvider port implementation, AI policy, provider factory
   workflow-engine/     Workflow program runner + the account-fault-triage workflow
@@ -55,6 +59,9 @@ Open http://localhost:5173, go to **New run**, upload
 `samples/account-faults/primary_accounts.csv` and `samples/account-faults/fault_events.csv`, and start
 the run. You should get 10 output rows, 2 auto-approved accounts, 7 review items and 3 artifacts
 (CSV, XLSX, review queue CSV).
+
+To inspect a file first, open **Datasets**, upload `samples/account-faults/fault_events.csv`, and read the
+detected sheets, columns, inferred types and validation warnings; the row preview is paged.
 
 No configuration is required: the API defaults to in-memory repositories and local file storage.
 Copy `.env.example` to `.env` to change ports, storage, Postgres, logging or AI settings.
@@ -95,6 +102,8 @@ Never commit a real `.env` file — `.gitignore` excludes it.
 | `DATABASE_URL` | – | Required when `REPOSITORY_DRIVER=postgres` |
 | `STORAGE_DRIVER` / `STORAGE_LOCAL_DIR` | `local` / `.data/storage` | Uploaded files and generated artifacts |
 | `MAX_UPLOAD_MB` | `50` | Upload limit enforced by the API |
+| `DATASET_SAMPLE_ROWS` | `10` | Sample rows persisted/returned in a dataset preview |
+| `DATASET_MAX_SCAN_ROWS` | `200000` | Hard cap on rows read during dataset inspection |
 | `AI_PROVIDER` | `noop` | `noop` today; `openai` fails fast until the adapter is implemented |
 
 ## Database
@@ -107,6 +116,7 @@ and testable without infrastructure.
 ## Status
 
 This repository is the foundation: the workflow engine, file processing, rule engine, review queue, API
-and UI are implemented and tested end to end for the account fault triage workflow. Scheduling, editable
-rules, AI providers, authentication and multi-tenancy are deliberately deferred — see
+and UI are implemented and tested end to end for the account fault triage workflow. File ingestion now
+includes production-quality validation and a dataset inspection/preview UI. Scheduling, editable rules,
+AI providers, authentication and multi-tenancy are deliberately deferred — see
 [`progress.md`](./progress.md) §15 for the prioritized next steps.

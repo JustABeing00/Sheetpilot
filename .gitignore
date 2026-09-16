@@ -20,6 +20,9 @@ coverage/
 tmp/
 *.log
 
+# automation harness scratch space
+.overnight-run/
+
 # editor / OS
 .vscode/*
 !.vscode/extensions.json

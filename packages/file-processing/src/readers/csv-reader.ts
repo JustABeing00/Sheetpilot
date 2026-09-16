@@ -1,7 +1,12 @@
 import type { Readable } from 'node:stream';
 import { parse } from 'csv-parse';
 import type { Row } from '../table.js';
-import type { ReadOptions, TabularReader } from './tabular-reader.js';
+import type {
+  DescribeOptions,
+  ReadOptions,
+  SourceDescription,
+  TabularReader,
+} from './tabular-reader.js';
 
 export class CsvTabularReader implements TabularReader {
   readonly format = 'csv' as const;
@@ -38,5 +43,34 @@ export class CsvTabularReader implements TabularReader {
     } finally {
       parser.destroy();
     }
+  }
+
+  async describe(source: Readable, _options: DescribeOptions = {}): Promise<SourceDescription> {
+    const parser = source.pipe(
+      parse({
+        bom: true,
+        columns: false,
+        skip_empty_lines: true,
+        relax_column_count: true,
+        relax_quotes: true,
+        to: 1,
+      }),
+    );
+
+    try {
+      for await (const record of parser) {
+        const cells = Array.isArray(record) ? (record as unknown[]) : [];
+        return {
+          sheetNames: [],
+          headers: cells.map((value) =>
+            value === undefined || value === null ? '' : String(value as string | number | boolean),
+          ),
+        };
+      }
+    } finally {
+      parser.destroy();
+    }
+
+    return { sheetNames: [], headers: [] };
   }
 }

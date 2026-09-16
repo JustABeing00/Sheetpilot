@@ -16,6 +16,12 @@ import {
   jsonObjectSchema,
   metricRecordSchema,
 } from '../domain/entities.js';
+import {
+  datasetAnalysisSchema,
+  datasetColumnSchema,
+  datasetWarningSchema,
+  sampleRowSchema,
+} from '../domain/dataset.js';
 import { ruleSchema } from '../domain/rules.js';
 
 export const isoDateTimeSchema = z
@@ -100,6 +106,67 @@ export const fileAssetDtoSchema = z.object({
   uploadedAt: isoDateTimeSchema,
 });
 export type FileAssetDto = z.infer<typeof fileAssetDtoSchema>;
+
+export const datasetDtoSchema = z.object({
+  id: z.string(),
+  fileId: z.string(),
+  kind: fileKindSchema,
+  originalName: z.string(),
+  format: tabularFormatSchema,
+  mimeType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  checksum: z.string(),
+  sheetNames: z.array(z.string()),
+  sheetName: z.string().nullable(),
+  rowCount: z.number().int().nonnegative(),
+  rowCountExact: z.boolean(),
+  truncated: z.boolean(),
+  scanLimit: z.number().int().positive(),
+  columns: z.array(datasetColumnSchema),
+  sampleRows: z.array(sampleRowSchema),
+  warnings: z.array(datasetWarningSchema),
+  inspectedAt: isoDateTimeSchema,
+  rowPreviewUrl: z.string(),
+});
+export type DatasetDto = z.infer<typeof datasetDtoSchema>;
+
+export const datasetSummaryDtoSchema = z.object({
+  id: z.string(),
+  fileId: z.string(),
+  kind: fileKindSchema,
+  originalName: z.string(),
+  format: tabularFormatSchema,
+  sizeBytes: z.number().int().nonnegative(),
+  sheetName: z.string().nullable(),
+  rowCount: z.number().int().nonnegative(),
+  rowCountExact: z.boolean(),
+  truncated: z.boolean(),
+  columnCount: z.number().int().nonnegative(),
+  warningCount: z.number().int().nonnegative(),
+  inspectedAt: isoDateTimeSchema,
+});
+export type DatasetSummaryDto = z.infer<typeof datasetSummaryDtoSchema>;
+
+export const datasetRowsResponseSchema = z.object({
+  datasetId: z.string(),
+  sheetName: z.string().nullable(),
+  columns: z.array(z.string()),
+  items: z.array(sampleRowSchema),
+  total: z.number().int().nonnegative().nullable(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+});
+export type DatasetRowsResponse = z.infer<typeof datasetRowsResponseSchema>;
+
+export const datasetAnalysisResponseSchema = z.object({
+  datasetId: z.string(),
+  analysis: datasetAnalysisSchema,
+});
+export type DatasetAnalysisResponse = z.infer<typeof datasetAnalysisResponseSchema>;
+
+export const datasetListResponseSchema = z.object({ items: z.array(datasetSummaryDtoSchema) });
+export type DatasetListResponse = z.infer<typeof datasetListResponseSchema>;
 
 export const reviewItemDtoSchema = z.object({
   id: z.string(),

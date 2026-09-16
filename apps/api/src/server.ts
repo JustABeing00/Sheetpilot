@@ -1,7 +1,7 @@
 import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
-import { isAppError, toPublicErrorBody } from '@sheetpilot/core';
+import { isAppError, PayloadTooLargeError, toPublicErrorBody } from '@sheetpilot/core';
 import type { AppContainer } from './container.js';
 import { registerRoutes } from './http/routes/index.js';
 
@@ -31,6 +31,20 @@ export function buildServer(container: AppContainer, options: ServerOptions): Fa
     }
 
     const status = typeof error.statusCode === 'number' ? error.statusCode : 500;
+    if (
+      status === 413 ||
+      error.code === 'FST_REQ_FILE_TOO_LARGE' ||
+      error.code === 'FST_FILES_LIMIT'
+    ) {
+      reply
+        .status(413)
+        .send(
+          toPublicErrorBody(
+            new PayloadTooLargeError('The uploaded file exceeds the configured size limit.'),
+          ),
+        );
+      return;
+    }
     if (status >= 400 && status < 500) {
       reply.status(status).send({
         error: {
