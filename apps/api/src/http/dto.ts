@@ -11,6 +11,9 @@ import type {
   RunDto,
   RunSnapshot,
   RunSummaryDto,
+  SavedWorkflowDetail,
+  SavedWorkflowLastRun,
+  SavedWorkflowSummary,
   StepRun,
   StoredRuleSet,
   WorkflowConfiguration,
@@ -38,12 +41,60 @@ import type {
   RunSnapshotDto,
   RunSnapshotSummaryDto,
   RuleSetSummaryDto,
+  SavedWorkflowDetailDto,
+  SavedWorkflowRunDto,
+  SavedWorkflowSummaryDto,
   StepRunDto,
   WorkflowConfigurationDto,
   WorkflowConfigurationSummaryDto,
   WorkflowDetailDto,
   WorkflowSummaryDto,
 } from '@sheetpilot/core';
+
+export function toSavedWorkflowRunDto(run: SavedWorkflowLastRun): SavedWorkflowRunDto {
+  return {
+    id: run.id,
+    status: run.status,
+    createdAt: run.createdAt.toISOString(),
+    finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,
+    recordsProcessed: run.recordsProcessed,
+    reviewItemCount: run.reviewItemCount,
+    openReviewItemCount: run.openReviewItemCount,
+    exportStatus: run.exportStatus,
+    exportReady: run.exportReady,
+    exportMessage: run.exportMessage,
+  };
+}
+
+export function toSavedWorkflowSummaryDto(
+  summary: SavedWorkflowSummary,
+): SavedWorkflowSummaryDto {
+  return {
+    id: summary.id,
+    name: summary.name,
+    description: summary.description,
+    workflowSlug: summary.workflowSlug,
+    workflowName: summary.workflowName,
+    workflowVersion: summary.workflowVersion,
+    configurationVersion: summary.configurationVersion,
+    datasetCount: summary.datasetCount,
+    mappingCount: summary.mappingCount,
+    ruleSet: summary.ruleSet,
+    lastRun: summary.lastRun ? toSavedWorkflowRunDto(summary.lastRun) : null,
+    runCount: summary.runCount,
+    createdAt: summary.createdAt.toISOString(),
+    updatedAt: summary.updatedAt.toISOString(),
+  };
+}
+
+export function toSavedWorkflowDetailDto(detail: SavedWorkflowDetail): SavedWorkflowDetailDto {
+  return {
+    ...toSavedWorkflowSummaryDto(detail),
+    configuration: toWorkflowConfigurationDto(detail.configuration),
+    ruleSetDefinition: detail.ruleSetDefinition ? toRuleSetDto(detail.ruleSetDefinition) : null,
+    recentRuns: detail.recentRuns.map(toSavedWorkflowRunDto),
+  };
+}
 
 export function toWorkflowConfigurationDto(
   configuration: WorkflowConfiguration,

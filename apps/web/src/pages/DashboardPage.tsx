@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import { useDatasets, useHealth, useMeta, useReviewQueue, useRuns, useWorkflows } from '../api/hooks.js';
-import { Badge, Card, ErrorState, LoadingState, PageHeader, StatCard } from '../components/ui.js';
+import { useDatasets, useHealth, useMeta, useReviewQueue, useRuns, useSavedWorkflows, useWorkflows } from '../api/hooks.js';
+import { SavedWorkflowsTable } from '../components/SavedWorkflowsTable.js';
+import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, StatCard } from '../components/ui.js';
 import { runStatusLabel, statusTone } from '../lib/status.js';
 import { PIPELINE_STAGES } from '../lib/pipeline.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
@@ -12,10 +13,13 @@ export function DashboardPage() {
   const runs = useRuns();
   const datasets = useDatasets();
   const reviewQueue = useReviewQueue('needs_review');
+  const savedWorkflows = useSavedWorkflows();
 
   const recentRuns = runs.data?.items.slice(0, 6) ?? [];
   const latestRun = recentRuns[0];
   const openReview = reviewQueue.data?.openCount ?? 0;
+  const saved = savedWorkflows.data?.items ?? [];
+  const firstSaved = saved[0];
 
   // The single most useful next action, based on what already exists.
   const nextAction = (() => {
@@ -53,11 +57,51 @@ export function DashboardPage() {
         title="Dashboard"
         description="Recurring spreadsheet workflows, deterministic classification and human review in one place."
         actions={
-          <Link className="button button-primary" to="/setup">
-            Start a workflow
-          </Link>
+          firstSaved ? (
+            <Link className="button button-primary" to={`/saved-workflows/${firstSaved.id}/run`}>
+              Run a saved workflow again
+            </Link>
+          ) : (
+            <Link className="button button-primary" to="/setup">
+              Start a workflow
+            </Link>
+          )
         }
       />
+
+      <Card
+        title="Your saved workflows"
+        subtitle="Run a saved workflow again on new files, or open one to see what it remembers."
+        actions={
+          <>
+            {saved.length > 0 ? (
+              <Link className="link" to="/saved-workflows">
+                View all
+              </Link>
+            ) : null}
+            <Link className="button button-small" to="/setup">
+              New
+            </Link>
+          </>
+        }
+      >
+        {savedWorkflows.isLoading ? <LoadingState label="Loading saved workflows…" /> : null}
+        {savedWorkflows.isError ? (
+          <ErrorState error={savedWorkflows.error} onRetry={() => void savedWorkflows.refetch()} />
+        ) : null}
+        {savedWorkflows.isSuccess && saved.length === 0 ? (
+          <EmptyState
+            title="No saved workflows yet"
+            description="Set up a workflow once; next month you just attach the new files and run it again."
+            action={
+              <Link className="button button-primary" to="/setup">
+                Create your first saved workflow
+              </Link>
+            }
+          />
+        ) : null}
+        {saved.length > 0 ? <SavedWorkflowsTable items={saved.slice(0, 5)} /> : null}
+      </Card>
 
       <Card title="Your next step" subtitle={nextAction.description}>
         <div className="next-step">

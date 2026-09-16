@@ -3,13 +3,13 @@ import { useHealth, useMeta, useReviewQueue } from '../api/hooks.js';
 
 const navigation = [
   { to: '/', label: 'Dashboard', end: true },
+  { to: '/saved-workflows', label: 'Saved workflows' },
   { to: '/datasets', label: 'Datasets' },
   { to: '/setup', label: 'Setup' },
-  { to: '/runs/new', label: 'New run' },
   { to: '/runs', label: 'Runs' },
   { to: '/review', label: 'Review queue' },
   { to: '/rules', label: 'Rules' },
-  { to: '/workflows', label: 'Workflows' },
+  { to: '/workflows', label: 'Workflow types' },
 ];
 
 export function AppShell() {

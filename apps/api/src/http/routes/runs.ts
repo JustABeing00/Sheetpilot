@@ -26,7 +26,7 @@ import {
 } from '../dto.js';
 import { clampLimit, parseOffset, parseOrThrow } from '../http-utils.js';
 
-async function describeRun(
+export async function describeRun(
   container: AppContainer,
   run: WorkflowRun,
   includeSteps: boolean,

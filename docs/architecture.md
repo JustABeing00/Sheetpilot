@@ -14,12 +14,12 @@
 ```mermaid
 flowchart TB
   subgraph UI["apps/web — Frontend / UI"]
-    pages["Dashboard · Datasets · Setup · New run · Runs · Run detail · Review queue · Rules · Workflows"]
+    pages["Dashboard · Saved workflows · Datasets · Setup · Runs · Run detail · Review queue · Rules · Workflow types"]
   end
 
   subgraph API["apps/api — API / application layer"]
     routes["HTTP routes (Fastify)"]
-    services["DatasetService · WorkflowConfigurationService · RuleSetService · FileService · RunService"]
+    services["DatasetService · WorkflowConfigurationService · SavedWorkflowService · RuleSetService · FileService · RunService"]
     container["Composition root (container.ts)"]
   end
 
@@ -106,6 +106,26 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    `RegisteredWorkflow.resolveRunInput` into `{ primaryFileId, eventsFileId, config }`, where config keys
    are the workflow's expected field names (`primaryAccountColumn`, `eventsTimestampColumn`, …) and the run
    records the `configurationId` for traceability.
+
+## Saved workflow (reusable) lifecycle
+
+1. A saved workflow is a named, versioned `WorkflowConfiguration` on a registered template. It records the
+   dataset roles, the column mapping (by column name), the active rule set and the output/review options —
+   i.e. everything needed to run it again.
+2. The dashboard (`GET /api/v1/saved-workflows`, `SavedWorkflowService`) derives one row per saved workflow:
+   workflow name, last run, latest status, records processed, review count and export availability (plus the
+   active rule set). It is a projection of configurations + recent runs + rule sets + the live
+   `ExportService` status; nothing is stored twice.
+3. "Run again" (`/saved-workflows/:id/run`): the user attaches today's file to each dataset role (upload or
+   pick an existing dataset). `rebindConfiguration` (pure, in `@sheetpilot/core`) carries each remembered
+   mapping onto the new file **by column name** and reports any mapping it could not carry.
+4. `POST /api/v1/saved-workflows/:id/prepare` returns the carried/dropped plan, the validation issues and
+   the resolved-config preview with no side effects, so the UI can ask the user to fix only the affected
+   roles. `POST …/run` re-validates, optionally saves the re-pointed mapping as a new version, then creates a
+   run. A one-off run still freezes the exact configuration it used (`configurationOverride`), so
+   reproducibility is independent of whether the re-point was saved.
+5. Creating a new saved workflow from scratch is the existing Setup flow (`/setup`); rules remain the
+   workflow's versioned, active rule set (`/rules`).
 
 ## Reproducibility & the run snapshot lifecycle
 
@@ -276,6 +296,9 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `validateStoredTable` | `packages/file-processing/src/export/validate.ts` | Re-reads a stored artifact and proves columns + row count before the run succeeds (`ExportValidationError`) |
 | `WriteSummary` (writer option) | `packages/file-processing/src/writers/tabular-writer.ts` | Optional leading `Summary` worksheet (XLSX only, ignored by CSV) |
 | `ExportService` | `apps/api/src/services/export-service.ts` | Derives the live export summary and status for a run from decisions + review items + artifacts |
+| `rebindConfiguration` | `packages/core/src/domain/saved-workflow.ts` | Pure recipe carrying a saved mapping onto new files by column name; reports carried/dropped columns and re-pointed roles |
+| `SavedWorkflowSummary`/`SavedWorkflowDetail` | `packages/core/src/domain/saved-workflow.ts` | Derived (never stored) returning-user aggregate: remembered recipe + latest-run outcome |
+| `SavedWorkflowService` | `apps/api/src/services/saved-workflow-service.ts` | Dashboard projection, read-only run preparation (`prepare`) and the run-again flow; persists the re-point only when asked |
 | API DTO schemas | `packages/core/src/api/contracts.ts` | Single source of truth for request/response shapes used by API and web |
 
 ## Determinism and traceability rules
@@ -327,8 +350,7 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 ## Deliberate non-goals in this foundation
 
 - No authentication/authorization yet (single-tenant, local deployment).
-- No scheduler/cron or watched-folder ingestion yet.
-- No editable UI for rules; rule sets ship as code-validated data.
+- No scheduler/cron or watched-folder ingestion yet; a saved workflow is re-pointed at new files by hand.
 - Runs execute in-process (no worker pool); large-file parallelism and cancellation API come later.
 - Reviewers are unauthenticated (`resolvedBy` is always `null`); human corrections are audited but not yet
   fed back into rule suggestions.

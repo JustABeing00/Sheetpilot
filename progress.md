@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 8 — end-to-end workflow experience & run reproducibility)
+**Last updated:** 2026-09-16 (product session 9 — saved workflows & the daily-report experience)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -69,12 +69,28 @@ the report, makes processing statuses and errors human-readable, and lets the re
 single run (`/review?runId=…`) so a reviewer can work one run end to end and jump to the report. **Status:
 achieved** (see §8, verified in §9).
 
-**Next (product session 9):** durable persistence and the loop back into rules. See §15: verify Postgres
-(migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated repository integration tests including
-`run_snapshots`), turn human corrections into rule suggestions, immutable version *history* tables (the run
-snapshot already guarantees reproducibility; this would add browsable per-version history), reviewer
-identity, and reopening a resolved item. Scheduling/watched-folder ingestion and streaming the loader remain
-on the roadmap.
+**Product session 9 objective: saved workflows & the "daily report" experience.** The product is now
+organized around the recurring unit a returning user comes back to. A **saved workflow** is a named,
+versioned `WorkflowConfiguration` on a registered template that remembers its dataset roles, column
+mappings, matching/latest-record logic (from the workflow type), rules, output configuration and review
+behavior. `SavedWorkflowService` derives a dashboard (`GET /api/v1/saved-workflows`) showing, per workflow,
+the latest run, its status, records processed, review count and export availability. The **Run again** flow
+re-points a saved workflow at a new day's files: the pure `rebindConfiguration` in `core` carries each
+remembered mapping onto the new file **by column name** and reports any mapping it cannot carry;
+`POST …/:id/prepare` previews this (validation + plan) with no side effects and `POST …/:id/run` optionally
+saves the re-point as a new version then starts a run. A one-off re-point freezes the exact configuration it
+used (a `configurationOverride` on `RunService.createRun`), so reproducibility holds either way. The web app
+gains a **Saved workflows** dashboard, a saved-workflow detail view (recipe + recent runs) and a **Run again**
+page; the Dashboard leads with saved workflows and Setup creates them from scratch. **Status: achieved**
+(see §8, verified in §9).
+
+**Next (product session 10):** security, reliability & production hardening (queue `10-session.md`) — treat
+uploaded files as untrusted, audit file/API/data/AI security, strengthen reliability (retries, idempotency,
+failed-run recovery, job-state consistency, partial processing), add structured logging/error reporting and
+privacy documentation, add security-focused tests, and perform a repository-wide security review with an
+honest write-up of remaining risks. The deferred backlog from earlier sessions (Postgres verification, human
+corrections → rule suggestions, browsable version history, reviewer identity, reopening resolved items,
+scheduling/watched-folder ingestion, streaming the loader) remains in §15.
 
 ## 3. Product Vision
 
@@ -115,6 +131,7 @@ core workflow is excellent.
 | Review / human-in-the-loop | Derived `ReviewState` + append-only `review_resolutions` audit + `ReviewService` | Filter presets + per-filter counts; rich item DTO (automation, latest event, history, AI outcome, applicable rules); resolve/override/dismiss records the audit trail and regenerates the output; human decisions tracked separately from automation |
 | Output / export | `ExportSummary` (core) + streaming writers + `ExportService` | Data-preserving, deterministic, type-safe Excel (primary) + CSV export with a `Summary` worksheet; generated files re-read and validated before the run succeeds; live derived export summary + status endpoint and run-page panel |
 | Reproducibility | Immutable `RunSnapshot` (core) + `RunSnapshotRepository` + `run_snapshots` table | Frozen configuration + rule-set versions captured at run creation; execution uses the snapshot; `GET /api/v1/runs/:id/snapshot`; summary on every run DTO |
+| Saved workflows | `rebindConfiguration` (core) + `SavedWorkflowService` + `/api/v1/saved-workflows` + Saved workflows / Run again UI | A named, versioned, reusable setup (roles, mappings by column name, rules, options); derived dashboard (last run, status, records, review, export); re-point onto new files with a prepare → run flow and an optional version save |
 | Product workflow UX | `WorkflowProgress` stepper + `lib/pipeline.ts` + `lib/status.ts` labels | One resumable journey (Set up → Rules → Process → Review → Export); plain-language statuses and error help; run summary → review queue → report |
 | Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 245 tests, 28 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
@@ -144,6 +161,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                            │      Excel/CSV writers + ExportService status)
                                            ├──▶ run snapshot (immutable frozen configuration + rules,
                                            │      captured at run creation, evaluated on execute)
+                                           ├──▶ saved workflows (reusable, re-pointable setups + a derived
+                                           │      dashboard and the run-again flow)
                                            ▼
                                   core (domain, schemas, ports)  ◀── db (Drizzle schema + repos)
 ```
@@ -160,6 +179,13 @@ returns structural/semantic issues (from `validateWorkflowConfiguration` in `cor
 preview → saving persists a versioned `WorkflowConfiguration` →
 `POST /api/v1/runs { configurationId }` resolves it through `RegisteredWorkflow.resolveRunInput` into file
 ids + config keys.
+Saved workflow lifecycle: a saved configuration is presented as a reusable workflow → `GET
+/api/v1/saved-workflows` derives the dashboard (latest run + status/records/review/export from runs, review
+items, rule sets and `ExportService`) → "Run again" attaches a new day's files and `POST
+/api/v1/saved-workflows/:id/prepare` runs the pure `rebindConfiguration` (carry mappings by column name,
+report drops) and re-validates without side effects → `POST /api/v1/saved-workflows/:id/run` optionally saves
+the re-point as a new version and starts a run whose snapshot freezes the exact configuration used
+(`RunService.createRun` `configurationOverride`).
 Run lifecycle: `POST /files` → `POST /runs` (202, queued) → `RunService.createRun` freezes a write-once
 `RunSnapshot` (configuration + rule set as they are now) → background `RunService.execute` evaluates the
 snapshot's rules → step traces + artifacts + decision log + review items → run `succeeded`. Editing the
@@ -217,11 +243,13 @@ apps/
     services/run-service.ts    run creation/execution, step persistence, artifacts; injects the active rule set
     services/review-service.ts human review resolution, append-only audit trail, output-artifact regeneration
     services/export-service.ts derives the live export summary + status and lists the validated deliverables
+    services/saved-workflow-service.ts the reusable-workflow layer: derived dashboard, read-only run preparation (rebind + validate) and the run-again flow
     server.test.ts / review.test.ts / export.test.ts  API integration + E2E, including the review queue, audit trail, regeneration and export
     workflow-journey.test.ts  full configuration-driven journey: upload → map → run → review → export, plus rule/setup-change reproducibility
+    saved-workflow.test.ts  saved-workflow dashboard, re-point onto new files (prepare), one-off vs saved run-again, missing-column handling
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
-    http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, files, datasets, runs, review-items, artifacts
+    http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, saved-workflows, files, datasets, runs, review-items, artifacts
     fixtures.ts            reads the sample CSVs for tests
     server.test.ts         API integration + E2E test (upload → run → artifacts → review resolve)
   web/src/
@@ -232,7 +260,8 @@ apps/
     components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
     components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
     components/WorkflowProgress.tsx  shared end-to-end journey stepper (Set up → Rules → Process → Review → Export)
-    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
+    components/SavedWorkflowsTable.tsx  the returning-user dashboard table (last run, status, records, review, report, Run again)
+    pages/*.tsx            Dashboard, SavedWorkflows, SavedWorkflowDetail, RunSavedWorkflow, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
     lib/format.ts, lib/rules.ts, lib/status.ts, lib/pipeline.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones + plain-language run/error labels, journey stages, dataset helpers, mapping suggestions
     styles/app.css         design tokens + component styles (light professional theme)
 packages/
@@ -249,6 +278,8 @@ packages/
                            event schemas, append-only ReviewResolutionLog, changedFields + evidence parsers
     domain/run-snapshot.ts Immutable per-run snapshot (frozen WorkflowConfiguration + StoredRuleSet) and the
                            compact summary embedded on every run DTO
+    domain/saved-workflow.ts Reusable-workflow aggregate types + the pure `rebindConfiguration` recipe that
+                           carries a saved mapping onto new files by column name
     domain/output.ts       Export domain: OutputRecordState (+ labels) derived from ReviewState, the
                            ExportSummary schema, summariseOutputRecords, unmatched-reason helper
     api/contracts.ts       HTTP request/response schemas shared with the web app
@@ -304,6 +335,8 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `WorkflowConfiguration` | A saved, versioned setup: which datasets play which roles and which real columns fill semantic roles | workflowSlug/version, name, version, assignments[] (role→datasetId), mappings[] (role→datasetId→column, confirmed), options |
 | `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, configurationId, config, stats, error, timestamps |
 | `RunSnapshot` | Immutable, write-once capture of a run's inputs (never updated) | runId (unique), workflowSlug/version, configurationId + frozen `WorkflowConfiguration`, ruleSetId + frozen `StoredRuleSet`, capturedAt |
+| `SavedWorkflowSummary` / `SavedWorkflowDetail` | Derived (never stored) returning-user aggregate over a `WorkflowConfiguration` | id, name, workflowSlug/name/version, configurationVersion, datasetCount, mappingCount, ruleSet (id/name/version/ruleCount), lastRun (status, recordsProcessed, reviewItemCount, openReviewItemCount, exportStatus, exportReady), runCount; detail adds the full configuration, rule set and recent runs |
+| `RebindPlan` | Pure result of carrying a saved mapping onto new files (`rebindConfiguration`) | assignments, mappings, carried[], dropped[] (role/column/reason), datasetChanges[] |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, decisionSource (`deterministic`/`ai_suggested`/`none`), confidence, reviewReasons, outputValues, evidence (rule trace + AI outcome/provenance) |
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status (`open`/`resolved_accepted`/`resolved_overridden`/`dismissed`), title, detail, suggestedValues, evidence, resolution |
@@ -322,7 +355,8 @@ Important enums: `RunStatus = queued|running|succeeded|failed|canceled`;
 `ReviewState = AUTO_RESOLVED|NEEDS_REVIEW|APPROVED|OVERRIDDEN|DISMISSED|ERROR` (derived, never persisted);
 `ReviewFilter = needs_review|unresolved|conflicts|low_confidence|processing_errors|overridden|resolved|all`;
 `OutputRecordState = auto_resolved|approved|overridden|dismissed|needs_review|error` (derived for the export);
-`ExportStatus = processing|pending_review|ready|failed|unavailable` (derived).
+`ExportStatus = processing|pending_review|ready|failed|unavailable` (derived; `exportStatusSchema` lives in
+`core/domain/output.ts` and is reused by the export and saved-workflow contracts).
 
 Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`, `RecommendedAction`,
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
@@ -331,6 +365,54 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 9 — Saved workflows & the "daily report" experience (2026-09-16)
+
+- [x] `@sheetpilot/core`:
+  - new `domain/saved-workflow.ts` — the reusable-workflow vocabulary: `RebindPlan` (assignments, mappings,
+    `carried`, `dropped`, `datasetChanges`), the pure `rebindConfiguration` (carries a saved mapping onto new
+    files **by column name**, keeps untouched datasets verbatim, resets `confirmed` on a re-point, reports
+    anything it could not carry) and the derived `SavedWorkflowRuleSetSummary` / `SavedWorkflowLastRun` /
+    `SavedWorkflowSummary` / `SavedWorkflowDetail` aggregate types (never persisted).
+  - `domain/output.ts` — `exportStatusSchema` (+ `ExportStatus` type) extracted so the export, run and
+    saved-workflow contracts share one readiness vocabulary.
+  - `api/contracts.ts` — `savedWorkflowRunDtoSchema`, `savedWorkflowRuleSetSummaryDtoSchema`,
+    `savedWorkflowSummaryDtoSchema`, `savedWorkflowListResponseSchema`, `savedWorkflowDetailDtoSchema`,
+    `rebindPlanDtoSchema`, `prepareSavedWorkflowRunRequest/ResponseSchema`, `runSavedWorkflowRequestSchema`;
+    `exportStatusResponseSchema` now uses the shared `exportStatusSchema`.
+- [x] `apps/api`:
+  - new `SavedWorkflowService` — `list()` derives the dashboard (per saved workflow: workflow name, latest
+    run status, records processed from the export summary, review counts, export status/readiness, rule set,
+    run count) from configurations + recent runs + rule sets + `ExportService`; `getById()` returns the recipe
+    plus recent runs and rules; `prepare()` runs the pure rebind + `validateWorkflowConfiguration` and
+    previews the resolved config with no side effects; `run()` re-validates, optionally persists the
+    re-pointed mapping as a new version, then creates a run.
+  - `RunService.createRun` gained `configurationOverride` so a one-off re-pointed run freezes the **exact**
+    configuration it used in its `RunSnapshot` (reproducibility holds whether or not the re-point is saved).
+  - `WorkflowConfigurationService.loadDatasets` made public so the saved-workflow flow reuses the same
+    dataset loading.
+  - new routes `GET /api/v1/saved-workflows`, `GET /api/v1/saved-workflows/:id`,
+    `POST /api/v1/saved-workflows/:id/prepare`, `POST /api/v1/saved-workflows/:id/run` (202) + DTO mappers +
+    container wiring.
+- [x] `apps/web` — the returning-user experience:
+  - **Dashboard** leads with a Saved workflows table (workflow name, last run, latest status, records
+    processed, review count, export availability) and a direct **Run a saved workflow again** action;
+    **Saved workflows** page and **saved workflow detail** (the remembered recipe: files/roles, column
+    mapping, matching/latest-record steps, rules, output/review options, recent runs).
+  - **Run again** page: attach today's file per dataset role (upload or pick an existing dataset), a live
+    prepare/validate that shows carried vs dropped mappings and issues, an optional "update the saved
+    workflow to point at these files" toggle, then start processing.
+  - new `components/SavedWorkflowsTable.tsx`, `lib` status reuse, router + nav ("Saved workflows",
+    "Workflow types"), Setup wording/links.
+- [x] Tests: +13 (258 total, 30 files) — `packages/core/src/domain/saved-workflow.test.ts` (4: carry by name,
+  report a missing column, partial re-point, keep confirmation on the same file) and
+  `apps/api/src/saved-workflow.test.ts` (9: dashboard before/after a run, detail recipe, prepare preview,
+  one-off vs saved run-again with snapshot assertions, missing-column prepare/run failures, 404). Also fixed a
+  pre-existing type error in `run-snapshot.test.ts` (a partially-specified rule literal now carries its
+  condition defaults) so `npm run typecheck` is clean.
+- [x] `scripts/smoke.mjs` now asserts the saved-workflow dashboard, a prepare that carries all four mappings
+  onto a new day's files, and a run-again that saves the new configuration version.
+- [x] Docs: ADR-018, `docs/architecture.md` (saved-workflow lifecycle + abstractions), README, this file.
 
 ### Product session 8 — End-to-end workflow experience & run reproducibility (2026-09-16)
 
@@ -738,11 +820,13 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 28 files / 245 tests passed |
+| Tests | `npm test` | 30 files / 258 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV |
 | End-to-end journey (API E2E) | `npx vitest run apps/api/src/workflow-journey.test.ts` | upload field-service datasets → validate mapping (resolved config preview) → save configuration v1 → run → freeze snapshot (config v1, 7 rules) → classify (2 auto / 5 review with the expected reasons) → review every exception (override no-events + accept others) → export `ready`; then edit the setup + replace the active rule set and prove the historical run's decisions and snapshot are **unchanged** while a new run picks up the new versions (`no_rule_match`) |
 | Run snapshot (core) | `npx vitest run packages/core/src/domain/run-snapshot.test.ts` | schema defaults (null configuration/rule set) and summary mapping (versions, names, rule count) |
+| Saved workflow (core) | `npx vitest run packages/core/src/domain/saved-workflow.test.ts` | `rebindConfiguration` carries mappings by column name, reports a missing column, re-points only the supplied roles and keeps confirmation on the same file |
+| Saved workflow (API E2E) | `npx vitest run apps/api/src/saved-workflow.test.ts` | dashboard before/after a run (records 9, review 7, export `pending_review`), detail recipe, prepare preview (4/4 carried), one-off run-again (config v1, snapshot freezes the new file) vs saved run-again (config v2), missing-column prepare/run failures, 404 |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
@@ -776,6 +860,14 @@ Every run now **freezes a snapshot** of the configuration and rule-set versions 
 summary shows them ("Reproducibility"), links straight to the run-scoped review queue, and offers the report
 download once every exception is resolved. Editing a setup or the rules afterwards changes only future runs —
 the historical run's decisions, artifacts and snapshot are untouched (proven by the journey test).
+
+Each saved setup is a **saved workflow**. The Dashboard and the **Saved workflows** page show, per workflow,
+its last run, latest status, records processed, review count and report availability, each with a **Run
+again** action. Run again attaches a new day's files and carries the remembered column mapping onto them by
+name (dropped mappings are reported per role), previews validation before starting, and can optionally update
+the saved mapping to point at the new files. A one-off re-point still freezes the exact configuration it used,
+so the historical report stays reproducible either way (proven by the saved-workflow API test and the smoke
+script).
 
 Sample run results (canonical `samples/account-faults` files with the default noop provider): 9 accounts,
 13 events, 10 output rows, 2 auto-approved, 7 review items (conflicting history, no events, no rule match,
@@ -945,9 +1037,27 @@ the assisted paths.
    in-memory mode both the files and the run are lost on restart — see #2). Re-running a historical run
    against the *same* input bytes is therefore a manual re-upload in the current build.
 53. **There is no "what would this run look like under the current rules?" diff yet.** The full frozen
-   snapshot plus the current active set are both readable, so the feature is a comparison endpoint away, but
-   it is not built. Likewise the UI shows the frozen versions on the run summary but does not yet let a user
-   open the full frozen rule set in the editor.
+    snapshot plus the current active set are both readable, so the feature is a comparison endpoint away, but
+    it is not built. Likewise the UI shows the frozen versions on the run summary but does not yet let a user
+    open the full frozen rule set in the editor.
+54. **A saved workflow *is* a `WorkflowConfiguration`** (there is no separate `saved_workflows` entity/table).
+    Name, mappings, options and version come from the configuration; rules come from the workflow's single
+    active rule set — a saved workflow does not pin its own rule set. "Saved workflow" is the user-facing
+    framing of that aggregate, and the API/DTOs reflect that (list/detail are derived, nothing is stored
+    twice). A dedicated entity would be needed before per-workflow rule sets or per-workflow ownership.
+55. **The dashboard scans recent runs to find each saved workflow's latest run** (`runs.list({ limit: 1000 })`)
+    and derives the export status per workflow. Correct and cheap for a single-user workload with hundreds of
+    runs; at scale this should become an indexed "latest run per configuration" query.
+56. **Rebinding matches columns by exact name only.** A renamed column (even a case/whitespace change) is
+    reported as `column_not_found` rather than fuzzy-matched; the user re-maps that role once. There is no
+    column-alias/rename mapping yet, and sheet selection is carried as-is.
+57. **A one-off run-again does not change the saved workflow**, so the dashboard's "last run" can point at
+    files the saved mapping no longer references. The run snapshot (what actually ran) is correct; the saved
+    mapping is only updated when the user ticks "update the saved workflow".
+58. **Saving a re-point replaces the configuration row and bumps its version** (same as any config edit): the
+    dataset pointers now reference today's datasets, so yesterday's run keeps its own snapshot but the saved
+    workflow no longer resolves the old files. Browsable per-version history is still the deferred item
+    (#18/#26).
 
 ## 11. Technical Decisions
 
@@ -979,6 +1089,9 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
   deterministic order, nullable blanks, streamed writes, re-read validation, live derived `ExportSummary`).
 - ADR-017 every run freezes an immutable snapshot of its configuration and rule set at creation; execution
   evaluates the snapshot, so edits affect only future runs and historical reports stay auditable.
+- ADR-018 a saved workflow is a reusable, re-pointable aggregate (a named, versioned configuration) whose
+  mapping is remembered by column name and carried onto new files by the pure `rebindConfiguration`; the
+  returning-user dashboard is derived, and a one-off re-point freezes the exact configuration it used.
 
 Additional decisions made during implementation:
 
@@ -1048,7 +1161,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 245 tests / 28 files passing (`npm test`).** Coverage by area:
+**Status: 258 tests / 30 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -1076,6 +1189,8 @@ Not yet implemented (risks acknowledged):
 | Export writers | `packages/file-processing/src/export.test.ts` | stream-to-storage CSV, `validateStoredTable` pass + row-count/column failures, XLSX leading `Summary` sheet, type preservation (leading zeros, long identifiers, dates, nulls) |
 | Export API | `apps/api/src/export.test.ts` | live summary/validation/`pending_review`, XLSX `Summary` + deterministic primary-file row order, `ready` + `reviewed` after every case resolved, leading-zero identifiers preserved upload → run → xlsx |
 | Run snapshot (core) | `packages/core/src/domain/run-snapshot.test.ts` | schema defaults (null configuration/rule set) and the summary mapping (versions, names, rule count) |
+| Saved workflow (core) | `packages/core/src/domain/saved-workflow.test.ts` | `rebindConfiguration` carries every mapping by name onto new files, reports a dropped mapping when a column is missing, re-points only the supplied roles (keeping untouched datasets verbatim) and keeps confirmation when a mapping still points at the same file |
+| Saved workflow (API E2E) | `apps/api/src/saved-workflow.test.ts` | dashboard before a run, detail recipe, latest-run status/records/review/export after a run, read-only prepare (4/4 carried, resolved preview), one-off run-again that leaves the saved version at v1 while its snapshot freezes the new file, saved run-again that bumps to v2, missing-column prepare + 422 run, 404 |
 | End-to-end journey | `apps/api/src/workflow-journey.test.ts` | upload the field-service fixtures → validate the mapping + resolved-config preview → save configuration v1 → run → freeze snapshot (config v1, 7 rules, full audit payload) → classify with the expected per-entity review reasons → review every exception (override the no-events case, accept the rest) → export `ready` (reviewed 5, overridden 1) → **reproducibility**: edit the setup (v2) and replace the active rule set, then assert the historical run's decisions/snapshot are unchanged while a new run uses the new versions (`no_rule_match`) |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
@@ -1118,34 +1233,42 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 9: durable persistence & the loop back into rules** (queue `09-session.md`; session 8
-shipped the end-to-end workflow experience and run reproducibility — see §8). The journey, review loop and
-export are complete and run snapshots already guarantee reproducibility; the next structural gap is
-durability plus using human decisions. Recommended order:
+**Product session 10: security, reliability & production hardening** (queue `10-session.md`; session 9 shipped
+saved workflows and the daily-report experience — see §8, and note that session 9's prompt was *saved
+workflows*, not the durable-persistence work this section previously predicted). This is the security pass,
+because the product handles uploaded business files. Audit and improve, in roughly this order:
 
-1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0005`), and exercise the
-   API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (memory vs Postgres
-   parity) covering the new `run_snapshots` (including the embedded-timestamp revival), the
-   `review_resolutions` audit, `reviewItems.counts()` / filtered listings, `artifacts.update`,
-   `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug`, and `run_decisions.decision_source`. Fix any
-   divergence the tests surface (the adapters have never run against a live database).
-2. **Turn human corrections into rule suggestions.** Mine `review_resolutions` (`changedFields`, automation
-   vs applied values) into candidate rules/condition hypotheses and surface them (read-only) on the Rules
-   page or a review-insights panel — never auto-save a rule. This is the payoff of the audit trail.
-3. **Immutable version history (browsable).** Run snapshots make history reproducible, but configurations and
-   rule sets still overwrite in place; add immutable history rows (or versions tables) so a user can browse a
-   previous configuration/rule-set version, and add a "diff this run against the current rules" view.
-4. **Review-loop polish:** reviewers are anonymous (`resolvedBy` null) — add at least a name/actor input (and
-   then auth), support reopening/re-resolving an item (the data model already supports history), and expose
-   reason/severity filters in the UI (the API supports them today).
-5. **AI follow-ups:** per-configuration provider choice, token/cost accounting, prompt-injection fixtures and
-   an adapter contract test against a local endpoint. Also consider `decisionSource`-based filtering in the
-   decision log UI.
-6. **Streaming/chunking:** the loader still reads whole files into memory (`readAllRows`), artifact
-   regeneration re-reads whole outputs and run snapshots store full payloads; add a streaming/chunked path
-   behind the existing `TabularReader` contract.
-7. Then: scheduling/watched-folder ingestion, exposing identifier normalization options through
-   configuration, and route-level code splitting for the web bundle.
+1. **File security.** Re-audit `packages/file-processing/src/upload.ts` and `LocalFileStorage`: filename
+   handling/basename, path-traversal protection, extension/content-type/magic-byte allowlists, size limits,
+   malicious/corrupt workbook handling (zip bombs, huge sheets), and add a temporary-file **cleanup + retention
+   strategy** (today uploads/artifacts live on disk indefinitely, and rejected uploads are not deleted).
+2. **API security.** Input validation is already strict (zod at every boundary) and error bodies are clean, but
+   there is **no authentication/authorization, no rate limiting and no tenant isolation**; document the
+   boundaries honestly, add request-size/rate limits where cheap, and keep the "local/trusted deployment only"
+   statement accurate.
+3. **Data security.** Secrets are env-only; files are unencrypted on local disk. Document what is stored, what
+   can be deleted, and how long temporary files live; ensure logs never contain file contents (they carry ids
+   and counts today).
+4. **AI security.** Re-confirm the data-minimisation guarantee (bounded request, no raw rows, `AI_EXCLUDED_FIELDS`
+   redaction), the strict output validation and the failure-to-review behaviour; add prompt-injection fixtures
+   and an adapter contract test against a local mock endpoint.
+5. **Reliability.** Add idempotency/failed-run recovery and job-state consistency analysis: what happens if the
+   process dies mid-run (docs currently say in-flight runs are lost in memory mode), partial processing, and the
+   append-only history's behaviour under retries. Consider retries where appropriate and document the rest.
+6. **Observability & privacy.** Structured pino logs already exist; add useful error reporting without leaking
+   sensitive content, and write the privacy section (what is stored, what is sent to an AI provider).
+7. **Testing.** Add security-focused tests for the most important attack/failure cases (traversal filenames,
+   spoofed content types, oversized/corrupt files, injection-shaped cell values, dead-provider paths).
+8. **Repository-wide security review** at the end, documented honestly (no absolute "secure" claim).
+
+**Deferred backlog (still open from earlier sessions), roughly in priority order:** verify Postgres
+(`docker compose up -d postgres`, migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated memory↔Postgres
+parity tests for `run_snapshots`/`review_resolutions`/counts/rule-set queries); turn human corrections into
+rule suggestions (mine `review_resolutions`); browsable immutable configuration/rule-set version history and a
+"diff this run against current rules" view; reviewer identity and reopening resolved items; per-configuration
+AI provider choice / token accounting / `decisionSource` filtering; streaming/chunked loading (the loader still
+reads whole files); scheduling/watched-folder ingestion; exposing identifier-normalization options through
+configuration; route-level code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -1204,6 +1327,16 @@ durability plus using human decisions. Recommended order:
   configuration or rule set may only affect **future** runs. The schema lives in
   `packages/core/src/domain/run-snapshot.ts`; the run DTOs carry the compact summary and
   `GET /api/v1/runs/:id/snapshot` returns the full frozen payloads.
+- **Saved workflows are a derived view over `WorkflowConfiguration`, not a second entity.** Name, mappings
+  and options come from the configuration; rules come from the workflow's single active set. Never store a
+  duplicate copy. Column mappings are remembered **by name**: `rebindConfiguration`
+  (`packages/core/src/domain/saved-workflow.ts`) is the single recipe that carries them onto new files, keeps
+  untouched datasets verbatim, resets `confirmed` on a re-point and reports every dropped mapping — do not
+  add a second rebind path or fuzzy column matching. `SavedWorkflowService` owns the dashboard projection, the
+  read-only `prepare` and the run-again flow; `prepare` must stay side-effect free, and `run` may only persist
+  the re-point when `saveConfiguration` is true. A one-off run must pass `configurationOverride` to
+  `RunService.createRun` so its snapshot freezes the configuration it actually used. The dashboard scans recent
+  runs (`limit: 1000`) to find each workflow's latest run — revisit with an indexed query before scaling.
 - **Output generation is modular, deterministic and validated.** `build-output` (workflow) owns row assembly
   and must copy the primary source row, overwrite only the configured output columns, write missing values as
   `null`, and emit rows in primary-file order (sort by `rowIndex`). `RunService` owns writing: use
@@ -1249,9 +1382,11 @@ durability plus using human decisions. Recommended order:
   `packages/ai/src/{service,resolve,redact,openai-provider}.ts` →
   `packages/core/src/domain/review.ts` →
   `packages/core/src/domain/output.ts` →
-  `packages/core/src/domain/run-snapshot.ts` →
+  `packages/core/src/domain/run-snapshot.ts` +
+  `packages/core/src/domain/saved-workflow.ts` →
   `apps/api/src/services/review-service.ts` +
-  `apps/api/src/services/export-service.ts` →
+  `apps/api/src/services/export-service.ts` +
+  `apps/api/src/services/saved-workflow-service.ts` →
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
@@ -1270,3 +1405,4 @@ durability plus using human decisions. Recommended order:
 | Product 6 | 2026-09-16 | Review queue & human-in-the-loop: derived `ReviewState` + shared queue filter presets, append-only `review_resolutions` audit (migration `0004`) + repository, `ReviewService` (resolve/override/dismiss, automation snapshot, `changedFields`, output-artifact regeneration), enriched review DTOs (automation block, latest event, history, AI outcome, applicable rules), per-filter counts + filtered queue API, master/detail review workspace with keyboard shortcuts and audit trail, run-detail decision state, +13 tests (222 total). Verified: lint/typecheck/222 tests/build/smoke (filtered queue, override audit, regenerated output). |
 | Product 7 | 2026-09-16 | Output generation & Excel export: OutputRecordState/ExportSummary + summariseOutputRecords in core, deterministic primary-order output with null blanks, streamed writeTableToStorage, XLSX leading Summary sheet + type preservation, validateStoredTable re-read validation that fails the run on mismatch, live ExportService/GET /runs/:id/export summary + status, run-page Final report panel, +13 tests (235 total). Verified: lint/typecheck/235 tests/build/smoke (export summary + validated xlsx/csv). |
 | Product 8 | 2026-09-16 | End-to-end workflow experience & run reproducibility: immutable `RunSnapshot` (frozen configuration + rule set) + `RunSnapshotRepository` + `run_snapshots` table (migration `0005`), `RunService` captures at creation and executes the snapshot, `GET /api/v1/runs/:id/snapshot` + snapshot summary on run DTOs, shared `WorkflowProgress` journey stepper + plain-language statuses/error help, run summary dashboard linking to the run-scoped review queue and report, `samples/field-service` fixtures, +10 tests (245 total). Verified: lint/typecheck/245 tests/build/smoke (snapshot frozen; full journey incl. reproducibility). |
+| Product 9 | 2026-09-16 | Saved workflows & the daily-report experience: reusable `SavedWorkflow` aggregate + pure `rebindConfiguration` (carry mappings by column name), `SavedWorkflowService`/`/api/v1/saved-workflows` (dashboard, read-only prepare, run-again with optional version save), `RunService` `configurationOverride` so one-off re-points freeze what they used, `exportStatusSchema` in core, Saved workflows dashboard + detail + Run again pages and Dashboard/nav/home updates, +13 tests (258 total). Verified: lint/typecheck/258 tests/build/smoke (dashboard, 4/4 carried mappings, run-again saved config v2). |

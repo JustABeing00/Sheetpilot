@@ -1590,3 +1590,66 @@ kbd {
 #final-report {
   scroll-margin-top: 16px;
 }
+
+/* ---------- saved workflows ---------- */
+
+.table-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table-actions .button {
+  margin-left: 6px;
+}
+
+.table-compact th,
+.table-compact td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.subsection-title {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.card-body > .subsection-title:first-child {
+  margin-top: 0;
+}
+
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.journey-list.compact li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.role-assignment-list {
+  display: grid;
+  gap: 14px;
+}
+
+.role-assignment {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.role-assignment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}

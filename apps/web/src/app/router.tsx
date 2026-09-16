@@ -8,7 +8,10 @@ import { NotFoundPage } from '../pages/NotFoundPage.js';
 import { ReviewQueuePage } from '../pages/ReviewQueuePage.js';
 import { RulesPage } from '../pages/RulesPage.js';
 import { RunDetailPage } from '../pages/RunDetailPage.js';
+import { RunSavedWorkflowPage } from '../pages/RunSavedWorkflowPage.js';
 import { RunsPage } from '../pages/RunsPage.js';
+import { SavedWorkflowDetailPage } from '../pages/SavedWorkflowDetailPage.js';
+import { SavedWorkflowsPage } from '../pages/SavedWorkflowsPage.js';
 import { SetupPage } from '../pages/SetupPage.js';
 import { WorkflowDetailPage } from '../pages/WorkflowDetailPage.js';
 import { WorkflowsPage } from '../pages/WorkflowsPage.js';
@@ -22,6 +25,9 @@ export const router = createBrowserRouter([
       { path: 'runs', element: <RunsPage /> },
       { path: 'runs/new', element: <NewRunPage /> },
       { path: 'runs/:runId', element: <RunDetailPage /> },
+      { path: 'saved-workflows', element: <SavedWorkflowsPage /> },
+      { path: 'saved-workflows/:savedWorkflowId', element: <SavedWorkflowDetailPage /> },
+      { path: 'saved-workflows/:savedWorkflowId/run', element: <RunSavedWorkflowPage /> },
       { path: 'datasets', element: <DatasetsPage /> },
       { path: 'datasets/:datasetId', element: <DatasetDetailPage /> },
       { path: 'setup', element: <SetupPage /> },

@@ -21,6 +21,7 @@ import {
   type Repositories,
   type RunSnapshot,
   type TabularFormat,
+  type WorkflowConfiguration,
   type WorkflowRun,
 } from '@sheetpilot/core';
 import {
@@ -50,6 +51,12 @@ export interface CreateRunInput {
   primaryFileId: string;
   eventsFileId: string;
   configurationId?: string | null;
+  /**
+   * The exact configuration to freeze when a run uses a variant that is not (yet) persisted — e.g. a
+   * saved workflow re-pointed at a new day's files in one-off mode. Guarantees the snapshot always
+   * reflects what the run actually used.
+   */
+  configurationOverride?: WorkflowConfiguration | null;
   config: Record<string, unknown>;
 }
 
@@ -90,7 +97,7 @@ export class RunService {
     const created = await this.deps.repositories.runs.create(run);
     // Freeze the configuration + rule-set versions before execution so a later edit can never change
     // what this run produced. Every run is reproducible from its own snapshot.
-    await this.captureSnapshot(created);
+    await this.captureSnapshot(created, input.configurationOverride ?? null);
     this.deps.logger.info(
       { runId: created.id, workflowSlug: created.workflowSlug },
       'run queued for execution',
@@ -107,10 +114,15 @@ export class RunService {
    * Writes the write-once run snapshot: the saved configuration (if the run was started from one) and
    * the workflow's active rule set, exactly as they were when the run was created.
    */
-  private async captureSnapshot(run: WorkflowRun): Promise<RunSnapshot> {
-    const configuration = run.configurationId
-      ? await this.deps.repositories.workflowConfigurations.getById(run.configurationId)
-      : null;
+  private async captureSnapshot(
+    run: WorkflowRun,
+    configurationOverride: WorkflowConfiguration | null,
+  ): Promise<RunSnapshot> {
+    const configuration =
+      configurationOverride ??
+      (run.configurationId
+        ? await this.deps.repositories.workflowConfigurations.getById(run.configurationId)
+        : null);
     const ruleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(run.workflowSlug);
 
     const snapshot = runSnapshotSchema.parse({

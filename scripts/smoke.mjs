@@ -250,6 +250,63 @@ async function main() {
     `snapshot      : config v${snapshot.configuration.version} (${snapshot.configuration.name}), rules v${snapshot.ruleSet.version} (${snapshot.ruleSet.rules.length} rules)`,
   );
 
+  // Saved workflows: the returning-user dashboard, then "run again" on a new day's files.
+  const savedList = await request('/api/v1/saved-workflows');
+  const saved = savedList.items.find((item) => item.id === configuration.id);
+  assert(saved, 'the saved configuration must appear as a saved workflow');
+  assert(saved.lastRun, 'a saved workflow that has run must report its latest run');
+  assert(
+    saved.lastRun.recordsProcessed === 9,
+    `saved workflow must report 9 records processed, got ${saved.lastRun.recordsProcessed}`,
+  );
+  assert(
+    saved.lastRun.reviewItemCount === 7,
+    `saved workflow must report 7 review items, got ${saved.lastRun.reviewItemCount}`,
+  );
+  assert(
+    saved.lastRun.exportStatus === 'pending_review',
+    `a run with open exceptions must report pending_review, got ${saved.lastRun.exportStatus}`,
+  );
+  console.log(
+    `saved wf      : ${saved.name} (config v${saved.configurationVersion}), last run ${saved.lastRun.status}, ${saved.lastRun.recordsProcessed} records, ${saved.lastRun.openReviewItemCount} open`,
+  );
+
+  const day2Primary = await uploadDataset('primary', 'primary_accounts.csv');
+  const day2Events = await uploadDataset('events', 'fault_events.csv');
+  const day2Assignments = [
+    { role: 'primary', datasetId: day2Primary.id, sheetName: null },
+    { role: 'events', datasetId: day2Events.id, sheetName: null },
+  ];
+  const prepared = await request(`/api/v1/saved-workflows/${configuration.id}/prepare`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ assignments: day2Assignments }),
+  });
+  assert(prepared.valid, `rebinding to new files must validate: ${JSON.stringify(prepared.issues)}`);
+  assert(
+    prepared.plan.carried.length === 4 && prepared.plan.dropped.length === 0,
+    'every remembered column mapping must be carried onto the new files',
+  );
+  assert(
+    prepared.resolvedConfig?.primaryAccountColumn === 'Account Number',
+    'the preview must resolve the mapped columns onto the new files',
+  );
+
+  const againRun = await request(`/api/v1/saved-workflows/${configuration.id}/run`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ assignments: day2Assignments, saveConfiguration: true }),
+  });
+  const againFinished = await waitForRun(againRun.id);
+  assert(againFinished.status === 'succeeded', `run-again status was ${againFinished.status}`);
+  assert(
+    againFinished.snapshot?.configurationVersion === configuration.version + 1,
+    'saving the re-pointed mapping must record the new configuration version on the run',
+  );
+  console.log(
+    `run again     : carried ${prepared.plan.carried.length} mappings onto new files, saved config v${againFinished.snapshot.configurationVersion}`,
+  );
+
   // Human review loop: filter presets with counts, an append-only audit trail and output regeneration.
   const reviewFilter = await request(
     `/api/v1/review-items?filter=needs_review&runId=${configuredFinished.id}`,

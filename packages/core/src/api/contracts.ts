@@ -33,7 +33,8 @@ import {
 import { ruleSchema, ruleValidationIssueSchema } from '../domain/rules.js';
 import { aiAssistOutcomeSchema } from '../domain/ai.js';
 import { reviewAutomationSchema, reviewEventSchema, reviewStateSchema } from '../domain/review.js';
-import { exportSummarySchema } from '../domain/output.js';
+import { exportStatusSchema, exportSummarySchema } from '../domain/output.js';
+import { rebindPlanSchema } from '../domain/saved-workflow.js';
 
 export const isoDateTimeSchema = z
   .string()
@@ -395,7 +396,7 @@ export type ExportValidationDto = z.infer<typeof exportValidationDtoSchema>;
  */
 export const exportStatusResponseSchema = z.object({
   runId: z.string(),
-  status: z.enum(['processing', 'pending_review', 'ready', 'failed', 'unavailable']),
+  status: exportStatusSchema,
   ready: z.boolean(),
   message: z.string(),
   summary: exportSummarySchema,
@@ -427,6 +428,95 @@ export type RuleSetDto = z.infer<typeof ruleSetDtoSchema>;
 
 export const ruleSetListResponseSchema = z.object({ items: z.array(ruleSetSummaryDtoSchema) });
 export type RuleSetListResponse = z.infer<typeof ruleSetListResponseSchema>;
+
+/**
+ * A saved workflow as shown on the returning-user dashboard: the remembered recipe plus the outcome of
+ * its latest run (status, records processed, review count and whether the report is ready).
+ */
+export const savedWorkflowRunDtoSchema = z.object({
+  id: z.string(),
+  status: runStatusSchema,
+  createdAt: isoDateTimeSchema,
+  finishedAt: isoDateTimeSchema.nullable(),
+  recordsProcessed: z.number().int().nonnegative(),
+  reviewItemCount: z.number().int().nonnegative(),
+  openReviewItemCount: z.number().int().nonnegative(),
+  exportStatus: exportStatusSchema,
+  exportReady: z.boolean(),
+  exportMessage: z.string(),
+});
+export type SavedWorkflowRunDto = z.infer<typeof savedWorkflowRunDtoSchema>;
+
+export const savedWorkflowRuleSetSummaryDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.number().int().positive(),
+  ruleCount: z.number().int().nonnegative(),
+  active: z.boolean(),
+});
+export type SavedWorkflowRuleSetSummaryDto = z.infer<typeof savedWorkflowRuleSetSummaryDtoSchema>;
+
+export const savedWorkflowSummaryDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  workflowSlug: z.string(),
+  workflowName: z.string(),
+  workflowVersion: z.number().int().positive(),
+  configurationVersion: z.number().int().positive(),
+  datasetCount: z.number().int().nonnegative(),
+  mappingCount: z.number().int().nonnegative(),
+  ruleSet: savedWorkflowRuleSetSummaryDtoSchema.nullable(),
+  lastRun: savedWorkflowRunDtoSchema.nullable(),
+  runCount: z.number().int().nonnegative(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type SavedWorkflowSummaryDto = z.infer<typeof savedWorkflowSummaryDtoSchema>;
+
+export const savedWorkflowListResponseSchema = z.object({
+  items: z.array(savedWorkflowSummaryDtoSchema),
+});
+export type SavedWorkflowListResponse = z.infer<typeof savedWorkflowListResponseSchema>;
+
+export const savedWorkflowDetailDtoSchema = savedWorkflowSummaryDtoSchema.extend({
+  configuration: workflowConfigurationDtoSchema,
+  ruleSetDefinition: ruleSetDtoSchema.nullable(),
+  recentRuns: z.array(savedWorkflowRunDtoSchema),
+});
+export type SavedWorkflowDetailDto = z.infer<typeof savedWorkflowDetailDtoSchema>;
+
+/** Preview of how a saved workflow's mapping carries onto a new set of files. */
+export const rebindPlanDtoSchema = rebindPlanSchema;
+export type RebindPlanDto = z.infer<typeof rebindPlanDtoSchema>;
+
+export const prepareSavedWorkflowRunRequestSchema = z.object({
+  assignments: z.array(datasetAssignmentSchema).min(1),
+});
+export type PrepareSavedWorkflowRunRequest = z.infer<
+  typeof prepareSavedWorkflowRunRequestSchema
+>;
+
+export const prepareSavedWorkflowRunResponseSchema = z.object({
+  valid: z.boolean(),
+  issues: z.array(configurationIssueSchema),
+  resolvedConfig: resolvedRunConfigSchema.nullable(),
+  plan: rebindPlanSchema,
+});
+export type PrepareSavedWorkflowRunResponse = z.infer<
+  typeof prepareSavedWorkflowRunResponseSchema
+>;
+
+export const runSavedWorkflowRequestSchema = z.object({
+  assignments: z.array(datasetAssignmentSchema).min(1),
+  /** Persist the re-pointed mapping as a new saved version; otherwise the run only uses it once. */
+  saveConfiguration: z.boolean().default(false),
+  name: z.string().min(1).max(200).optional(),
+  config: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+    .default({}),
+});
+export type RunSavedWorkflowRequest = z.infer<typeof runSavedWorkflowRequestSchema>;
 
 /**
  * The full frozen inputs of a run, for the audit view: the exact configuration and rule set that were

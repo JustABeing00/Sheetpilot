@@ -21,6 +21,9 @@ import {
   ruleSetValidationResponseSchema,
   runDtoSchema,
   runListResponseSchema,
+  savedWorkflowDetailDtoSchema,
+  savedWorkflowListResponseSchema,
+  prepareSavedWorkflowRunResponseSchema,
   workflowConfigurationDtoSchema,
   workflowConfigurationListResponseSchema,
   workflowDetailDtoSchema,
@@ -28,8 +31,10 @@ import {
   type CreateRuleSetRequest,
   type CreateRunRequest,
   type CreateWorkflowConfigurationRequest,
+  type PrepareSavedWorkflowRunRequest,
   type ResolveReviewItemRequest,
   type ReviewFilter,
+  type RunSavedWorkflowRequest,
   type UpdateRuleSetRequest,
   type UpdateWorkflowConfigurationRequest,
   type ValidateRuleSetRequest,
@@ -63,6 +68,8 @@ export const queryKeys = {
   workflowConfiguration: (id: string) => ['workflow-configurations', id] as const,
   ruleSets: (slug?: string) => ['rule-sets', slug ?? 'all'] as const,
   ruleSet: (id: string) => ['rule-sets', id] as const,
+  savedWorkflows: ['saved-workflows'] as const,
+  savedWorkflow: (id: string) => ['saved-workflows', id] as const,
 };
 
 export function useHealth() {
@@ -377,6 +384,45 @@ export function useUpdateRuleSet() {
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['rule-sets'] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.ruleSet(variables.id) });
+    },
+  });
+}
+
+export function useSavedWorkflows() {
+  return useQuery({
+    queryKey: queryKeys.savedWorkflows,
+    queryFn: () => apiGet('/api/v1/saved-workflows', savedWorkflowListResponseSchema),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useSavedWorkflow(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.savedWorkflow(id ?? ''),
+    queryFn: () => apiGet(`/api/v1/saved-workflows/${id}`, savedWorkflowDetailDtoSchema),
+    enabled: Boolean(id),
+  });
+}
+
+export function usePrepareSavedWorkflowRun() {
+  return useMutation({
+    mutationFn: (input: { id: string; body: PrepareSavedWorkflowRunRequest }) =>
+      apiPost(
+        `/api/v1/saved-workflows/${input.id}/prepare`,
+        input.body,
+        prepareSavedWorkflowRunResponseSchema,
+      ),
+  });
+}
+
+export function useRunSavedWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: RunSavedWorkflowRequest }) =>
+      apiPost(`/api/v1/saved-workflows/${input.id}/run`, input.body, runDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runs });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.savedWorkflows });
     },
   });
 }

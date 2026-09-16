@@ -62,6 +62,20 @@ export function outputRecordStateForReviewState(
   }
 }
 
+/**
+ * The readiness of the final deliverable for a run. Derived (never stored) so it always reflects the
+ * current human decisions: `processing` while the run is still working, `pending_review` once output
+ * exists but exceptions remain, `ready` when every case is resolved, plus `failed` and `unavailable`.
+ */
+export const exportStatusSchema = z.enum([
+  'processing',
+  'pending_review',
+  'ready',
+  'failed',
+  'unavailable',
+]);
+export type ExportStatus = z.infer<typeof exportStatusSchema>;
+
 /** Review reasons that mean automation could not connect a record to usable source events. */
 export const UNMATCHED_REVIEW_REASONS: readonly ReviewReason[] = ['no_events', 'no_rule_match'];
 

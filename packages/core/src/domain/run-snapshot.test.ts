@@ -11,7 +11,12 @@ const rule: Rule = {
   description: '',
   enabled: true,
   priority: 10,
-  when: { mode: 'all', conditions: [{ field: 'description', operator: 'contains', value: 'power' }] },
+  when: {
+    mode: 'all',
+    conditions: [
+      { field: 'description', operator: 'contains', value: 'power', caseSensitive: false, scope: 'latest' },
+    ],
+  },
   then: [{ type: 'set', field: 'RootCause', value: 'Power Loss' }],
   confidence: 0.9,
   explanationTemplate: '',

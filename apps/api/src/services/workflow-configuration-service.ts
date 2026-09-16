@@ -238,7 +238,7 @@ export class WorkflowConfigurationService {
     };
   }
 
-  private async loadDatasets(
+  async loadDatasets(
     assignments: DatasetAssignment[],
     mappings: WorkflowConfiguration['mappings'],
   ): Promise<DatasetProfile[]> {

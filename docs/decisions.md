@@ -398,3 +398,34 @@ a larger migration and it changes ids/references everywhere; the run snapshot al
 reproducibility and can be layered on top later). Storing the snapshot inside `runs.config` (rejected:
 unvalidated, untyped, and it conflates the resolved run input with the frozen definitions). Resolving the
 rule set at execution time only (rejected: a rule edit between queueing and execution would change the run).
+
+## ADR-018 - A saved workflow is a reusable, re-pointable aggregate; the dashboard is derived
+
+**Decision.** The user-facing unit is a **saved workflow**: a named, versioned `WorkflowConfiguration` built
+on a registered workflow template. It remembers the dataset roles, the column mapping (by **column name**),
+the active rules and the output/review options, and it can be re-pointed at a new day's files without
+re-mapping. "Run again" carries the remembered mapping onto the chosen datasets through the pure
+`rebindConfiguration` in `@sheetpilot/core`: a mapping is carried when the new file has a column with the
+same name, otherwise it is dropped and reported so only that role needs re-mapping. Saving the re-pointed
+mapping bumps the configuration version; running one-off without saving is allowed. `SavedWorkflowService`
+derives the dashboard (latest run, status, records processed, review count, export availability) from
+configurations + runs + rule sets + the live export status — none of it is stored a second time. A one-off
+run freezes the exact (unpersisted) configuration it used through `RunService.createRun`'s
+`configurationOverride`, so reproducibility holds whether or not the re-point was saved.
+
+**Why.** The recurring use case ("put today's files somewhere, run the saved workflow, review the unusual
+cases") fails if a returning user must re-map columns every day. Remembering the mapping by column name — the
+one stable, human-meaningful fact across files — turns a multi-minute setup into attaching two files. Keeping
+the aggregate derived avoids a new source of truth that could drift from the runs it describes.
+
+**Consequences.** A daily file whose columns were renamed is reported (`column_not_found`) rather than
+silently mis-mapped; the user fixes that role once. Re-pointing resets a mapping's `confirmed` flag so the
+new file is re-validated. The dashboard's latest-run view reads recent runs (bounded scan) and the export
+service derives status per saved workflow, so it is a read-heavy projection rather than an indexed aggregate
+(fine for a single-user workload; revisit at scale). Configurations remain mutable pointers; the immutable
+per-run snapshot (ADR-017) is still the audit record.
+
+**Alternatives considered.** A separate `saved_workflows` table duplicating name/mappings/rules (rejected:
+two sources of truth for the same setup). Retrieving the mapping by dataset id (rejected: new files have new
+ids; it would force re-mapping). Requiring the re-point to be saved before running (rejected: a user may want
+a one-off run without changing the saved setup; the run snapshot already makes the run reproducible).

@@ -11,7 +11,7 @@ types, emptiness/uniqueness, samples and validation warnings); rows stay in obje
 on demand, so no stage loads a whole dataset into browser memory. A **workflow configuration** then
 assigns datasets to declared roles and maps semantic columns (entity id, timestamp, description, output
 columns) to real columns, with validation and explicit confirmation for ambiguous mappings; the saved,
-versioned configuration can start a run and be reused. A reusable **matching engine**
+versioned configuration becomes a reusable **saved workflow**. A reusable **matching engine**
 (`@sheetpilot/matching-engine`) joins primary records to their events on a normalized identifier, keeps the
 complete event history and selects the latest event deterministically, reporting every join anomaly.
 
@@ -35,7 +35,7 @@ for the architecture deep dive.
 ```
 apps/
   api/                 Fastify HTTP API (application layer, composition root, services, routes)
-  web/                 React + Vite single-page app (dashboard, datasets, setup, runs, review queue, workflows)
+  web/                 React + Vite single-page app (dashboard, saved workflows, datasets, setup, runs, review queue)
 packages/
   core/                Domain model, zod schemas, API contracts, ports (zero runtime deps except zod)
   config/              Typed environment loading/validation (fail-fast, no secrets in code)
@@ -73,6 +73,11 @@ detected sheets, columns, inferred types and validation warnings; the row previe
 For the guided path, open **Setup**: upload both sample files under **Datasets**, then assign them to the
 primary/events roles, map the account/date/description columns (the page suggests defaults and validates
 as you go), save the configuration, and click **Continue to processing**.
+
+Once a setup is saved it appears under **Saved workflows**. To process a new day's data, open the saved
+workflow and click **Run again**: attach the new files, and the remembered column mapping is carried onto
+them by name (anything that could not be carried is reported). The run freezes its own setup and rule
+versions, so past reports never change.
 
 No configuration is required: the API defaults to in-memory repositories and local file storage.
 Copy `.env.example` to `.env` to change ports, storage, Postgres, logging or AI settings.
@@ -163,5 +168,14 @@ The end-to-end journey is now a single, resumable experience with a shared progr
 Rules, Processing, Review and Export, and a run summary that links straight to the review queue and the
 report. Runs are **reproducible**: each run freezes an immutable snapshot of the configuration and rule-set
 versions it started with (`GET /api/v1/runs/:id/snapshot`), so editing a setup or the rules tomorrow changes
-only future runs and never a historical report. Scheduling, authentication and multi-tenancy are deliberately
-deferred — see [`progress.md`](./progress.md) §15 for the prioritized next steps.
+only future runs and never a historical report.
+
+The product is now organized around **saved workflows** — the recurring unit a returning user comes back to.
+The **Dashboard** and **Saved workflows** page show, per workflow, its last run, latest status, records
+processed, review count and whether the report is ready, each with a direct **Run again** action. "Run again"
+attaches a new day's files and carries the remembered mapping (by column name) onto them, reporting any
+column that needs re-mapping, and can optionally update the saved mapping to point at the new files. A
+saved workflow remembers its dataset roles, column mappings, matching/latest-record logic, rules and
+output/review options; creating a new one from scratch is the existing Setup flow. Scheduling,
+authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
+prioritized next steps.

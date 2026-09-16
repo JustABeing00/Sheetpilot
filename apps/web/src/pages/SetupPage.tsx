@@ -350,11 +350,16 @@ export function SetupPage() {
       <WorkflowProgress current="setup" />
       <PageHeader
         title={configurationId ? 'Edit workflow setup' : 'Set up a workflow'}
-        description="Setup is preparation: connect your files and confirm the columns. Processing is a separate step you start when the setup is ready. Everything is saved so you can reuse it next month."
+        description="Setup is preparation: connect your files and confirm the columns. Saving creates a reusable saved workflow — next time you only attach the new files. Processing is a separate step you start when the setup is ready."
         actions={
-          <Link className="button" to="/rules">
-            Tune the rules
-          </Link>
+          <>
+            <Link className="button" to="/saved-workflows">
+              Saved workflows
+            </Link>
+            <Link className="button" to="/rules">
+              Tune the rules
+            </Link>
+          </>
         }
       />
 
@@ -380,7 +385,7 @@ export function SetupPage() {
               ))}
             </select>
           </Field>
-          <Field label="Setup name" hint="Shown in the saved setups list.">
+          <Field label="Saved workflow name" hint="Shown in Saved workflows and on every run.">
             <input
               className="input"
               type="text"

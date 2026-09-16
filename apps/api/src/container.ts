@@ -22,6 +22,7 @@ import { ExportService } from './services/export-service.js';
 import { ReviewService } from './services/review-service.js';
 import { RuleSetService } from './services/rule-set-service.js';
 import { RunService } from './services/run-service.js';
+import { SavedWorkflowService } from './services/saved-workflow-service.js';
 import { WorkflowConfigurationService } from './services/workflow-configuration-service.js';
 
 export interface AppContainer {
@@ -39,6 +40,7 @@ export interface AppContainer {
   runService: RunService;
   reviewService: ReviewService;
   exportService: ExportService;
+  savedWorkflowService: SavedWorkflowService;
   close(): Promise<void>;
 }
 
@@ -153,6 +155,15 @@ export async function createContainer(
   const runService = new RunService({ repositories, storage, registry, clock, logger });
   const reviewService = new ReviewService({ repositories, storage, clock, logger });
   const exportService = new ExportService({ repositories });
+  const savedWorkflowService = new SavedWorkflowService({
+    repositories,
+    registry,
+    clock,
+    logger,
+    configurationService: workflowConfigurationService,
+    runService,
+    exportService,
+  });
 
   return {
     config,
@@ -169,6 +180,7 @@ export async function createContainer(
     runService,
     reviewService,
     exportService,
+    savedWorkflowService,
     async close() {
       await databaseHandle?.close();
     },
