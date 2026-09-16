@@ -110,6 +110,25 @@ async function main() {
     `review queue  : ${reviewItems.items.length} items, decision log: ${decisions.total} records`,
   );
 
+  const matchedDecision = decisions.items.find((item) => item.entityKey === '1001');
+  assert(
+    matchedDecision?.decisionSource === 'deterministic',
+    'a matched rule must be recorded as a deterministic decision',
+  );
+  assert(
+    matchedDecision?.ai?.status === 'not_consulted',
+    'AI must not be consulted when the rules were sufficient',
+  );
+  const unmatchedDecision = decisions.items.find((item) => item.entityKey === '1004');
+  assert(
+    unmatchedDecision?.ai?.status === 'disabled',
+    'with AI_PROVIDER=noop the AI layer must report itself disabled and send nothing',
+  );
+  assert(
+    csv.includes('__DecisionSource'),
+    'output CSV must carry the decision-source provenance column',
+  );
+
   const resolved = await request(`/api/v1/review-items/${reviewItems.items[0].id}/resolve`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

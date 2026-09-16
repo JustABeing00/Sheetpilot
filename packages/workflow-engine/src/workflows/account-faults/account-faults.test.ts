@@ -6,11 +6,14 @@ import {
   fileAssetSchema,
   fixedClock,
   ruleSetSchema,
+  type AiClassificationRequest,
+  type AiClassificationResult,
+  type ClassificationProvider,
   type FileAsset,
   type FileRepository,
 } from '@sheetpilot/core';
 import { InMemoryFileStorage } from '@sheetpilot/file-processing';
-import { NoopClassificationProvider } from '@sheetpilot/ai';
+import { NoopClassificationProvider, AiProviderError } from '@sheetpilot/ai';
 import { createStepContext } from '../../engine.js';
 import type { WorkflowOutputs } from '../../registry.js';
 import type { WorkflowExecution } from '../../types.js';
@@ -28,7 +31,48 @@ interface Harness {
   storage: InMemoryFileStorage;
 }
 
-async function runWorkflow(input: Record<string, unknown> = {}): Promise<Harness> {
+class RecordingProvider implements ClassificationProvider {
+  readonly id = 'recording';
+  readonly displayName = 'Recording provider';
+  readonly model = 'recording-1';
+  readonly requests: AiClassificationRequest[] = [];
+
+  constructor(
+    private readonly respond: (
+      request: AiClassificationRequest,
+    ) => AiClassificationResult | Promise<AiClassificationResult>,
+  ) {}
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async classify(request: AiClassificationRequest): Promise<AiClassificationResult> {
+    this.requests.push(request);
+    return this.respond(request);
+  }
+}
+
+function aiResult(
+  proposedCode: string,
+  confidence: number,
+  extra: Partial<AiClassificationResult> = {},
+): AiClassificationResult {
+  return {
+    proposedCode,
+    proposedLabel: proposedCode,
+    confidence,
+    reasoning: 'model reasoning',
+    ambiguity: [],
+    missingInformation: [],
+    ...extra,
+  };
+}
+
+async function runWorkflow(
+  input: Record<string, unknown> = {},
+  classifier: ClassificationProvider = new NoopClassificationProvider(),
+): Promise<Harness> {
   const storage = new InMemoryFileStorage();
   await storage.put('uploads/primary.csv', PRIMARY_CSV);
   await storage.put('uploads/events.csv', EVENTS_CSV);
@@ -68,7 +112,7 @@ async function runWorkflow(input: Record<string, unknown> = {}): Promise<Harness
   const workflow = createAccountFaultWorkflow({
     files,
     storage,
-    classifier: new NoopClassificationProvider(),
+    classifier,
   });
 
   const ctx = createStepContext({
@@ -122,6 +166,7 @@ describe('account fault triage workflow', () => {
       '__FaultCount',
       '__LatestFaultAt',
       '__MatchedRules',
+      '__DecisionSource',
       '__DecisionConfidence',
       '__ReviewStatus',
       '__ReviewReasons',
@@ -335,5 +380,81 @@ describe('account fault triage workflow', () => {
     expect(evidence.ruleStatus).toBe('no_match');
     expect(evidence.needsReview).toBe(true);
     expect(evidence.ruleReviewReasons).toContain('no_rule_match');
+  });
+
+  it('applies a confident AI proposal only when no rule matched and auto-approval is enabled', async () => {
+    const classifier = new RecordingProvider(() => aiResult('SENSOR_FAULT', 0.95));
+    const { execution } = await runWorkflow(
+      { config: { aiPolicy: 'on_no_rule_match', aiAutoApprove: true, aiMinConfidence: 0.9 } },
+      classifier,
+    );
+
+    const [elmStreet] = rowsFor(execution, '1004');
+    expect(elmStreet?.['RootCause']).toBe('Sensor Fault');
+    expect(elmStreet?.['FaultCategory']).toBe('Hardware');
+    expect(elmStreet?.['__DecisionSource']).toBe('ai_suggested');
+    expect(elmStreet?.['__ReviewStatus']).toBe('AUTO_APPROVED');
+
+    const decision = execution.state!.decisionRecords.find((record) => record.entityKey === '1004');
+    expect(decision?.decisionSource).toBe('ai_suggested');
+    expect(decision?.aiAssisted).toBe(true);
+    expect(decision?.confidence).toBeCloseTo(0.95);
+  });
+
+  it('never lets AI override a confident deterministic rule', async () => {
+    const classifier = new RecordingProvider(() => aiResult('SENSOR_FAULT', 0.99));
+    const { execution } = await runWorkflow(
+      { config: { aiPolicy: 'always', aiAutoApprove: true, aiMinConfidence: 0.5 } },
+      classifier,
+    );
+
+    const [northRidge] = rowsFor(execution, '1001');
+    expect(northRidge?.['RootCause']).toBe('Power Loss');
+    expect(northRidge?.['__DecisionSource']).toBe('deterministic');
+
+    const decision = execution.state!.decisionRecords.find((record) => record.entityKey === '1001');
+    expect(decision?.decisionSource).toBe('deterministic');
+    expect(decision?.reviewReasons).toContain('ai_proposed_alternative');
+  });
+
+  it('routes a low-confidence AI proposal to review', async () => {
+    const classifier = new RecordingProvider(() => aiResult('SENSOR_FAULT', 0.5));
+    const { execution } = await runWorkflow(
+      { config: { aiPolicy: 'on_no_rule_match', aiAutoApprove: true, aiMinConfidence: 0.9 } },
+      classifier,
+    );
+
+    const [elmStreet] = rowsFor(execution, '1004');
+    expect(elmStreet?.['RootCause']).toBe('Sensor Fault');
+    expect(String(elmStreet?.['__ReviewReasons'])).toContain('ai_low_confidence');
+  });
+
+  it('survives a provider failure and records it as a review reason', async () => {
+    const classifier = new RecordingProvider(() => {
+      throw new AiProviderError('provider exploded', {
+        kind: 'provider_error',
+        retryable: false,
+      });
+    });
+    const { execution } = await runWorkflow(
+      { config: { aiPolicy: 'on_no_rule_match' } },
+      classifier,
+    );
+
+    expect(execution.status).toBe('succeeded');
+    const [elmStreet] = rowsFor(execution, '1004');
+    expect(String(elmStreet?.['__ReviewReasons'])).toContain('ai_failed');
+  });
+
+  it('sends only bounded, non-row data to the AI provider', async () => {
+    const classifier = new RecordingProvider(() => aiResult('SENSOR_FAULT', 0.9));
+    await runWorkflow({ config: { aiPolicy: 'on_no_rule_match' } }, classifier);
+
+    const first = classifier.requests[0];
+    expect(first).toBeDefined();
+    expect(first?.latestEvent?.fields).toEqual({});
+    expect(first?.entityKey).toBe('1004');
+    expect(first?.eventHistory.length).toBeLessThanOrEqual(5);
+    expect(JSON.stringify(first)).not.toContain('Elm Street');
   });
 });

@@ -29,6 +29,10 @@ export const reviewReasonSchema = z.enum([
   'conflicting_fault_history',
   'unparsed_timestamp',
   'duplicate_primary_key',
+  'ai_low_confidence',
+  'ai_ambiguous',
+  'ai_proposed_alternative',
+  'ai_failed',
 ]);
 export type ReviewReason = z.infer<typeof reviewReasonSchema>;
 
@@ -43,6 +47,13 @@ export type ArtifactKind = z.infer<typeof artifactKindSchema>;
 
 export const aiPolicySchema = z.enum(['never', 'on_no_rule_match', 'on_low_confidence', 'always']);
 export type AiPolicy = z.infer<typeof aiPolicySchema>;
+
+/**
+ * Where the values in a persisted decision came from. Human resolutions are tracked separately on
+ * the review item, so this never masks a human decision.
+ */
+export const decisionSourceSchema = z.enum(['deterministic', 'ai_suggested', 'none']);
+export type DecisionSource = z.infer<typeof decisionSourceSchema>;
 
 export const aiProviderIdSchema = z.enum(['noop', 'openai']);
 export type AiProviderId = z.infer<typeof aiProviderIdSchema>;

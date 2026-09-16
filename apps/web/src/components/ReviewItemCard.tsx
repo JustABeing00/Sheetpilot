@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ReviewItemDto } from '@sheetpilot/core';
+import { AI_AMBIGUITY_LABELS, AI_FAILURE_LABELS } from '@sheetpilot/core';
 import { useResolveReviewItem } from '../api/hooks.js';
 import { formatCellValue, formatDateTime, humanizeToken } from '../lib/format.js';
 import { Badge } from './ui.js';
@@ -11,7 +12,6 @@ interface EvidenceView {
   explanation?: string;
   matchedRuleIds?: string[];
   reasons?: string[];
-  ai?: { consulted?: boolean; suggestions?: Array<{ label?: string; confidence?: number }> };
 }
 
 export function ReviewItemCard({
@@ -27,6 +27,7 @@ export function ReviewItemCard({
   const [overrides, setOverrides] = useState<Record<string, string>>({});
 
   const evidence = item.evidence as EvidenceView;
+  const ai = item.ai;
   const suggestionKeys = useMemo(() => Object.keys(item.suggestedValues), [item.suggestedValues]);
   const isOpen = item.status === 'open';
 
@@ -92,19 +93,42 @@ export function ReviewItemCard({
             <span>{evidence.explanation}</span>
           </div>
         ) : null}
-        {evidence.ai?.consulted ? (
+        {ai && ai.status === 'suggested' ? (
+          <>
+            <div>
+              <span className="evidence-label">AI suggestion</span>
+              <span>
+                {ai.result.proposedLabel || ai.result.proposedCode} (
+                {Math.round(ai.result.confidence * 100)}%)
+                {ai.model ? <span className="muted"> · {ai.model}</span> : null}
+              </span>
+            </div>
+            {ai.result.reasoning ? (
+              <div>
+                <span className="evidence-label">AI reasoning</span>
+                <span>{ai.result.reasoning}</span>
+              </div>
+            ) : null}
+            {ai.result.ambiguity.length > 0 ? (
+              <div>
+                <span className="evidence-label">AI ambiguity</span>
+                <span>
+                  {ai.result.ambiguity.map((flag) => AI_AMBIGUITY_LABELS[flag]).join(', ')}
+                </span>
+              </div>
+            ) : null}
+            {ai.result.missingInformation.length > 0 ? (
+              <div>
+                <span className="evidence-label">Missing information</span>
+                <span>{ai.result.missingInformation.join('; ')}</span>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {ai && ai.status === 'failed' ? (
           <div>
-            <span className="evidence-label">AI consulted</span>
-            <span>
-              {evidence.ai.suggestions && evidence.ai.suggestions.length > 0
-                ? evidence.ai.suggestions
-                    .map(
-                      (suggestion) =>
-                        `${suggestion.label ?? 'suggestion'} (${Math.round((suggestion.confidence ?? 0) * 100)}%)`,
-                    )
-                    .join(', ')
-                : 'no suggestion returned'}
-            </span>
+            <span className="evidence-label">AI</span>
+            <span>{AI_FAILURE_LABELS[ai.failure]} — continuing with the deterministic result.</span>
           </div>
         ) : null}
       </div>

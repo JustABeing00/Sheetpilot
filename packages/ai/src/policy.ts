@@ -1,7 +1,6 @@
-import type { AiPolicy, RuleEvaluation } from '@sheetpilot/core';
+import type { AiConsultReason, AiPolicy, RuleEvaluation } from '@sheetpilot/core';
 
-export type AiDecisionReason =
-  'policy_never' | 'policy_always' | 'no_rule_match' | 'low_confidence' | 'rules_sufficient';
+export type AiDecisionReason = AiConsultReason;
 
 export interface AiDecision {
   shouldConsult: boolean;
@@ -13,6 +12,12 @@ export interface AiDecisionInput {
   confidenceThreshold: number;
 }
 
+/**
+ * Pure policy gate: decides whether the AI layer may be consulted for a record.
+ *
+ * This is the only place the `AiPolicy` is interpreted. Even when it returns `true`, a confident
+ * deterministic result is never overridden downstream (`resolveAssistedDecision` enforces that).
+ */
 export function decideAiUsage(policy: AiPolicy, input: AiDecisionInput): AiDecision {
   switch (policy) {
     case 'never':

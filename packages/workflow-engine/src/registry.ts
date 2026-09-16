@@ -4,12 +4,14 @@ import {
   type DatasetProfile,
   type FileRepository,
   type FileStorage,
+  type Logger,
   type MetricRecord,
   type RuleSet,
   type WorkflowConfigField,
   type WorkflowConfiguration,
   type WorkflowConfigurationDefinition,
 } from '@sheetpilot/core';
+import type { AiRedactionPolicy } from '@sheetpilot/ai';
 import type { Row } from '@sheetpilot/file-processing';
 import type { NewDecisionRecord, NewReviewItem, StepContext, WorkflowExecution } from './types.js';
 import { createAccountFaultWorkflow } from './workflows/account-faults/workflow.js';
@@ -73,10 +75,20 @@ export class WorkflowRegistry {
   }
 }
 
+export interface AiWorkflowOptions {
+  timeoutMs?: number;
+  maxAttempts?: number;
+  backoffMs?: number;
+  redaction?: Partial<AiRedactionPolicy>;
+}
+
 export interface WorkflowDependencies {
   files: FileRepository;
   storage: FileStorage;
   classifier: ClassificationProvider;
+  logger?: Logger;
+  /** Orchestration options for the AI layer (timeouts, retries, redaction). */
+  ai?: AiWorkflowOptions;
 }
 
 export function createDefaultWorkflowRegistry(deps: WorkflowDependencies): WorkflowRegistry {

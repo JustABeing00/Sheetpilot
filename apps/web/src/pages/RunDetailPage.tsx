@@ -179,6 +179,7 @@ export function RunDetailPage() {
               <tr>
                 <th>Entity</th>
                 <th>Rule</th>
+                <th>Source</th>
                 <th>Confidence</th>
                 <th>Review reasons</th>
                 <th>Root cause</th>
@@ -189,6 +190,7 @@ export function RunDetailPage() {
                 <tr key={decision.id}>
                   <td className="mono">{decision.entityKey}</td>
                   <td className="mono small">{decision.matchedRuleIds.join(', ') || '—'}</td>
+                  <td className="small">{humanizeToken(decision.decisionSource)}</td>
                   <td>{Math.round(decision.confidence * 100)}%</td>
                   <td className="small">
                     {decision.reviewReasons.length > 0

@@ -42,7 +42,7 @@ packages/
   file-processing/     CSV/XLSX readers & writers, schema inference, dataset inspection, upload validation, storage drivers
   matching-engine/     Reusable primary↔event matching: identifier normalization, grouping, deterministic latest event
   rule-engine/         Rule DSL evaluation, deterministic winner selection, explanations, validation
-  ai/                  ClassificationProvider port implementation, AI policy, provider factory
+  ai/                  ClassificationProvider port + OpenAI adapter, AI service (policy, redaction, retries), deterministic-first resolution
   workflow-engine/     Workflow program runner + the account-fault-triage workflow (roles, mapping resolver)
   db/                  Drizzle (Postgres) schema + migrations, in-memory and Postgres repositories
 samples/account-faults Canonical demo files and expected outcomes (used by tests and smoke script)
@@ -116,7 +116,10 @@ Never commit a real `.env` file — `.gitignore` excludes it.
 | `MAX_UPLOAD_MB` | `50` | Upload limit enforced by the API |
 | `DATASET_SAMPLE_ROWS` | `10` | Sample rows persisted/returned in a dataset preview |
 | `DATASET_MAX_SCAN_ROWS` | `200000` | Hard cap on rows read during dataset inspection |
-| `AI_PROVIDER` | `noop` | `noop` today; `openai` fails fast until the adapter is implemented |
+| `AI_PROVIDER` | `noop` | `noop` (sends nothing) or `openai` (requires `OPENAI_API_KEY` and `AI_MODEL`) |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint (point at a gateway/local model) |
+| `AI_TIMEOUT_MS` / `AI_MAX_ATTEMPTS` | `15000` / `2` | Per-request deadline and bounded retries (retryable failures only) |
+| `AI_EXCLUDED_FIELDS` | – | Comma-separated field names that must never be sent to a provider |
 
 ## Database
 
@@ -134,6 +137,11 @@ column-mapping/workflow configuration layer lets a nontechnical user connect fil
 reuse the setup, and the reusable matching engine performs the deterministic primary↔event join and
 latest-event selection with reported identifier normalization. Rules are first-class, editable **data**: the
 **Rules** page lets a non-technical user build conditions (over the latest record or the whole event history)
-and output assignments, validate them, and save a new version that the next run picks up. Scheduling, AI
-providers, authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md)
-§15 for the prioritized next steps.
+and output assignments, validate them, and save a new version that the next run picks up. AI is an optional,
+policy-gated **assistant** behind a provider abstraction: it can only be consulted when deterministic rules
+are insufficient, it can never override a matched rule, its output is strictly validated (proposed class,
+reasoning, confidence, ambiguity/missing-information flags), and any AI suggestion is recorded with full
+provenance (`decisionSource`, provider, model, agreement) and routed to review unless auto-approval is
+explicitly enabled. Provider failures degrade to a review reason, never a wrong result. Scheduling,
+authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
+prioritized next steps.

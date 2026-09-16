@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   artifactKindSchema,
+  decisionSourceSchema,
   fileKindSchema,
   reviewActionSchema,
   reviewItemStatusSchema,
@@ -30,6 +31,7 @@ import {
   workflowConfigurationDefinitionSchema,
 } from '../domain/workflow-config.js';
 import { ruleSchema, ruleValidationIssueSchema } from '../domain/rules.js';
+import { aiAssistOutcomeSchema } from '../domain/ai.js';
 
 export const isoDateTimeSchema = z
   .string()
@@ -270,6 +272,7 @@ export const reviewItemDtoSchema = z.object({
   detail: z.string(),
   suggestedValues: z.record(z.string(), outputValueSchema),
   evidence: jsonObjectSchema,
+  ai: aiAssistOutcomeSchema.nullable(),
   resolution: z
     .object({
       action: reviewActionSchema,
@@ -289,10 +292,12 @@ export const decisionDtoSchema = z.object({
   entityKey: z.string(),
   matchedRuleIds: z.array(z.string()),
   aiAssisted: z.boolean(),
+  decisionSource: decisionSourceSchema,
   confidence: z.number().min(0).max(1),
   reviewReasons: z.array(reviewReasonSchema),
   outputValues: z.record(z.string(), outputValueSchema),
   evidence: jsonObjectSchema,
+  ai: aiAssistOutcomeSchema.nullable(),
   createdAt: isoDateTimeSchema,
 });
 export type DecisionDto = z.infer<typeof decisionDtoSchema>;

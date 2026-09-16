@@ -158,6 +158,7 @@ export const runDecisions = pgTable(
     entityKey: text('entity_key').notNull(),
     matchedRuleIds: jsonb('matched_rule_ids').$type<string[]>().notNull(),
     aiAssisted: boolean('ai_assisted').notNull(),
+    decisionSource: text('decision_source').notNull().default('deterministic'),
     confidence: doublePrecision('confidence').notNull(),
     reviewReasons: jsonb('review_reasons').$type<string[]>().notNull(),
     outputValues: jsonb('output_values').$type<Record<string, unknown>>().notNull(),

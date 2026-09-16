@@ -1,0 +1,1 @@
+ALTER TABLE "run_decisions" ADD COLUMN "decision_source" text DEFAULT 'deterministic' NOT NULL;

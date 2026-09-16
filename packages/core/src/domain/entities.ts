@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   artifactKindSchema,
+  decisionSourceSchema,
   fileKindSchema,
   reviewActionSchema,
   reviewItemStatusSchema,
@@ -125,6 +126,7 @@ export const decisionRecordSchema = z.object({
   entityKey: z.string().min(1),
   matchedRuleIds: z.array(z.string()).default([]),
   aiAssisted: z.boolean().default(false),
+  decisionSource: decisionSourceSchema.default('deterministic'),
   confidence: confidenceSchema,
   reviewReasons: z.array(reviewReasonSchema).default([]),
   outputValues: z.record(z.string(), outputValueSchema).default({}),

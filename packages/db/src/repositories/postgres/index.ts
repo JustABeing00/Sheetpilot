@@ -257,6 +257,7 @@ export function createPostgresRepositories(db: Database): Repositories {
             entityKey: record.entityKey,
             matchedRuleIds: record.matchedRuleIds,
             aiAssisted: record.aiAssisted,
+            decisionSource: record.decisionSource,
             confidence: record.confidence,
             reviewReasons: record.reviewReasons,
             outputValues: record.outputValues,

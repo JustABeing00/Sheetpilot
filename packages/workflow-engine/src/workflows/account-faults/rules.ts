@@ -1,47 +1,94 @@
-import { ruleSetSchema, type ClassificationOption, type RuleSet } from '@sheetpilot/core';
+import { ruleSetSchema, type AiClassificationTarget, type RuleSet } from '@sheetpilot/core';
 
-export const ACCOUNT_FAULT_TAXONOMY: ClassificationOption[] = [
+/**
+ * The classification targets the AI layer may choose from. `values` makes an accepted AI proposal
+ * map onto exactly the same business columns a rule action would set, so the two paths are
+ * interchangeable in the generated output.
+ */
+export const ACCOUNT_FAULT_TAXONOMY: AiClassificationTarget[] = [
   {
     code: 'POWER_LOSS',
     label: 'Power Loss',
     category: 'Power',
     description: 'Mains power absent or unstable at the site.',
+    values: {
+      RootCause: 'Power Loss',
+      FaultCategory: 'Power',
+      RecommendedAction: 'Verify supply and dispatch technician',
+      Priority: 'P2',
+    },
   },
   {
     code: 'BATTERY_DEGRADED',
     label: 'Battery Degraded',
     category: 'Power',
     description: 'Backup battery below capacity or failing self-test.',
+    values: {
+      RootCause: 'Battery Degraded',
+      FaultCategory: 'Power',
+      RecommendedAction: 'Schedule battery replacement',
+      Priority: 'P3',
+    },
   },
   {
     code: 'CONNECTIVITY_FAILURE',
     label: 'Connectivity Failure',
     category: 'Communications',
     description: 'Device unreachable or reporting communication faults.',
+    values: {
+      RootCause: 'Connectivity Failure',
+      FaultCategory: 'Communications',
+      RecommendedAction: 'Check connectivity and signal strength',
+      Priority: 'P2',
+    },
   },
   {
     code: 'SENSOR_FAULT',
     label: 'Sensor Fault',
     category: 'Hardware',
     description: 'Sensor or probe reporting invalid readings.',
+    values: {
+      RootCause: 'Sensor Fault',
+      FaultCategory: 'Hardware',
+      RecommendedAction: 'Replace or recalibrate sensor',
+      Priority: 'P3',
+    },
   },
   {
     code: 'TAMPER_DETECTED',
     label: 'Tamper Detected',
     category: 'Security',
     description: 'Enclosure or line tamper indication.',
+    values: {
+      RootCause: 'Tamper Detected',
+      FaultCategory: 'Security',
+      RecommendedAction: 'Dispatch security inspection',
+      Priority: 'P1',
+    },
   },
   {
     code: 'TRANSIENT_FAULT',
     label: 'Transient Fault',
     category: 'Software',
     description: 'Self-cleared fault after reset with no recurring history.',
+    values: {
+      RootCause: 'Transient Fault',
+      FaultCategory: 'Software',
+      RecommendedAction: 'Monitor for recurrence',
+      Priority: 'P4',
+    },
   },
   {
     code: 'UNSPECIFIED_FAULT',
     label: 'Unspecified Fault',
     category: 'Unknown',
     description: 'Fault reported without a recognised signature.',
+    values: {
+      RootCause: 'Unspecified Fault',
+      FaultCategory: 'Unknown',
+      RecommendedAction: 'Manual triage required',
+      Priority: 'P4',
+    },
   },
 ];
 

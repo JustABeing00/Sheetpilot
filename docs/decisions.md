@@ -233,3 +233,56 @@ use case and is far easier for non-technical users to reason about). Letting run
 the registry's in-code set (rejected: makes rule editing impossible without a redeploy). Using lowest
 priority number as the winner (rejected: higher number = more specific/intentional, matching the existing
 priority ordering).
+
+## ADR-014 — AI assists behind a provider abstraction and never overrides a deterministic rule
+
+**Decision.** Model-based classification lives behind a single provider port
+(`ClassificationProvider`: `id`, `displayName`, `model`, `isAvailable()`, `classify(request, signal)`), and
+all orchestration is provider-neutral (`AiClassificationService`). A provider receives only a bounded,
+structured `AiClassificationRequest` (entity key, latest event, bounded event history, classification
+targets, already-evaluated rule summaries, hints) and must return a strictly `zod`-validated
+`AiClassificationResult` (`proposedCode`, `proposedLabel`, `confidence`, `reasoning`, `ambiguity[]`,
+`missingInformation[]`). Free-form prose is never accepted: responses are extracted from their JSON object
+and schema-checked, unknown keys are stripped, and a proposed code outside the configured targets is a hard
+`unexpected_classification` failure. The decision pipeline is explicit and one-directional:
+
+```
+deterministic rules → if confident: accept (AI may only raise a disagreement for review)
+                    → else AI may assist (policy-gated)
+                    → confidence/ambiguity evaluation
+                    → automatic result (only if aiAutoApprove) or human review
+```
+
+`resolveAssistedDecision` is the single place that combines the two: a matched rule is **never** replaced by
+AI, AI can only corroborate a weak rule (raising confidence when auto-approval is enabled) or supply values
+when no rule matched. AI-sourced values are labelled `decisionSource: ai_suggested`, recorded in decision
+evidence and the `__DecisionSource` output column, and by default (`aiAutoApprove: false`) are always routed
+to a human. The policy (`never` / `on_no_rule_match` / `on_low_confidence` / `always`), provider, model,
+base URL, timeout, attempts and excluded fields are configuration, not code.
+
+**Why.** The product's trust proposition is that classifications are deterministic and explainable, so AI
+must be an assistant with a hard, testable ceiling. A provider abstraction keeps the model replaceable
+(OpenAI today, a local/gateway model later, a mock in tests) and prevents vendor lock-in and live calls in
+CI. Strict validation is required because model output is untrusted input: a hallucinated class or a
+malformed response must degrade to "needs review", never to a wrong silent classification. Recording
+`deterministic` vs `ai_suggested` vs a later human resolution keeps the provenance of every output value
+auditable.
+
+**Consequences.** Provider failures, timeouts, rate limits, invalid credentials, malformed responses and
+unexpected classes are normalized into a non-throwing `AiAssistOutcome` (`not_consulted` / `disabled` /
+`skipped` / `no_suggestion` / `suggested` / `failed`); a failing AI layer can never fail a run. Retries are
+bounded and only applied to retryable failures (timeout, rate limit, 5xx, network). Data minimisation is
+structural: the request is built from descriptions/timestamps only (never the raw row) and an
+`AI_EXCLUDED_FIELDS` redaction pass runs inside the service before the provider sees anything. The
+`run_decisions` table gained a `decision_source` column (migration `0003`) and decision/review DTOs expose
+the validated outcome. Tests inject a mock provider, so ordinary `npm test` never makes a network call.
+Trade-offs accepted: an AI-sourced auto-approval is off by default (more review, less automation); the
+taxonomy now carries the output values each target implies so an accepted proposal maps onto the same
+columns as a rule action; and "AI suggests a new rule" remains future work.
+
+**Alternatives considered.** A single hard-coded OpenAI call inside the classify step (rejected:
+untestable, vendor-locked, leaks data). Letting AI overwrite low-confidence rules (rejected: violates the
+deterministic-first product promise). Trusting the model to return a value per output column (rejected:
+output shape becomes model-dependent; choosing a taxonomy target and mapping it is auditable). Reusing the
+rule engine as the AI output contract (rejected: rules are a different, richer abstraction; a small
+purpose-built result schema is easier to validate and evolve).

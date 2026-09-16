@@ -1,4 +1,5 @@
 import { parseOrThrow, type RuleSet } from '@sheetpilot/core';
+import { AiClassificationService } from '@sheetpilot/ai';
 import { executeWorkflow } from '../../engine.js';
 import type { WorkflowDependencies, RegisteredWorkflow, WorkflowOutputs } from '../../registry.js';
 import type { StepContext, WorkflowExecution, WorkflowProgram } from '../../types.js';
@@ -12,6 +13,7 @@ import {
   createGroupEventsStep,
   createLoadEventsStep,
   createLoadPrimaryStep,
+  type AccountFaultDeps,
 } from './steps.js';
 import { DEFAULT_ACCOUNT_FAULT_RULE_SET } from './rules.js';
 import {
@@ -31,6 +33,11 @@ export function createAccountFaultProgram(
   deps: AccountFaultWorkflowDeps,
 ): WorkflowProgram<AccountFaultState> {
   const rules = deps.rules ?? DEFAULT_ACCOUNT_FAULT_RULE_SET;
+  const ai = new AiClassificationService(deps.classifier, {
+    ...deps.ai,
+    ...(deps.logger ? { logger: deps.logger } : {}),
+  });
+  const stepDeps: AccountFaultDeps = { files: deps.files, storage: deps.storage, ai };
 
   return {
     slug: ACCOUNT_FAULT_WORKFLOW_SLUG,
@@ -39,10 +46,10 @@ export function createAccountFaultProgram(
     description:
       'Matches fault events to accounts, selects the latest fault, classifies it with deterministic rules, generates the completed output and routes unusual cases to review.',
     steps: [
-      createLoadPrimaryStep(deps),
-      createLoadEventsStep(deps),
+      createLoadPrimaryStep(stepDeps),
+      createLoadEventsStep(stepDeps),
       createGroupEventsStep(),
-      createClassifyStep(deps),
+      createClassifyStep(stepDeps),
       createBuildOutputStep(),
     ],
     createState(input: unknown, ctx: StepContext): Promise<AccountFaultState> {

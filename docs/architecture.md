@@ -33,7 +33,7 @@ flowchart TB
     files["file-processing — CSV/XLSX readers, writers, inference, storage"]
     match["matching-engine — primary/event join, identifier normalization, latest event"]
     rules["rule-engine — rule DSL, evaluation, explanations"]
-    ai["ai — ClassificationProvider, AI policy"]
+    ai["ai — ClassificationProvider, AI service (policy, redaction, retries), resolution"]
   end
 
   subgraph DATA["packages/db + storage"]
@@ -142,6 +142,29 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    (`no_rule_match`, `rule_conflict`, `low_confidence`). The workflow persists this as decision evidence and
    uses it to route `review` items; a conflict or no-match is never silently guessed.
 
+## AI-assisted classification lifecycle
+
+1. AI is **opt-in and policy-gated**. `decideAiUsage(policy, { ruleEvaluation, confidenceThreshold })` is the
+   only place the `AiPolicy` (`never` / `on_no_rule_match` / `on_low_confidence` / `always`) is interpreted.
+   With the default `noop` provider, `AiClassificationService` reports `disabled` and nothing leaves the
+   process.
+2. The workflow builds a bounded, structured `AiClassificationRequest` — entity key, the latest event, a
+   capped event history, the classification targets (each carrying the output values it implies) and the
+   already-evaluated matching rule summaries. **The raw source row is never included.**
+3. `AiClassificationService` redacts any `AI_EXCLUDED_FIELDS`, runs the provider with a hard timeout and a
+   bounded number of retries (only for retryable failures: timeout, rate limit, 5xx, network), and
+   schema-validates the response. Provider failures, malformed responses and unknown target codes become a
+   `failed` / `no_suggestion` `AiAssistOutcome`, never an exception that fails the run.
+4. `resolveAssistedDecision` combines the deterministic result with the outcome. A matched rule is **never**
+   replaced: AI can only corroborate a weak rule (raising confidence when `aiAutoApprove` is on) or supply
+   values when no rule matched. AI-sourced values are `decisionSource: ai_suggested` and, unless
+   `aiAutoApprove` is enabled, always routed to review (`ai_low_confidence`, `ai_ambiguous`); a disagreement
+   with a confident rule raises `ai_proposed_alternative`; a failed consultation raises `ai_failed`.
+5. Provenance is persisted: every `DecisionRecord` carries `decisionSource`, `aiAssisted`, and the full AI
+   block (outcome, provider, model, agreement, applied, redacted fields) in its evidence; the output file
+   adds a `__DecisionSource` column. Human accept/override lives on the review item, so deterministic,
+   AI-suggested and human-reviewed results never blur together.
+
 ## Key abstractions (ports & contracts)
 
 | Concept | Location | Notes |
@@ -168,7 +191,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `validateRule` / `validateRuleSet` | `packages/rule-engine/src/validate.ts` | Pure semantic validation (errors block, warnings advise) shared by the API and the Rules UI |
 | `RuleSetRepository` | `packages/core/src/ports/repositories.ts` | Persistence port for versioned rule sets; `listByWorkflowSlug`, `getActiveByWorkflowSlug` |
 | `RuleSetService` | `apps/api/src/services/rule-set-service.ts` | Validates, versions and activates rule sets; one active set per workflow |
-| `ClassificationProvider` | `packages/core/src/ports/classification.ts` | AI port; `NoopClassificationProvider` today |
+| `ClassificationProvider` | `packages/core/src/ports/classification.ts` | Provider-neutral AI port (`id`/`displayName`/`model`/`isAvailable`/`classify`) taking a structured `AiClassificationRequest` and returning a validated `AiClassificationResult` |
+| `AiClassificationService` | `packages/ai/src/service.ts` | Provider-neutral orchestration: policy gating, redaction, timeout, bounded retries, strict validation, normalized outcomes |
+| `resolveAssistedDecision` | `packages/ai/src/resolve.ts` | The single deterministic-first merge; AI never overrides a matched rule |
+| `OpenAiClassificationProvider` | `packages/ai/src/openai-provider.ts` | OpenAI-compatible adapter (configurable base URL/model, injectable `fetch`), maps HTTP/network faults to `AiFailureKind`s |
 | `decideAiUsage` | `packages/ai/src/policy.ts` | AI is only consulted per explicit policy and never overrides a deterministic match |
 | API DTO schemas | `packages/core/src/api/contracts.ts` | Single source of truth for request/response shapes used by API and web |
 
@@ -189,10 +215,14 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
   complete event history.
 - Confidence is rule-declared. Accounts below `reviewBelowConfidence` are queued for review rather than
   being silently accepted.
-- Every account produces a `DecisionRecord` with matched rules, evidence (fault count, latest fault,
-  earlier faults, explanation, AI suggestions) and review reasons.
-- Artifacts include a `__Explanation` column and a review queue CSV so the result is auditable outside
-  the app.
+- AI never overrides a matched rule. It can supply values only when no rule matched, and only when
+  `aiAutoApprove` is enabled; otherwise an AI suggestion is recorded and routed to review. A provider
+  failure/timeout/malformed response is downgraded to a review reason, never a wrong or failed run.
+- Every account produces a `DecisionRecord` with matched rules, `decisionSource`
+  (`deterministic`/`ai_suggested`/`none`), evidence (fault count, latest fault, earlier faults, explanation,
+  rule trace, AI outcome/provenance) and review reasons.
+- Artifacts include `__DecisionSource` and `__Explanation` columns and a review queue CSV so the result is
+  auditable outside the app. A human resolution is tracked separately on the review item.
 
 ## Extension points for later sessions
 
@@ -203,7 +233,7 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | Configurable identifier normalization | The `IdentifierNormalizationOptions` already exist; expose them through a workflow option/config field and thread them into `matchRecords` |
 | Chunked / out-of-core matching | Keep the `MatchRecordsInput/Result` contract and replace the loader that feeds `matchRecords` (or add a reducer-style API) |
 | Editable workflow mapping | `WorkflowConfiguration` + repository already exist; add a compare/merge UI and immutable version snapshots |
-| Real AI provider | Implement `ClassificationProvider` in `packages/ai` and wire it in `createClassificationProvider` |
+| Real AI provider | The `OpenAiClassificationProvider` adapter now exists; add another `ClassificationProvider` and select it in `createClassificationProvider`. Use `fetchImpl` for testing |
 | Editable/persisted rules | `RuleSetRepository` + `rule_sets` table already exist; the API reads rules from the registry today |
 | S3/blob storage | Implement `FileStorage`; `createContainer` selects the driver |
 | Background queue / scheduling | Replace the fire-and-forget call in `RunService.createRun` with a queue; run state already lives in the `runs` table |

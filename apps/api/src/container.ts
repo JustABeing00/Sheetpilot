@@ -80,7 +80,7 @@ async function seedRegisteredWorkflows(
 export async function createContainer(
   config: AppConfig,
   logger: Logger,
-  overrides: { storage?: FileStorage } = {},
+  overrides: { storage?: FileStorage; classifier?: ClassificationProvider } = {},
 ): Promise<AppContainer> {
   const clock = systemClock;
   const storage: FileStorage =
@@ -104,17 +104,26 @@ export async function createContainer(
     );
   }
 
-  const classifier = createClassificationProvider({
-    provider: config.ai.provider,
-    apiKey: config.ai.apiKey,
-    model: config.ai.model,
-    logger,
-  });
+  const classifier =
+    overrides.classifier ??
+    createClassificationProvider({
+      provider: config.ai.provider,
+      apiKey: config.ai.apiKey,
+      model: config.ai.model,
+      baseUrl: config.ai.baseUrl,
+      logger,
+    });
 
   const registry = createDefaultWorkflowRegistry({
     files: repositories.files,
     storage,
     classifier,
+    logger,
+    ai: {
+      timeoutMs: config.ai.timeoutMs,
+      maxAttempts: config.ai.maxAttempts,
+      redaction: { excludedFields: config.ai.excludedFields },
+    },
   });
   await seedRegisteredWorkflows(repositories, registry, clock, logger);
 

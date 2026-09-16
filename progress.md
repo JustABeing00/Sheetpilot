@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 4 — rule engine & rule management)
+**Last updated:** 2026-09-16 (product session 5 — AI-assisted classification layer)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -24,20 +24,24 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Product session 4 objective: the rule engine and rule management.** Rules are now first-class, editable
-**data** rather than code. `@sheetpilot/rule-engine` evaluates a structured rule set deterministically and
-returns a full decision (winning rule + priority, confidence, explanation, resulting values, every condition
-evaluated with the actual value seen, matched-rule summaries, conflicts, and a `matched`/`no_match` status
-with `needsReview`/review reasons). Conditions can be scoped to the **latest record** or to the entity's
-whole history (`any_event`/`all_events`). The API exposes validated, versioned rule-set management
-(`GET/POST/PUT /api/v1/rule-sets`, `POST /api/v1/rule-sets/validate`) with exactly one active set per
-workflow, and a non-technical **Rules** page builds conditions/actions, validates and saves new versions. A
-run resolves the active persisted rule set, so edits take effect on the next run without a redeploy.
-**Status: achieved** (see §8, verified in §9).
+**Product session 5 objective: the AI-assisted classification layer.** AI is now an optional,
+policy-gated **assistant** behind a provider-neutral port, not a decision-maker. `@sheetpilot/ai` owns the
+provider contract (`ClassificationProvider`), a strict structured result contract, an
+`AiClassificationService` (policy gate → redaction → timeout → bounded retries → strict schema validation →
+normalized failure), a deterministic-first merge (`resolveAssistedDecision`), and an OpenAI-compatible
+adapter whose `fetch`/base URL/model are all injectable. Providers receive only a bounded, structured
+request (entity key, latest event, capped history, classification targets, evaluated rule summaries) and
+must return a validated JSON object (`proposedCode`, `reasoning`, `confidence`, `ambiguity[]`,
+`missingInformation[]`). **AI can never override a matched rule**: it may corroborate a weak rule or supply
+values only when no rule matched, is recorded as `decisionSource: ai_suggested`, and is routed to review
+unless auto-approval is explicitly enabled. Failures (timeout, rate limit, invalid credentials, malformed,
+unexpected class) become review reasons, never a failed run. Provenance is persisted in the decision log
+and a new `__DecisionSource` output column. **Status: achieved** (see §8, verified in §9).
 
-**Next (product session 5):** durability and the review loop remain the platform's weakest points. See §15
-for the recommended order: Postgres verification, review→artifact regeneration, then the rule-management
-follow-ups (immutable version history, richer editors) and the configuration follow-ups from session 2.
+**Next (product session 6):** the human review loop. See §15: the AI layer now produces suggestions and
+provenance, so the review queue should surface them richly (deterministic vs AI-suggested vs overridden),
+support fast filtering/bulk actions and preserve a full audit trail of what automation decided, why, and
+what the human changed. Durability (Postgres verification, review→artifact regeneration) remains open.
 
 ## 3. Product Vision
 
@@ -73,8 +77,9 @@ core workflow is excellent.
 | Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
 | Rules | Custom DSL in `@sheetpilot/rule-engine` | Data-only rules (zod-validated); priority → specificity → id winner selection; `latest`/`any_event`/`all_events` condition scopes; decision metadata (resulting values, conditions evaluated, conflicts, no-match/low-confidence review flags); explanation templates |
 | Rule management | `RuleSetService` + `/api/v1/rule-sets` + Rules UI page | Validated before save (`validateRuleSet`), versioned on every save, one active set per workflow, resolved per run |
-| AI | `ClassificationProvider` port + `NoopClassificationProvider` + policy function | Real provider intentionally not implemented yet |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 179 tests, 20 files, all green |
+| AI | `@sheetpilot/ai` — provider port + orchestration | `ClassificationProvider` port; `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized outcomes); `resolveAssistedDecision` (deterministic-first merge); `OpenAiClassificationProvider` (configurable base URL/model, injectable `fetch`); `NoopClassificationProvider` is the safe default (sends nothing) |
+| AI safety | Policy, redaction and provenance | Only consulted per `AiPolicy`; never overrides a matched rule; a bounded structured request (no raw rows); `AI_EXCLUDED_FIELDS` redaction; failures become review reasons (`ai_failed`/`ai_low_confidence`/`ai_ambiguous`/`ai_proposed_alternative`); `decisionSource` + full AI outcome persisted and exposed via DTOs; `__DecisionSource` output column |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 209 tests, 21 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -94,7 +99,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                           ├──▶ matching-engine (primary↔event join,
                                           │      identifier normalization, latest event)
                                           ├──▶ rule-engine (deterministic rules, explanations)
-                                          ├──▶ ai (policy + ClassificationProvider port)
+                                          ├──▶ ai (policy gate + ClassificationProvider port +
+                                          │      AiClassificationService + deterministic-first resolve)
                                           ▼
                                   core (domain, schemas, ports)  ◀── db (Drizzle schema + repos)
 ```
@@ -123,6 +129,14 @@ default) → the Rules UI/SDK validates a candidate set (`validateRuleSet`) and 
 `RunService` loads the active set and passes it into the run → `evaluateRules` returns a full
 `RuleEvaluation` (winner, conditions evaluated, resulting values, conflicts, no-match/low-confidence review
 flags) that the workflow persists as decision evidence.
+AI lifecycle: the `classify` step builds a bounded `AiClassificationRequest` (entity key, latest event,
+capped history, classification targets + implied values, evaluated rule summaries; never the raw row) →
+`AiClassificationService.assist` applies the policy gate, redacts excluded fields, calls the provider with a
+timeout and bounded retries, strictly validates the result and normalizes every failure into an
+`AiAssistOutcome` → `resolveAssistedDecision` merges it with the deterministic result without ever replacing
+a matched rule → the resolved source/values/confidence plus the full AI provenance are persisted in the
+decision record (`decisionSource`, `aiAssisted`, evidence `ai.outcome`) and surfaced through decision/review
+DTOs and the `__DecisionSource` output column.
 
 ## 6. Repository Structure
 
@@ -161,6 +175,8 @@ packages/
     domain/workflow-config.ts  dataset/column role definitions, WorkflowConfiguration, validateWorkflowConfiguration
     domain/rules.ts        Rule, ConditionGroup, RuleAction (with condition scope), RuleSet, RuleEvaluation
                            (decision status, resulting values, evaluated conditions, conflicts, review reasons), validation issues
+    domain/ai.ts           AI decision contract: consult reasons, decision source, ambiguity flags, failure
+                           kinds, structured request/result/outcome schemas, target + event + rule summaries
     api/contracts.ts       HTTP request/response schemas shared with the web app
     ports/                 repositories, datasets, workflow-configurations, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
@@ -180,7 +196,10 @@ packages/
     scripts/benchmark.mts  synthetic benchmark (10k–250k entities) for performance observations
   rule-engine/src/         conditions.ts (scope-aware evaluation + condition trace), evaluate.ts (deterministic
                            winner + decision metadata + conflicts), actions.ts, template.ts, validate.ts (semantic validation)
-  ai/src/                  noop-provider.ts, policy.ts, factory.ts
+  ai/src/                  types (core), errors.ts (AiProviderError), parse.ts (strict JSON/schema),
+                           redact.ts (field/entity-handle redaction), resilience.ts (timeout/backoff),
+                           service.ts (AiClassificationService), resolve.ts (deterministic-first merge),
+                           noop-provider.ts, openai-provider.ts, policy.ts, factory.ts
   workflow-engine/src/
     engine.ts              executeWorkflow (ordered steps, state merge, traces, cancel handling)
     registry.ts            WorkflowRegistry, RegisteredWorkflow (configuration definition + resolveRunInput), createDefaultWorkflowRegistry
@@ -209,22 +228,85 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `WorkflowConfiguration` | A saved, versioned setup: which datasets play which roles and which real columns fill semantic roles | workflowSlug/version, name, version, assignments[] (role→datasetId), mappings[] (role→datasetId→column, confirmed), options |
 | `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, configurationId, config, stats, error, timestamps |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
-| `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, confidence, reviewReasons, outputValues, evidence |
+| `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, decisionSource (`deterministic`/`ai_suggested`/`none`), confidence, reviewReasons, outputValues, evidence (rule trace + AI outcome/provenance) |
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status, title, detail, suggestedValues, evidence, resolution |
 | `Artifact` | Generated output file | kind (output_csv/output_xlsx/review_queue_csv), format, fileName, storageKey, sizeBytes |
 | `RuleSet` / `Rule` | Versioned business rules | priority, when (all/any condition tree), then (set/set_if_empty), confidence, explanationTemplate |
 | `MatchedEntity<TPrimary, TEvent>` | In-memory (not persisted) result of the matching engine: one entity with its complete, latest-first event history | key, rawKeys[], primaries[], events[], latest, issues[], counts |
 
 Important enums: `RunStatus = queued|running|succeeded|failed|canceled`;
-`ReviewReason = no_events|no_rule_match|rule_conflict|low_confidence|ambiguous_latest_timestamp|conflicting_fault_history|unparsed_timestamp|duplicate_primary_key`;
+`ReviewReason = no_events|no_rule_match|rule_conflict|low_confidence|ambiguous_latest_timestamp|conflicting_fault_history|unparsed_timestamp|duplicate_primary_key|ai_low_confidence|ai_ambiguous|ai_proposed_alternative|ai_failed`;
 `AiPolicy = never|on_no_rule_match|on_low_confidence|always`;
+`DecisionSource = deterministic|ai_suggested|none`;
+`AiFailureKind = timeout|rate_limited|invalid_credentials|unavailable|provider_error|malformed_response|unexpected_classification`;
 `MatchIssueCode = no_events|duplicate_primary|ambiguous_latest_timestamp|unparsed_timestamp|no_valid_timestamp|identifier_transformed`.
 
 Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`, `RecommendedAction`,
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
-confidence, review status, review reasons, explanation), 7 default rules over a 7-option taxonomy.
+decision source, confidence, review status, review reasons, explanation), 7 default rules over a 7-option
+taxonomy (each taxonomy target carries the output values it implies so an accepted AI proposal maps onto
+the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 5 — AI-assisted classification layer (2026-09-16)
+
+- [x] `@sheetpilot/core`:
+  - new `domain/ai.ts` — the provider-neutral AI contract: `AiConsultReason`, `DecisionSource`,
+    `AiAmbiguityFlag`, `AiFailureKind`, `AiEventSummary`, `AiRuleSummary`, `AiClassificationTarget`
+    (taxonomy option + implied output `values`), structured `AiClassificationRequest` (entity key, latest
+    event, bounded history, targets, evaluated rule summaries, hints, redacted fields), strictly validated
+    `AiClassificationResult` (`proposedCode`, `proposedLabel`, `confidence`, `reasoning`, `ambiguity`,
+    `missingInformation`) and the non-throwing `AiAssistOutcome` union
+    (`not_consulted`/`disabled`/`skipped`/`no_suggestion`/`suggested`/`failed`), plus display labels.
+  - `ports/classification.ts` rewritten to the real provider port (`id`, `displayName`, `model`,
+    `isAvailable`, `classify(request, signal)`), replacing the ad-hoc `text`/`suggestions` shape.
+  - `decisionRecordSchema` gained `decisionSource`; `decisionSourceSchema` added to enums; four AI review
+    reasons added (`ai_low_confidence`, `ai_ambiguous`, `ai_proposed_alternative`, `ai_failed`); review and
+    decision DTOs now expose `ai` (the validated outcome) and `decisionSource`.
+- [x] `@sheetpilot/ai` rewritten into a real layer:
+  - `errors.ts` (`AiProviderError` with `kind`/`retryable`; `toAiProviderError`), `parse.ts` (balanced-JSON
+    extraction + strict zod validation, unknown keys stripped, out-of-range confidence rejected),
+    `redact.ts` (`excludedFields`, `redactEntityKey`, `latestEventOnly`), `resilience.ts`
+    (`withTimeout`, `sleep`).
+  - `service.ts` — `AiClassificationService.assist()`: policy gate (`decideAiUsage`), redaction, provider
+    call with a hard timeout and bounded retries (retryable only: timeout/rate-limit/5xx/network), strict
+    validation, unknown-code detection (`unexpected_classification`) and normalized `failed` outcomes.
+    **It never throws into the pipeline** (only rethrows on run cancellation).
+  - `resolve.ts` — `resolveAssistedDecision`: the single deterministic-first merge. Confident rule → kept,
+    AI may only raise `ai_proposed_alternative`; weak rule → kept, AI can corroborate (raise confidence when
+    `aiAutoApprove`); no rule → AI may supply values (`ai_suggested`) but is routed to review unless
+    `aiAutoApprove` and confident and unambiguous.
+  - `openai-provider.ts` — OpenAI-compatible adapter with configurable base URL/model, injectable `fetch`,
+    JSON-object response format, a prompt-injection-aware system prompt and HTTP/network → `AiFailureKind`
+    mapping (401/403 credentials, 429 rate limit, 408 timeout, 5xx provider error, bad body malformed).
+  - `noop-provider.ts` reports `isAvailable() === false` (nothing is ever sent); `factory.ts` builds the
+    configured provider and requires `OPENAI_API_KEY`+`AI_MODEL` for `openai`; `policy.ts` reason type now
+    aliases the core `AiConsultReason`.
+- [x] `@sheetpilot/workflow-engine`: the account-faults taxonomy now carries the output values each target
+  implies; `classify` builds the bounded request (descriptions/timestamps only, **never the raw row**),
+  calls the AI service, merges via `resolveAssistedDecision`, merges AI review reasons, records
+  `decisionSource` + the full AI block (outcome, provider, model, agreement, applied, redacted fields) in
+  decision evidence, and writes the `__DecisionSource` output column. Config gained `aiMinConfidence`
+  (default 0.85) and `aiAutoApprove` (default **false**). The default (noop) path is byte-for-byte
+  unchanged.
+- [x] `@sheetpilot/config`: `AI_BASE_URL`, `AI_TIMEOUT_MS` (15000), `AI_MAX_ATTEMPTS` (2),
+  `AI_EXCLUDED_FIELDS`; `AppConfig.ai` exposes them and the container threads them into the provider
+  factory and the workflow's AI options.
+- [x] `@sheetpilot/db`: `run_decisions.decision_source` column (default `deterministic`), Postgres/memory
+  mapping, generated migration `0003_eager_dagger.sql`.
+- [x] `apps/api`: decision/review DTOs expose `decisionSource` and the validated AI outcome;
+  `createContainer` accepts a classifier override (used by tests).
+- [x] `apps/web`: the review card renders the AI proposal, reasoning, confidence, ambiguity flags, missing
+  information and failure reasons; the run decision log shows the decision source.
+- [x] Tests: +30 (209 total, 21 files) — `packages/ai/src/ai.test.ts` rewritten (31 tests: policy, factory,
+  JSON/schema parsing, redaction, resolution across all branches, service policy/disabled/skip/retry/
+  exhaustion/malformed/timeout, OpenAI adapter with a mocked `fetch`), `account-faults.test.ts` +5 (AI
+  auto-approval, never-override, low-confidence review, provider failure, data minimisation) and new
+  `apps/api/src/ai-classification.test.ts` (an injected mock provider end to end through the HTTP API).
+- [x] `scripts/smoke.mjs` now also asserts deterministic vs not-consulted vs disabled AI provenance and the
+  `__DecisionSource` column.
+- [x] Docs: ADR-014, `docs/architecture.md` (AI lifecycle + abstractions), README, `.env.example`, this file.
 
 ### Product session 4 — Rule engine & rule management (2026-09-16)
 
@@ -431,27 +513,33 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 20 files / 179 tests passed |
+| Tests | `npm test` | 21 files / 209 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
-| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) |
+| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items); `__DecisionSource` present in the output CSV |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
 | Configurations (API) | `POST /api/v1/workflow-configurations/validate`, create, then `POST /api/v1/runs { configurationId }` | validation returns issues + resolved config; saved config version bumps; configured run succeeds and records `configurationId` |
 | Rule management (API) | start the API, then `GET /api/v1/rule-sets`, `POST .../validate` (valid + invalid regex), `POST /api/v1/rule-sets`, run and read `/runs/:id/decisions` | seeded active set listed (7 rules); invalid regex fails validation; save bumps version and deactivates the previous set; a run resolves the active set and applies it |
-| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) — no new migration in session 4 (rule sets gained only a new query, no columns) |
+| AI layer (unit) | `npx vitest run packages/ai` | 31 tests: policy, factory, JSON/schema parsing, redaction, all resolution branches, service timeout/retry/exhaustion/malformed/disabled, OpenAI adapter with a mocked `fetch` (no live calls) |
+| AI layer (API E2E) | `npx vitest run apps/api/src/ai-classification.test.ts` | an injected mock provider produces a persisted `ai_suggested` decision (provenance + values), and the auto-approved account is absent from the review queue |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) |
 
 Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
 in the **Datasets** UI → **Setup**: assign datasets to roles, map the account/timestamp/description/output
 columns with live validation (errors block, ambiguous mappings need confirmation), save a reusable
 versioned configuration, and continue to processing → background run executes the deterministic
-classification (latest-fault selection) → output CSV/XLSX + review queue CSV → decision log → review
-queue with accept/override/dismiss → review counters. The legacy path (upload via `/files`, start a run
-with explicit file ids and the config form) still works.
+classification (latest-fault selection) → (optional, policy-gated) AI assistance for uncertain cases behind
+a provider abstraction, never overriding a matched rule and always recorded with provenance → output
+CSV/XLSX + review queue CSV → decision log (deterministic vs AI-suggested + AI outcome) → review queue with
+accept/override/dismiss → review counters. The legacy path (upload via `/files`, start a run with explicit
+file ids and the config form) still works.
 
-Sample run results (canonical `samples/account-faults` files): 9 accounts, 13 events, 10 output rows,
-2 auto-approved, 7 review items (conflicting history, no events, no rule match, low confidence, duplicate
-primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
+Sample run results (canonical `samples/account-faults` files with the default noop provider): 9 accounts,
+13 events, 10 output rows, 2 auto-approved, 7 review items (conflicting history, no events, no rule match,
+low confidence, duplicate primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
+No AI is consulted by the default provider; the AI tests inject a mock provider to exercise the assisted
+paths.
 
 ## 10. Known Issues / Limitations
 
@@ -464,8 +552,9 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
    dev dependencies. CI on Linux may need the equivalent (`@rolldown/binding-linux-x64-gnu`,
    `lightningcss-linux-x64-gnu`) or a fresh `npm install` without the lockfile. Do not delete these
    explicit bindings.
-4. **AI provider not implemented** — `AI_PROVIDER=openai` intentionally throws a `ConfigurationError`
-   at startup. `NoopClassificationProvider.isAvailable()` is false, so no AI calls are ever made today.
+4. **The OpenAI provider requires credentials and is unverified live.** `AI_PROVIDER=openai` fails fast at
+   startup unless `OPENAI_API_KEY` and `AI_MODEL` are set (see §12 for the privacy implications); the
+   default `noop` provider reports itself unavailable and sends nothing.
 5. **Review resolutions do not regenerate artifacts** — resolving an item records the decision but the
    output CSV/XLSX is not rewritten yet (next session item).
 6. **Cancellation is internal only** — `RunService.cancelRun` exists but is not exposed as an endpoint.
@@ -539,6 +628,24 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
     two active sets.
 31. **AI suggestions cannot yet be converted into rules.** The policy seam and evidence exist, but the Rules
     UI has no "accept a suggestion as a rule" flow (deliberately, per the AI-assists-never-overrides rule).
+32. **The AI layer is untested against a live model.** All tests inject a mock provider / mocked `fetch`;
+    the OpenAI adapter's request shape and failure mapping are covered, but real latency, token limits,
+    model-specific JSON quirks and cost are unverified. There is no token/cost accounting or caching.
+33. **AI context is bounded but not token-budgeted.** The request includes the latest event plus up to
+    `maxEvidenceFaults` history entries; there is no per-provider token estimate or truncation beyond that.
+34. **AI-sourced values are all-or-nothing.** An accepted target writes every value its taxonomy `values`
+    defines; there is no per-field AI fill or "AI fills only the gaps in a partial rule result".
+35. **Redaction is field-name based.** `AI_EXCLUDED_FIELDS` matches field names exactly (no regex/paths), the
+    default request already excludes raw rows, and `redactEntityKey` replaces the key with `[redacted]`
+    rather than a stable pseudonym, so it is not usable for correlating suggestions across calls.
+36. **Decision provenance is not queryable.** `decisionSource` and the AI outcome are persisted, but there is
+    no endpoint/UI filter for "show only AI-assisted" or "show AI failures"; the run decision table shows
+    the source column only.
+37. **AI corroboration of a weak rule is not surfaced in the output.** When AI agrees with a below-threshold
+    rule and auto-approval raises its confidence, the output looks identical to a confidently matched rule
+    except for `__DecisionSource` staying `deterministic`; the agreement is only in the decision evidence.
+38. **The `openai` provider is selected by env only.** There is no per-workflow or per-configuration provider
+    choice, and no way to A/B or shadow-evaluate a model; `AI_PROVIDER` is global.
 
 ## 11. Technical Decisions
 
@@ -561,6 +668,9 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-013 rules are data, evaluated deterministically (full decision metadata, scoped conditions, no-match/
   conflict/low-confidence review flags), and managed through a validated, versioned API with one active set
   per workflow resolved per run.
+- ADR-014 AI is an optional, policy-gated assistant behind a provider port; it receives a bounded structured
+  request, must return a strictly validated structured result, never overrides a matched rule, records full
+  provenance (`decisionSource`), and degrades every failure to a review reason rather than a wrong result.
 
 Additional decisions made during implementation:
 
@@ -572,6 +682,13 @@ Additional decisions made during implementation:
 - Deterministic tie-breaks everywhere: rules by priority → specificity → id; latest fault by timestamp →
   later source row.
 - `WorkflowOutputs` is the engine↔service contract, so `RunService` never knows workflow specifics.
+- The AI request is built from descriptions/timestamps only; the provider never receives a raw source row.
+  A provider is a thin transport adapter (one `classify` call); policy, redaction, timeout, retries and
+  validation live in the provider-neutral service, so a new model is a new adapter, not a new pipeline.
+- AI-sourced results are possible only when no rule matched; a matched rule is never replaced. `aiAutoApprove`
+  defaults to **false**, so an AI suggestion is recorded and routed to review unless an operator opts in.
+- AI failures are modelled as data (`AiAssistOutcome.failed`) so the run succeeds and the case is reviewable;
+  cancellation is the only AI error allowed to propagate.
 
 ## 12. Security
 
@@ -594,6 +711,19 @@ Implemented:
 - **Error hygiene** — internal errors are logged, clients receive `{ error: { code, message } }` only;
   `isAppError` distinguishes safe errors from unexpected ones.
 - **Logging** never includes file contents; logs carry ids, sizes, counts.
+- **AI is off by default.** `AI_PROVIDER=noop` (`isAvailable() === false`) means no record data leaves the
+  process; a consultation happens only when `aiPolicy` says so *and* a configured provider is available.
+- **Data minimisation.** A request carries only the entity handle, the latest event, a bounded history of
+  `description`/`occurredAt` summaries, the classification targets and evaluated rule summaries — never the
+  raw source row. `AI_EXCLUDED_FIELDS` removes named fields inside the service before any provider call.
+- **Untrusted model output.** Responses are extracted as a JSON object and strictly validated with zod
+  (unknown keys stripped, confidence range enforced); the proposed class must be one of the configured
+  targets, otherwise it is rejected. User content is labelled as untrusted data in the system prompt to
+  reduce prompt-injection risk, and a model reply can never execute code or change configuration.
+- **Failure isolation and secret hygiene.** Provider errors (timeout/rate limit/credentials/malformed) become
+  reviewable outcomes; `OPENAI_API_KEY` comes from the environment, is never logged, and only appears in the
+  `Authorization` header of the outbound request. Bounded retries/timeouts prevent a slow provider stalling a
+  run.
 
 Not yet implemented (risks acknowledged):
 
@@ -601,10 +731,16 @@ Not yet implemented (risks acknowledged):
   (`resolvedBy` is always `null`), no rate limiting, no malware scanning of uploads, no TLS termination
   (deploy behind a reverse proxy), CORS origins must be set explicitly in production, and files are stored
   unencrypted on local disk.
+- **AI privacy is a deployment responsibility.** With `AI_PROVIDER=openai` (or any non-`noop` base URL),
+  event descriptions are sent to a third party (or an operator-chosen gateway). There is no DPA/zero-retention
+  guarantee, no per-tenant or per-dataset routing, no in-repo local model, and no cost/token budget. Free-text
+  descriptions are the classification signal and may themselves contain PII; field-name redaction cannot
+  remove PII that lives inside the description. Treat exporting to an AI provider as a data-processing
+  decision, not a default.
 
 ## 13. Testing
 
-**Status: 179 tests / 20 files passing (`npm test`).** Coverage by area:
+**Status: 209 tests / 21 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -623,20 +759,25 @@ Not yet implemented (risks acknowledged):
 | Configuration API | `apps/api/src/workflow-configuration.test.ts` | workflow definition exposed to UI, validate incomplete/complete + resolved preview, invalid save rejected (422), create/list/get/update version bump, run started from a configuration records `configurationId` |
 | Rules | `packages/rule-engine/src/rule-engine.test.ts` | operators (15), case/numeric/date coercions, membership/emptiness, safe regex, `latest`/`any_event`/`all_events` scopes, decision metadata (resulting values, evaluated conditions, matched rules, status), deterministic tie-breaks, same-priority conflicts + `rule_conflict`, no-match/`no_rule_match`, low-confidence threshold, `applyActions` semantics, validation (duplicates, missing values, bad regex, conflicting actions, shared priorities, unreachable duplicates) |
 | Rule management API | `apps/api/src/rule-set.test.ts` | list seeded active set, validate (valid + blocking errors), refuse invalid save (422 `invalid_rule_set`), create + deactivate previous, update version bump, run resolves and applies the active set, 404 |
-| AI policy | `packages/ai/src/ai.test.ts` | policy decisions, noop provider, fail-fast factory |
+| AI layer | `packages/ai/src/ai.test.ts` | policy reasons, factory (noop default, openai requires key+model), noop result, balanced-JSON/schema parsing (prose + fences accepted; missing/malformed JSON and out-of-range confidence rejected; unknown keys stripped), redaction (excluded fields, entity key, latest-only), resolution (confident rule wins, AI never overrides, auto-approve gating, low-confidence/ambiguous flags, AI failure), service (not-consulted/disabled/skipped, suggested values, unknown class, redaction before provider, rate-limit retry then success, attempt-budget exhaustion, no retry on malformed, timeout of a hanging provider), OpenAI adapter with a mocked `fetch` (body shape/`response_format`, 401/429/malformed mapping) |
+| Workflow (AI) | `packages/workflow-engine/.../account-faults.test.ts` | +5 AI scenarios: confident AI proposal auto-approved only when no rule matched, AI can never override a confident rule (`ai_proposed_alternative`), low-confidence AI routes to review, provider failure keeps the run succeeding (`ai_failed`), and the request contains no raw row (bounded, non-identifying data) |
+| AI API | `apps/api/src/ai-classification.test.ts` | injected mock provider end to end through the HTTP API: a persisted `ai_suggested` decision with `decisionSource`, values and validated AI outcome, and the auto-approved account absent from the review queue |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
 
 Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
-including `datasets` and `workflow_configurations`), rule engine property/fuzz tests, a load test for large
-CSV/`DATASET_MAX_SCAN_ROWS` inspection, Playwright browser tests for the datasets/setup/new-run flows,
-configuration-resolution tests for multi-dataset roles, and coverage reporting in CI. For the matching
-engine: a randomized/property test asserting that the latest selection is invariant under input shuffling,
-and a very-large-file (streaming) test once the loader is chunked. For the rule engine: a randomized/property
-test asserting the winner is invariant under rule shuffling, a golden test over the default account-faults
-rule set, and a Playwright test for the Rules editor (validate → save → run uses it).
+including `datasets`, `workflow_configurations` and `run_decisions.decision_source`), rule engine
+property/fuzz tests, a load test for large CSV/`DATASET_MAX_SCAN_ROWS` inspection, Playwright browser tests
+for the datasets/setup/new-run/review flows, configuration-resolution tests for multi-dataset roles, and
+coverage reporting in CI. For the matching engine: a randomized/property test asserting that the latest
+selection is invariant under input shuffling, and a very-large-file (streaming) test once the loader is
+chunked. For the rule engine: a randomized/property test asserting the winner is invariant under rule
+shuffling, a golden test over the default account-faults rule set, and a Playwright test for the Rules editor
+(validate → save → run uses it). For the AI layer: an adapter contract test suite run against a local
+mock/hosted endpoint behind a gate, prompt-injection fixtures, and a test that redaction is applied for every
+request shape (including the history array).
 
 ## 14. Environment
 
@@ -653,35 +794,39 @@ Variables (defaults in parentheses): `NODE_ENV` (development), `API_HOST`/`API_P
 `REPOSITORY_DRIVER` (memory) + `DATABASE_URL` (required for postgres), `STORAGE_DRIVER` (local) +
 `STORAGE_LOCAL_DIR` (.data/storage), `MAX_UPLOAD_MB` (50), `DATASET_SAMPLE_ROWS` (10),
 `DATASET_MAX_SCAN_ROWS` (200000), `AI_PROVIDER` (noop), `OPENAI_API_KEY` (empty),
-`AI_MODEL` (empty). Web: `VITE_API_BASE_URL` (empty → Vite dev proxy to the API), `VITE_API_TARGET`
-(proxy target, default `http://127.0.0.1:4000`).
+`AI_MODEL` (empty), `AI_BASE_URL` (https://api.openai.com/v1), `AI_TIMEOUT_MS` (15000),
+`AI_MAX_ATTEMPTS` (2), `AI_EXCLUDED_FIELDS` (empty). Web: `VITE_API_BASE_URL` (empty → Vite dev proxy to the
+API), `VITE_API_TARGET` (proxy target, default `http://127.0.0.1:4000`).
 
 Local data lives in `.data/` (git-ignored): `storage/` for uploads/artifacts, log files from manual runs.
 Postgres for later verification: `docker compose up -d postgres` (user/password/db all `sheetpilot`).
 
 ## 15. Next Session — exact recommended work
 
-**Product session 5: pick the highest-value next slice** (queue `05-session.md`). Rule management now exists,
-so the platform's weakest points remain **durability** and the **review loop**. Recommended order:
+**Product session 6: the review queue & human-in-the-loop** (queue `06-session.md`). The AI layer now produces
+suggestions and provenance, so the review loop is the natural next slice. Recommended order:
 
-1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0002`), and exercise
-   the API against `REPOSITORY_DRIVER=postgres` (ingest a dataset, save a configuration and a rule set, run
-   it, page rows). Add gated repository integration tests (including `rule_sets`
-   `listByWorkflowSlug`/`getActiveByWorkflowSlug`). In-memory mode still loses everything on restart.
+1. **Human review system.** Make the review queue the product's differentiator: show, per item, the entity,
+   latest event, relevant history, the deterministic rule result, the AI suggestion (when present), the
+   confidence, the exact reason it was flagged, the applicable rules, and the current status
+   (`AUTO_RESOLVED`/`NEEDS_REVIEW`/`APPROVED`/`OVERRIDDEN`/`ERROR`). Support open → understand → see evidence
+   → accept / override → save → next, as fast as possible, with filtering (needs review, unresolved,
+   conflicts, low confidence, processing errors) and human overrides tracked separately from automated
+   decisions (audit what automation decided, why, what the human changed, and when).
 2. **Review → artifact regeneration.** Resolving a review item records the decision but does not rewrite the
    output CSV/XLSX. Apply resolutions to the output rows and regenerate the artifacts
    (`RunService`/artifact writer) so the exported file matches the reviewed result.
-3. **Rule-management follow-ups:** immutable rule-set version snapshots (keep previous versions instead of
-   overwriting), validate action fields against the workflow's declared output columns, an
-   "accept an AI suggestion as a rule" flow, and importing/exporting a rule set as JSON.
-4. **Review-loop follow-ups:** surface matching-engine issues (`ambiguous_latest_timestamp`,
-   `duplicate_primary`, `no_valid_timestamp`) as review reasons alongside the workflow's own reasons; bulk
-   review actions; show `__Explanation` / decision evidence in the output preview.
+3. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0003`), and exercise the
+   API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (including
+   `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug` and `run_decisions.decision_source`).
+4. **Rule-management follow-ups:** immutable rule-set version snapshots, validate action fields against the
+   workflow's declared output columns, an "accept an AI suggestion as a rule" flow, and import/export JSON.
 5. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
    re-points assignments while keeping column mappings, and deprecating the legacy `/files` wizard.
-6. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, exposing
-   identifier normalization options through configuration, streaming/chunking the loader, and route-level
-   code splitting for the web bundle.
+6. **AI follow-ups:** expose `decisionSource` filtering in the review/UI, per-configuration provider choice,
+   token/cost accounting, prompt-injection fixtures and an adapter contract test against a local endpoint.
+7. Then: scheduling/watched-folder ingestion, exposing identifier normalization options through configuration,
+   streaming/chunking the loader, and route-level code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -708,8 +853,18 @@ so the platform's weakest points remain **durability** and the **review loop**. 
 - **Rule changes are product changes.** `packages/workflow-engine/src/workflows/account-faults/rules.ts`
   is validated by zod at import time; the default rule set is versioned (`version: 1`). Bump the version
   when rules change materially and note it here.
+- **AI never overrides a rule.** `packages/ai/src/resolve.ts` (`resolveAssistedDecision`) is the single merge
+  point and `packages/ai/src/service.ts` is the single orchestration point (policy, redaction, timeout,
+  retries, validation). A provider is a thin `classify` adapter only. Keep the strict result schema in
+  `packages/core/src/domain/ai.ts` as the contract; never accept free-form model prose, never send raw rows
+  (build requests from `description`/`occurredAt`), and never let a provider error fail a run — return an
+  `AiAssistOutcome`. New AI review reasons must be added to the `ReviewReason` enum and the workflow's
+  label/severity/order maps. Tests must inject a mock provider; ordinary `npm test` must never hit the
+  network. The taxonomy target `values` are what an accepted AI proposal writes, so keep them in sync with
+  the corresponding rule actions.
 - **Review status vocabulary:** `open`, `resolved_accepted`, `resolved_overridden`, `dismissed`.
-  `__ReviewStatus` in output files is `AUTO_APPROVED` or `REVIEW_REQUIRED`.
+  `__ReviewStatus` in output files is `AUTO_APPROVED` or `REVIEW_REQUIRED`; `__DecisionSource` is
+  `deterministic` or `ai_suggested` (or empty/`none` when nothing produced values).
 - **Roadmap guardrail:** don't add enterprise features (SSO, billing, complex RBAC) before the core
   workflow, review loop and Postgres durability are excellent.
 - **Dataset ingestion is the front door.** All uploads flow through
@@ -739,8 +894,10 @@ so the platform's weakest points remain **durability** and the **review loop**. 
   `npm install`. If module resolution fails after moving the repo again, re-run `npm install`.
 - **Files a new agent should read first:** this file → `docs/architecture.md` →
   `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` +
-  `packages/core/src/domain/workflow-config.ts` → `packages/file-processing/src/inspection.ts` →
+  `packages/core/src/domain/workflow-config.ts` + `packages/core/src/domain/ai.ts` →
+  `packages/file-processing/src/inspection.ts` →
   `packages/matching-engine/src/{types,normalize,match}.ts` →
+  `packages/ai/src/{service,resolve,redact,openai-provider}.ts` →
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
@@ -754,3 +911,5 @@ so the platform's weakest points remain **durability** and the **review loop**. 
 | Product 1 | 2026-09-16 | File ingestion & dataset inspection: dataset domain + port + DTOs + errors, `TabularReader.describe()`, `inspectDataset` (types/emptiness/uniqueness/samples/warnings/flags), `validateUpload`, `datasets` table + migration + repositories, `DatasetService` + dataset API, Datasets upload/detail UI, +26 tests (112 total). Verified: lint/typecheck/112 tests/build. |
 | Product 2 | 2026-09-16 | Column mapping & workflow configuration: roles-as-data, semantic column mapping + pure validation, persisted/versioned `WorkflowConfiguration` + repository + `workflow_configurations` table/migration, `WorkflowConfigurationService` + API, `resolveRunInput` (config keys from mapped columns), Setup wizard UI with live validation/confirmations, +16 tests (128 total). Verified: lint/typecheck/128 tests/build/smoke (incl. configuration flow). |
 | Product 3 | 2026-09-16 | Reusable matching/grouping/latest-event engine: new `@sheetpilot/matching-engine` (reported identifier normalization with opt-in dangerous steps, primary↔event join, deterministic latest selection, full history, join statistics), account-faults `group-events` delegates to it, +35 tests (163 total), benchmark (1M events ≈ 2.7 s). Verified: lint/typecheck/163 tests/build/smoke. |
+| Product 4 | 2026-09-16 | Rule engine & rule management: scoped conditions (`latest`/`any_event`/`all_events`) and full `RuleEvaluation` decision metadata, semantic `validateRuleSet` warnings/errors, `RuleSetService` + `/api/v1/rule-sets` (validated, versioned, one active set, resolved per run), Rules UI editor, +16 tests (179 total). Verified: lint/typecheck/179 tests/build/smoke. |
+| Product 5 | 2026-09-16 | AI-assisted classification layer: provider-neutral `ClassificationProvider` + structured request/result/outcome contracts, `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized failures), deterministic-first `resolveAssistedDecision` (AI never overrides a rule; auto-approval off by default), OpenAI-compatible adapter, `decisionSource` + AI provenance persisted (migration `0003`), review-card AI panel + run decision source, `__DecisionSource` output column, +30 tests (209 total). Verified: lint/typecheck/209 tests/build/smoke. |

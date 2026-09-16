@@ -1,5 +1,6 @@
 import type {
   Artifact,
+  AiAssistOutcome,
   DecisionRecord,
   DatasetProfile,
   DatasetSummary,
@@ -13,6 +14,7 @@ import type {
   WorkflowConfigurationSummary,
   WorkflowRun,
 } from '@sheetpilot/core';
+import { aiAssistOutcomeSchema } from '@sheetpilot/core';
 import type { RegisteredWorkflow } from '@sheetpilot/workflow-engine';
 import type {
   ArtifactDto,
@@ -206,6 +208,7 @@ export function toReviewItemDto(item: ReviewItem, workflowSlug: string | null): 
     detail: item.detail,
     suggestedValues: item.suggestedValues,
     evidence: item.evidence,
+    ai: toAiOutcome(item.evidence),
     resolution: item.resolution
       ? {
           action: item.resolution.action,
@@ -226,12 +229,27 @@ export function toDecisionDto(record: DecisionRecord): DecisionDto {
     entityKey: record.entityKey,
     matchedRuleIds: record.matchedRuleIds,
     aiAssisted: record.aiAssisted,
+    decisionSource: record.decisionSource,
     confidence: record.confidence,
     reviewReasons: record.reviewReasons,
     outputValues: record.outputValues,
     evidence: record.evidence,
+    ai: toAiOutcome(record.evidence),
     createdAt: record.createdAt.toISOString(),
   };
+}
+
+/**
+ * Decision evidence stores the full AI provenance block (`{ outcome, providerId, ... }`); the DTO
+ * exposes just the validated outcome so clients can render it without trusting arbitrary JSON.
+ */
+function toAiOutcome(evidence: Record<string, unknown>): AiAssistOutcome | null {
+  const ai = evidence['ai'];
+  if (!ai || typeof ai !== 'object') {
+    return null;
+  }
+  const parsed = aiAssistOutcomeSchema.safeParse((ai as { outcome?: unknown }).outcome);
+  return parsed.success ? parsed.data : null;
 }
 
 export function toArtifactDto(artifact: Artifact): ArtifactDto {

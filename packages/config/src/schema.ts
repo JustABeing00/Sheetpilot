@@ -52,6 +52,10 @@ export const envSourceSchema = z.object({
   AI_PROVIDER: aiProviderIdSchema.default('noop'),
   OPENAI_API_KEY: z.string().default(''),
   AI_MODEL: z.string().default(''),
+  AI_BASE_URL: z.string().default('https://api.openai.com/v1'),
+  AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(15_000),
+  AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
+  AI_EXCLUDED_FIELDS: z.string().default(''),
 });
 export type EnvSource = z.infer<typeof envSourceSchema>;
 
@@ -80,6 +84,10 @@ export interface AppConfig {
     provider: AiProviderId;
     apiKey: string | null;
     model: string | null;
+    baseUrl: string;
+    timeoutMs: number;
+    maxAttempts: number;
+    excludedFields: string[];
     configured: boolean;
   };
 }
@@ -166,6 +174,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       provider: source.AI_PROVIDER,
       apiKey: source.OPENAI_API_KEY.trim().length > 0 ? source.OPENAI_API_KEY : null,
       model: source.AI_MODEL.trim().length > 0 ? source.AI_MODEL : null,
+      baseUrl:
+        source.AI_BASE_URL.trim().length > 0 ? source.AI_BASE_URL : 'https://api.openai.com/v1',
+      timeoutMs: source.AI_TIMEOUT_MS,
+      maxAttempts: source.AI_MAX_ATTEMPTS,
+      excludedFields: source.AI_EXCLUDED_FIELDS.split(',')
+        .map((field) => field.trim())
+        .filter((field) => field.length > 0),
       configured: source.AI_PROVIDER === 'openai' && source.OPENAI_API_KEY.trim().length > 0,
     },
   };

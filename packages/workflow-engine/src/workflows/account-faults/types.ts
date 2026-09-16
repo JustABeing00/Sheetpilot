@@ -2,7 +2,9 @@ import { z } from 'zod';
 import {
   aiPolicySchema,
   ruleSetSchema,
-  type ClassificationSuggestion,
+  type AiAssistOutcome,
+  type AiConsultReason,
+  type DecisionSource,
   type MetricRecord,
   type OutputValue,
   type ReviewReason,
@@ -12,7 +14,7 @@ import {
   type WorkflowConfigField,
 } from '@sheetpilot/core';
 import type { Row } from '@sheetpilot/file-processing';
-import type { AiDecisionReason } from '@sheetpilot/ai';
+import type { AiAgreement } from '@sheetpilot/ai';
 import type { AppliedAction } from '@sheetpilot/rule-engine';
 import type { NewDecisionRecord, NewReviewItem } from '../../types.js';
 
@@ -24,6 +26,8 @@ export const accountFaultConfigSchema = z
     eventsDescriptionColumn: z.string().min(1).default('Fault Description'),
     primaryOutputColumns: z.array(z.string()).default([]),
     reviewBelowConfidence: z.number().min(0).max(1).default(0.8),
+    aiMinConfidence: z.number().min(0).max(1).default(0.85),
+    aiAutoApprove: z.boolean().default(false),
     includeSystemColumns: z.boolean().default(true),
     aiPolicy: aiPolicySchema.default('on_no_rule_match'),
     dayFirstDates: z.boolean().default(false),
@@ -88,7 +92,25 @@ export const ACCOUNT_FAULT_CONFIG_FIELDS: WorkflowConfigField[] = [
     kind: 'text',
     required: false,
     defaultValue: 'on_no_rule_match',
-    description: 'When AI may be consulted. Deterministic rule matches are never overridden.',
+    description:
+      'When AI may be consulted (never, on_no_rule_match, on_low_confidence, always). Deterministic rule matches are never overridden.',
+  },
+  {
+    key: 'aiMinConfidence',
+    label: 'Minimum AI confidence',
+    kind: 'number',
+    required: false,
+    defaultValue: 0.85,
+    description: 'AI proposals below this confidence are always routed to a human reviewer.',
+  },
+  {
+    key: 'aiAutoApprove',
+    label: 'Auto-approve confident AI results',
+    kind: 'boolean',
+    required: false,
+    defaultValue: false,
+    description:
+      'When false (recommended), any AI-sourced classification requires human review even when confident. Deterministic results are unaffected.',
   },
   {
     key: 'dayFirstDates',
@@ -111,6 +133,7 @@ export const ACCOUNT_FAULT_SYSTEM_COLUMNS = [
   '__FaultCount',
   '__LatestFaultAt',
   '__MatchedRules',
+  '__DecisionSource',
   '__DecisionConfidence',
   '__ReviewStatus',
   '__ReviewReasons',
@@ -174,11 +197,16 @@ export interface EntityDecision {
   appliedActions: AppliedAction[];
   outputValues: Record<string, OutputValue>;
   confidence: number;
+  decisionSource: DecisionSource;
   ai: {
     consulted: boolean;
-    reason: AiDecisionReason | null;
+    reason: AiConsultReason | null;
     providerId: string;
-    suggestions: ClassificationSuggestion[];
+    model: string | null;
+    outcome: AiAssistOutcome;
+    agreement: AiAgreement | null;
+    applied: boolean;
+    redactedFields: string[];
   };
   reviewReasons: ReviewReason[];
   severity: ReviewSeverity | null;
@@ -220,6 +248,10 @@ export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
   conflicting_fault_history: 'Earlier faults suggest a different root cause',
   unparsed_timestamp: 'Fault timestamps could not be parsed',
   duplicate_primary_key: 'Account appears more than once in the primary file',
+  ai_low_confidence: 'AI suggestion confidence is below the review threshold',
+  ai_ambiguous: 'AI reported ambiguity or missing information',
+  ai_proposed_alternative: 'AI proposed a different classification than the matched rule',
+  ai_failed: 'AI assistance was requested but failed',
 };
 
 export const REVIEW_REASON_SEVERITY: Record<ReviewReason, ReviewSeverity> = {
@@ -231,6 +263,10 @@ export const REVIEW_REASON_SEVERITY: Record<ReviewReason, ReviewSeverity> = {
   conflicting_fault_history: 'warning',
   unparsed_timestamp: 'warning',
   duplicate_primary_key: 'critical',
+  ai_low_confidence: 'info',
+  ai_ambiguous: 'warning',
+  ai_proposed_alternative: 'warning',
+  ai_failed: 'warning',
 };
 
 export const REVIEW_REASON_ORDER: ReviewReason[] = [
@@ -241,5 +277,9 @@ export const REVIEW_REASON_ORDER: ReviewReason[] = [
   'unparsed_timestamp',
   'ambiguous_latest_timestamp',
   'conflicting_fault_history',
+  'ai_proposed_alternative',
+  'ai_ambiguous',
+  'ai_low_confidence',
+  'ai_failed',
   'low_confidence',
 ];

@@ -1,8 +1,8 @@
 import {
   NotFoundError,
   ProcessingError,
-  type ClassificationProvider,
-  type ClassificationSuggestion,
+  type AiClassificationRequest,
+  type AiEventSummary,
   type FileAsset,
   type FileRepository,
   type FileStorage,
@@ -22,8 +22,11 @@ import {
 } from '@sheetpilot/file-processing';
 import { matchRecords, normalizeIdentifier } from '@sheetpilot/matching-engine';
 import { applyActions, evaluateRules, type AppliedAction } from '@sheetpilot/rule-engine';
-import { decideAiUsage } from '@sheetpilot/ai';
-import { errorMessage } from '../../engine.js';
+import {
+  decideAiUsage,
+  resolveAssistedDecision,
+  type AiClassificationService,
+} from '@sheetpilot/ai';
 import type { NewDecisionRecord, NewReviewItem, StepDefinition } from '../../types.js';
 import { ACCOUNT_FAULT_TAXONOMY } from './rules.js';
 import {
@@ -43,7 +46,7 @@ import {
 export interface AccountFaultDeps {
   files: FileRepository;
   storage: FileStorage;
-  classifier: ClassificationProvider;
+  ai: AiClassificationService;
 }
 
 const SEVERITY_RANK: Record<ReviewSeverity, number> = { info: 0, warning: 1, critical: 2 };
@@ -265,6 +268,19 @@ export function buildRuleContext(
   };
 }
 
+/**
+ * Only the fields the model needs. The raw source row is deliberately never included so sensitive
+ * columns cannot leak to a provider by accident.
+ */
+function toEventSummary(event: EventRecord): AiEventSummary {
+  return {
+    rowIndex: event.rowIndex,
+    occurredAt: event.occurredAt?.toISOString() ?? null,
+    description: normalizeText(event.description),
+    fields: {},
+  };
+}
+
 function rootCauseForEvent(
   rules: RuleSet,
   account: string,
@@ -328,7 +344,7 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
 
         let evaluation = emptyEvaluation();
         let matchedTerm: string | null = null;
-        let outputValues: Record<string, OutputValue> = {};
+        let deterministicValues: Record<string, OutputValue> = {};
         let appliedActions: AppliedAction[] = [];
 
         if (latest) {
@@ -341,7 +357,7 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
           matchedTerm = result.matched[0]?.matchedTerm ?? null;
           if (result.winner) {
             const applied = applyActions(result.winner.then, {}, { ruleId: result.winner.id });
-            outputValues = applied.values;
+            deterministicValues = applied.values;
             appliedActions = applied.applied;
           }
         }
@@ -349,14 +365,8 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
         if (evaluation.conflicts.length > 0) {
           reviewReasons.push('rule_conflict');
         }
-        if (latest && !evaluation.winnerRuleId) {
-          reviewReasons.push('no_rule_match');
-        }
-        if (evaluation.winnerRuleId && evaluation.confidence < state.config.reviewBelowConfidence) {
-          reviewReasons.push('low_confidence');
-        }
 
-        const latestRootCause = outputValues['RootCause'];
+        const latestRootCause = deterministicValues['RootCause'];
         const latestRootCauseLabel =
           latestRootCause === undefined || latestRootCause === null
             ? null
@@ -382,28 +392,63 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
           confidenceThreshold: state.config.reviewBelowConfidence,
         });
 
-        let aiConsulted = false;
-        let suggestions: ClassificationSuggestion[] = [];
+        const request: AiClassificationRequest = {
+          entityKey: group.account,
+          latestEvent: latest ? toEventSummary(latest) : null,
+          eventHistory: sorted.slice(0, state.config.maxEvidenceFaults).map(toEventSummary),
+          targets: ACCOUNT_FAULT_TAXONOMY,
+          applicableRules: evaluation.matchedRules.map((rule) => ({
+            id: rule.ruleId,
+            name: rule.ruleName,
+            priority: rule.priority,
+            confidence: rule.confidence,
+            description: '',
+          })),
+          hints: {
+            faultCount: String(group.events.length),
+            policy: state.config.aiPolicy,
+          },
+          redactedFields: [],
+        };
 
-        if (aiDecision.shouldConsult && latest && deps.classifier.isAvailable()) {
-          aiConsulted = true;
-          try {
-            suggestions = await deps.classifier.classify(
-              {
-                text: normalizeText(latest.description),
-                accountKey: group.account,
-                taxonomy: ACCOUNT_FAULT_TAXONOMY,
-                hints: { faultCount: String(group.events.length) },
-              },
-              ctx.signal,
-            );
-          } catch (error) {
-            ctx.logger.warn(
-              { err: errorMessage(error), account: group.account },
-              'AI classification provider failed; continuing without suggestions',
-            );
-          }
+        // The classifier never throws into the pipeline: failures become reviewable outcomes.
+        const assist = await deps.ai.assist({
+          request,
+          policy: state.config.aiPolicy,
+          reviewBelowConfidence: state.config.reviewBelowConfidence,
+          ruleEvaluation: evaluation,
+          signal: ctx.signal,
+        });
+        const outcome = assist.outcome;
+
+        const resolution = resolveAssistedDecision({
+          deterministic: {
+            matched: Boolean(evaluation.winnerRuleId),
+            confidence: evaluation.confidence,
+            values: deterministicValues,
+          },
+          outcome,
+          reviewBelowConfidence: state.config.reviewBelowConfidence,
+          aiMinConfidence: state.config.aiMinConfidence,
+          aiAutoApprove: state.config.aiAutoApprove,
+          agreementField: 'RootCause',
+        });
+
+        for (const reason of resolution.aiReviewReasons) {
+          reviewReasons.push(reason);
         }
+        // An auto-approved AI suggestion has no deterministic rule and needs no human review;
+        // every other no-match case stays flagged.
+        const aiAutoApproved =
+          resolution.source === 'ai_suggested' && resolution.aiReviewReasons.length === 0;
+        if (latest && !evaluation.winnerRuleId && !aiAutoApproved) {
+          reviewReasons.push('no_rule_match');
+        }
+        if (evaluation.winnerRuleId && resolution.confidence < state.config.reviewBelowConfidence) {
+          reviewReasons.push('low_confidence');
+        }
+
+        const aiConsulted = outcome.status === 'suggested' || outcome.status === 'failed';
 
         const earlierFaults: EarlierFaultEvidence[] = sorted
           .slice(1, 1 + state.config.maxEvidenceFaults)
@@ -439,13 +484,18 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
           conflicts: evaluation.conflicts,
           evaluation,
           appliedActions,
-          outputValues,
-          confidence: evaluation.winnerRuleId ? evaluation.confidence : 0,
+          outputValues: resolution.values,
+          confidence: resolution.confidence,
+          decisionSource: resolution.source,
           ai: {
             consulted: aiConsulted,
-            reason: aiDecision.shouldConsult ? aiDecision.reason : null,
-            providerId: deps.classifier.id,
-            suggestions,
+            reason: outcome.status === 'not_consulted' ? outcome.reason : aiDecision.reason,
+            providerId: assist.providerId,
+            model: assist.model,
+            outcome,
+            agreement: resolution.agreement,
+            applied: resolution.applied,
+            redactedFields: assist.redactedFields,
           },
           reviewReasons: uniqueReasons,
           severity: uniqueReasons.length > 0 ? maxSeverity(uniqueReasons) : null,
@@ -462,6 +512,9 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
             (decision) => decision.reviewReasons.length > 0,
           ).length,
           aiConsultedAccounts: decisions.filter((decision) => decision.ai.consulted).length,
+          aiAssistedAccounts: decisions.filter(
+            (decision) => decision.decisionSource === 'ai_suggested',
+          ).length,
         },
       };
     },
@@ -483,6 +536,7 @@ function buildEvidence(decision: EntityDecision): Record<string, unknown> {
     evaluatedConditions: decision.evaluation.conditions,
     matchedRules: decision.evaluation.matchedRules,
     resultingValues: decision.evaluation.resultingValues,
+    decisionSource: decision.decisionSource,
     ai: decision.ai,
   };
 }
@@ -500,6 +554,12 @@ function buildReviewItem(decision: EntityDecision): NewReviewItem {
   const detailParts = decision.reviewReasons.map((reason) => REVIEW_REASON_LABELS[reason]);
   if (decision.explanation.length > 0) {
     detailParts.push(decision.explanation);
+  }
+  if (decision.ai.outcome.status === 'suggested') {
+    const { result } = decision.ai.outcome;
+    detailParts.push(
+      `AI suggestion: ${result.proposedLabel || result.proposedCode} (${Math.round(result.confidence * 100)}%)`,
+    );
   }
 
   return {
@@ -540,6 +600,9 @@ function computeStats(state: AccountFaultState): Record<string, number> {
     autoApprovedAccounts: autoApproved,
     reviewAccounts: state.decisions.length - autoApproved,
     aiConsultedAccounts: state.decisions.filter((decision) => decision.ai.consulted).length,
+    aiAssistedAccounts: state.decisions.filter(
+      (decision) => decision.decisionSource === 'ai_suggested',
+    ).length,
     ruleMatchRate: rate(ruleMatched, accounts),
     autoApprovalRate: rate(autoApproved, accounts),
     outputRows: state.outputRows.length,
@@ -587,6 +650,7 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
             row['__FaultCount'] = decision.faultCount;
             row['__LatestFaultAt'] = decision.latestFault?.occurredAt ?? '';
             row['__MatchedRules'] = decision.matchedRuleIds.join(', ');
+            row['__DecisionSource'] = decision.decisionSource;
             row['__DecisionConfidence'] = Number(decision.confidence.toFixed(2));
             row['__ReviewStatus'] =
               decision.reviewReasons.length > 0 ? 'REVIEW_REQUIRED' : 'AUTO_APPROVED';
@@ -603,7 +667,8 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
         decisionRecords.push({
           entityKey: group.account,
           matchedRuleIds: decision.matchedRuleIds,
-          aiAssisted: decision.ai.suggestions.length > 0,
+          aiAssisted: decision.ai.outcome.status === 'suggested',
+          decisionSource: decision.decisionSource,
           confidence: decision.confidence,
           reviewReasons: decision.reviewReasons,
           outputValues: decision.outputValues,
