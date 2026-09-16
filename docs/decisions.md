@@ -162,3 +162,35 @@ all rows, so it uses the bounded `DatasetProfile` and sample values.
 reuse/versioning). Letting the UI own the role/mapping shapes (rejected: layer violation and duplicated
 validation). A dedicated `@sheetpilot/config-engine` package (deferred: `core` already holds the domain and
 the validation is pure, so a package would add boilerplate without a boundary).
+
+## ADR-012 — Matching, grouping and latest-event selection is a standalone engine
+
+**Decision.** Primary↔event joining is implemented once, in a new example-agnostic package
+`@sheetpilot/matching-engine`, not inside a workflow. `matchRecords(input, options)` takes two arrays of
+already-loaded records plus accessor functions (`primaryKey`, `eventKey`, `eventTimestamp`), normalizes
+identifiers, groups events under their entity, orders each entity's complete history deterministically,
+selects the latest event and returns `MatchedEntity[]` + orphan events + aggregate `MatchStats`.
+`normalizeIdentifier` reports every transformation it applies and keeps dangerous merges (separator
+removal, leading-zero stripping) off by default and flagged when enabled. The account-faults workflow's
+`group-events` step delegates to it and maps the result back to its own `AccountGroup` type.
+
+**Why.** "Match the account, collect every fault, pick the latest" is the core processing primitive the
+whole product is built on, and it is needed by every future workflow. Leaving it intertwined with the
+account-faults classification both duplicated logic and made the join untestable in isolation. Keeping it
+generic means a new workflow gets a tested, deterministic join for free, and the difficult cases (missing,
+equal and invalid timestamps, orphans, duplicates, identifier formatting) are specified and verified in
+one place. Identifier normalization was made explicit and reported because silently merging identifiers is
+a correctness risk for financial/operational data: the engine must be able to say *what* it changed and
+never do a risky transformation unless a configuration opts in.
+
+**Consequences.** `matching-engine` depends on `file-processing` for the canonical `normalizeKey` /
+`parseTimestamp` helpers so matching stays consistent with ingestion; `workflow-engine` depends on it. The
+engine operates on in-memory arrays (a single O(P + E + Σ eᵢ log eᵢ) pass) so very large files still need a
+chunked loader behind the same contract. Engine issues are computed but the workflow still derives its own
+review reasons in `classify`, so wiring them together is future work. Default normalization is byte-for-byte
+`normalizeKey`, which keeps the sample results unchanged.
+
+**Alternatives considered.** Keeping grouping inside `workflow-engine` (rejected: not reusable, harder to
+test the edge cases). Putting the engine in `file-processing` (rejected: that package is about IO/format
+handling, not record semantics). Using a third-party fuzzy-match library (rejected: opaque, and the product
+requires explainable, deterministic matching).

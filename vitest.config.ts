@@ -11,6 +11,7 @@ export default defineConfig({
       '@sheetpilot/file-processing': pkg('file-processing'),
       '@sheetpilot/rule-engine': pkg('rule-engine'),
       '@sheetpilot/ai': pkg('ai'),
+      '@sheetpilot/matching-engine': pkg('matching-engine'),
       '@sheetpilot/workflow-engine': pkg('workflow-engine'),
       '@sheetpilot/db': pkg('db'),
     },

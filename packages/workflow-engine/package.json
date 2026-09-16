@@ -15,6 +15,7 @@
     "@sheetpilot/ai": "*",
     "@sheetpilot/core": "*",
     "@sheetpilot/file-processing": "*",
+    "@sheetpilot/matching-engine": "*",
     "@sheetpilot/rule-engine": "*",
     "zod": "^4.6.5"
   }

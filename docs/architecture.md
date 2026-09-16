@@ -31,6 +31,7 @@ flowchart TB
   subgraph DOMAIN["packages/* — Domain and capability layers"]
     core["core — domain model, zod schemas, API contracts, ports"]
     files["file-processing — CSV/XLSX readers, writers, inference, storage"]
+    match["matching-engine — primary/event join, identifier normalization, latest event"]
     rules["rule-engine — rule DSL, evaluation, explanations"]
     ai["ai — ClassificationProvider, AI policy"]
   end
@@ -45,6 +46,7 @@ flowchart TB
   services --> runner
   runner --> wf
   wf --> files
+  wf --> match
   wf --> rules
   wf --> ai
   services --> repos
@@ -58,6 +60,7 @@ flowchart TB
 
 Dependency rule: **inner layers never import outer layers.**
 `core` has no dependencies (except zod). `file-processing`, `rule-engine`, `ai` depend on `core`.
+`matching-engine` depends only on `file-processing` (reusing its canonical identifier/timestamp helpers).
 `workflow-engine` depends on those. `db` implements `core` ports. `api` wires everything. `web` only
 consumes `core` contracts (HTTP DTO schemas) and never touches Node-only packages.
 
@@ -103,6 +106,22 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    are the workflow's expected field names (`primaryAccountColumn`, `eventsTimestampColumn`, …) and the run
    records the `configurationId` for traceability.
 
+## Matching / grouping lifecycle
+
+1. A workflow's load steps read a file into records (one array for primaries, one for events) and extract
+   the raw identifier/timestamp cells; they do not decide how records join.
+2. The grouping step calls `matchRecords` from `@sheetpilot/matching-engine` with accessor functions
+   (`primaryKey`, `eventKey`, `eventTimestamp`). The engine normalizes every identifier through
+   `normalizeIdentifier`, joins events to primary entities in one linear pass, and collects events whose
+   key matches no primary as `orphans` instead of dropping or duplicating them.
+3. Per entity the engine orders the **complete** event history with `compareEventsLatestFirst` (valid
+   timestamps descending, then later source row), exposes `latest` plus the full `events[]`, attaches
+   `MatchIssue`s (`no_events`, `duplicate_primary`, `ambiguous_latest_timestamp`, `unparsed_timestamp`,
+   `no_valid_timestamp`, `identifier_transformed`) and per-entity counts, and returns aggregate `MatchStats`
+   (matched/unmatched entities, zero/one/multiple events, orphan events, malformed/missing timestamps).
+4. The workflow maps `MatchedEntity[]` back to its own `AccountGroup[]`; classification and output building
+   consume the grouped representation and never re-derive the join or "latest".
+
 ## Key abstractions (ports & contracts)
 
 | Concept | Location | Notes |
@@ -120,6 +139,9 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `validateWorkflowConfiguration` | `packages/core/src/domain/workflow-config.ts` | Pure structural + semantic validation shared by the API and (via the endpoint) the UI |
 | `WorkflowConfigurationRepository` | `packages/core/src/ports/workflow-configurations.ts` | Persistence port for configurations (in-memory and Postgres adapters) |
 | `resolveRunInput` | `packages/workflow-engine/src/workflows/account-faults/configuration.ts` | Maps a saved configuration to the workflow's concrete run input |
+| `matchRecords` | `packages/matching-engine/src/match.ts` | Generic primary↔event join + grouping + deterministic latest selection; returns `MatchedEntity[]`, orphans and `MatchStats` |
+| `normalizeIdentifier` | `packages/matching-engine/src/normalize.ts` | Reported identifier normalization; defaults equal `normalizeKey`; dangerous merges opt-in |
+| `compareEventsLatestFirst` | `packages/matching-engine/src/match.ts` | The single deterministic latest-event comparator |
 | `Rule`, `ConditionGroup`, `RuleAction` | `packages/core/src/domain/rules.ts` | Business rules are data with zod validation, versioned in `RuleSet`s |
 | `evaluateRules` | `packages/rule-engine/src/evaluate.ts` | Deterministic winner: priority ↓, specificity ↓, rule id ↑; conflicts reported |
 | `ClassificationProvider` | `packages/core/src/ports/classification.ts` | AI port; `NoopClassificationProvider` today |
@@ -130,8 +152,13 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 
 - Rules are evaluated by priority, then by number of conditions (specificity), then by rule id, so the
   winner never depends on map/array ordering.
-- The latest fault is chosen by timestamp (descending), with the later source row as the deterministic
-  tie-breaker; equal latest timestamps raise `ambiguous_latest_timestamp`.
+- Records are matched on a normalized identifier only. `normalizeIdentifier` reports every transformation
+  it applies; steps that can merge genuinely distinct identifiers (`stripSeparators`, `stripLeadingZeros`)
+  are off by default, and using them marks the entity with the `identifier_transformed` issue.
+- The latest fault/event is chosen by timestamp (descending), with the later source row as the deterministic
+  tie-breaker; an event with a valid timestamp always beats one that is missing or unparseable; equal latest
+  timestamps raise `ambiguous_latest_timestamp`. Entities keep their first-seen primary order and their
+  complete event history.
 - Confidence is rule-declared. Accounts below `reviewBelowConfidence` are queued for review rather than
   being silently accepted.
 - Every account produces a `DecisionRecord` with matched rules, evidence (fault count, latest fault,
@@ -143,7 +170,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 
 | Need | Where to plug in |
 | --- | --- |
-| New workflow (different use case) | Add a program under `packages/workflow-engine/src/workflows/*`, declare its `configuration` definition + `resolveRunInput`, and register it in `registry.ts` |
+| New workflow (different use case) | Add a program under `packages/workflow-engine/src/workflows/*`, declare its `configuration` definition + `resolveRunInput`, and register it in `registry.ts`; reuse `matchRecords` for the join |
+| Different matching keys/precedence | Pass new accessors or a custom `parseTimestamp` to `matchRecords`; extend `MatchIssueCode` if a new anomaly matters |
+| Configurable identifier normalization | The `IdentifierNormalizationOptions` already exist; expose them through a workflow option/config field and thread them into `matchRecords` |
+| Chunked / out-of-core matching | Keep the `MatchRecordsInput/Result` contract and replace the loader that feeds `matchRecords` (or add a reducer-style API) |
 | Editable workflow mapping | `WorkflowConfiguration` + repository already exist; add a compare/merge UI and immutable version snapshots |
 | Real AI provider | Implement `ClassificationProvider` in `packages/ai` and wire it in `createClassificationProvider` |
 | Editable/persisted rules | `RuleSetRepository` + `rule_sets` table already exist; the API reads rules from the registry today |

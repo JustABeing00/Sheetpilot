@@ -14,13 +14,13 @@ import {
 } from '@sheetpilot/core';
 import {
   createTabularReader,
-  normalizeKey,
   normalizeText,
   parseTimestamp,
   readAllRows,
   type Row,
   type TableData,
 } from '@sheetpilot/file-processing';
+import { matchRecords, normalizeIdentifier } from '@sheetpilot/matching-engine';
 import { applyActions, evaluateRules, type AppliedAction } from '@sheetpilot/rule-engine';
 import { decideAiUsage } from '@sheetpilot/ai';
 import { errorMessage } from '../../engine.js';
@@ -33,6 +33,7 @@ import {
   REVIEW_REASON_ORDER,
   REVIEW_REASON_SEVERITY,
   type AccountFaultState,
+  type AccountGroup,
   type EarlierFaultEvidence,
   type EntityDecision,
   type EventRecord,
@@ -94,7 +95,7 @@ export function createLoadPrimaryStep(deps: AccountFaultDeps): StepDefinition<Ac
       let withoutAccount = 0;
 
       table.rows.forEach((row, index) => {
-        const account = normalizeKey(row[column]);
+        const account = normalizeIdentifier(row[column]).key;
         if (account.length === 0) {
           withoutAccount += 1;
           return;
@@ -142,7 +143,7 @@ export function createLoadEventsStep(deps: AccountFaultDeps): StepDefinition<Acc
       let withoutTimestamp = 0;
 
       table.rows.forEach((row, index) => {
-        const account = normalizeKey(row[accountColumn]);
+        const account = normalizeIdentifier(row[accountColumn]).key;
         if (account.length === 0) {
           withoutAccount += 1;
           return;
@@ -183,38 +184,29 @@ export function createGroupEventsStep(): StepDefinition<AccountFaultState> {
     id: 'group-events',
     name: 'Group events by account',
     run: (_ctx, state) => {
-      const byAccount = new Map<
-        string,
-        { account: string; primaries: PrimaryRecord[]; events: EventRecord[] }
-      >();
+      // The reusable matching engine owns the join, the deterministic latest-event selection and
+      // the join statistics. The workflow only maps its generic result back to its own records.
+      const match = matchRecords<PrimaryRecord, EventRecord>(
+        { primaries: state.primaries, events: state.events },
+        {
+          primaryKey: (primary) => primary.account,
+          eventKey: (event) => event.account,
+          eventTimestamp: (event) => event.occurredAt,
+        },
+      );
 
-      for (const primary of state.primaries) {
-        let group = byAccount.get(primary.account);
-        if (!group) {
-          group = { account: primary.account, primaries: [], events: [] };
-          byAccount.set(primary.account, group);
-        }
-        group.primaries.push(primary);
-      }
-
-      const orphanAccounts = new Set<string>();
-      for (const event of state.events) {
-        const group = byAccount.get(event.account);
-        if (group) {
-          group.events.push(event);
-        } else {
-          orphanAccounts.add(event.account);
-        }
-      }
-
-      const groups = [...byAccount.values()];
+      const groups: AccountGroup[] = match.entities.map((entity) => ({
+        account: entity.key,
+        primaries: entity.primaries.map((entry) => entry.record),
+        events: entity.events.map((entry) => entry.record),
+      }));
 
       return Promise.resolve({
-        state: { groups, orphanEventAccounts: orphanAccounts.size },
+        state: { groups, orphanEventAccounts: match.stats.orphanEventEntities },
         metrics: {
           accounts: groups.length,
-          accountsWithEvents: groups.filter((group) => group.events.length > 0).length,
-          orphanEventAccounts: orphanAccounts.size,
+          accountsWithEvents: match.stats.matchedEntities,
+          orphanEventAccounts: match.stats.orphanEventEntities,
         },
       });
     },

@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/.data/**',
       'packages/db/drizzle/**',
       'scripts/**',
+      '**/scripts/**',
     ],
   },
   js.configs.recommended,

@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 2 — column mapping & workflow configuration)
+**Last updated:** 2026-09-16 (product session 3 — matching, grouping & latest-event engine)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -24,17 +24,18 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Product session 2 objective: column mapping and workflow configuration.** A workflow declares its
-requirements as data (dataset roles + semantic column roles + options). Users assign ingested datasets to
-roles, map semantic roles (entity id, timestamp, description, output columns) to real detected columns,
-get live compatibility validation with explicit confirmation for ambiguous mappings, and save a reusable,
-versioned configuration that can start a run. **Status: achieved** (see §8, verified in §9). Column keys
-are no longer hardcoded in the UI: the workflow definition drives the setup screen, and
-`resolveRunInput` translates a configuration into the run's config keys.
+**Product session 3 objective: the reusable matching, grouping & latest-event engine.** The core
+data-processing step — primary records → match entity identifier → collect all related events → group by
+entity → pick the latest event deterministically → expose the grouped result to downstream logic — is now a
+standalone, example-agnostic package (`@sheetpilot/matching-engine`). It normalizes identifiers with an
+explicit, reported transformation pipeline (dangerous steps are opt-in and flagged), tracks every join
+statistic, preserves the full event history, and emits a normalized intermediate representation that the
+account-fault-triage workflow now consumes instead of its own ad-hoc grouping. **Status: achieved** (see §8,
+verified in §9).
 
-**Next (product session 3):** continue building the reusable workflow platform. Priorities from the
-backlog: Postgres verification, review→artifact regeneration, rule management/editing, review ergonomics,
-scheduling/automated ingestion, and the real AI provider. See §15.
+**Next (product session 4):** the platform's weakest points remain durability and the review loop. See §15
+for the recommended order: Postgres verification, review→artifact regeneration, rule management, then the
+configuration follow-ups that remain from session 2.
 
 ## 3. Product Vision
 
@@ -66,10 +67,11 @@ core workflow is excellent.
 | File processing | `csv-parse` / `csv-stringify` (streaming), `exceljs` (buffered) | Behind `TabularReader`/`TabularWriter` async generator interfaces; readers also expose `describe()` for sheets+headers |
 | Dataset inspection | `inspectDataset` in `@sheetpilot/file-processing` | Bounded one-pass scan → `DatasetProfile` (types, emptiness, uniqueness, samples, warnings); persisted via `DatasetRepository` |
 | Workflow configuration | `@sheetpilot/core` domain + `WorkflowConfigurationService` (API) | Roles-as-data (`WorkflowConfigurationDefinition`), pure validation, persisted/versioned `WorkflowConfiguration`, workflow-specific `resolveRunInput` |
+| Record matching | `@sheetpilot/matching-engine` (new) | Generic primary↔event join: reported identifier normalization, deterministic latest-event selection, full event history, join statistics; consumed by the account-faults workflow |
 | Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
 | Rules | Custom DSL in `@sheetpilot/rule-engine` | priority → specificity → id winner selection, explanation templates |
 | AI | `ClassificationProvider` port + `NoopClassificationProvider` + policy function | Real provider intentionally not implemented yet |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 128 tests, 17 files, all green |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 163 tests, 19 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -86,6 +88,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                               step traces, role/mapping              storage drivers)
                               definitions + resolveRunInput)
                                           │                                   │
+                                          ├──▶ matching-engine (primary↔event join,
+                                          │      identifier normalization, latest event)
                                           ├──▶ rule-engine (deterministic rules, explanations)
                                           ├──▶ ai (policy + ClassificationProvider port)
                                           ▼
@@ -93,9 +97,11 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
 ```
 
 Dependency rule: inner layers never import outer layers; `web` only consumes `core` DTO schemas.
-Ingestion lifecycle: `POST /api/v1/datasets` (or `/files`) → `DatasetService.ingest` validates the
-upload, stores it, runs bounded `inspectDataset`, persists `FileAsset` + `DatasetProfile` → the UI reads
-the profile and pages rows via `GET /api/v1/datasets/:id/rows`.
+`matching-engine` depends only on `file-processing` (reusing its canonical identifier/timestamp helpers);
+`workflow-engine` depends on it. Ingestion lifecycle: `POST /api/v1/datasets` (or `/files`) →
+`DatasetService.ingest` validates the upload, stores it, runs bounded `inspectDataset`, persists
+`FileAsset` + `DatasetProfile` → the UI reads the profile and pages rows via
+`GET /api/v1/datasets/:id/rows`.
 Configuration lifecycle: a workflow declares dataset roles + semantic column roles → the Setup UI assigns
 datasets and maps columns against `DatasetProfile.columns` → `POST /api/v1/workflow-configurations/validate`
 returns structural/semantic issues (from `validateWorkflowConfiguration` in `core`) plus a resolved-config
@@ -104,6 +110,10 @@ preview → saving persists a versioned `WorkflowConfiguration` →
 ids + config keys.
 Run lifecycle: `POST /files` → `POST /runs` (202, queued) → background `RunService.execute` →
 step traces + artifacts + decision log + review items → run `succeeded`.
+Matching lifecycle: the workflow's load steps produce raw primary/event records → the `group-events` step
+calls `matchRecords` (`@sheetpilot/matching-engine`), which normalizes identifiers, joins events to
+entities, orders each entity's complete event history latest-first and returns the entities plus join
+statistics → classification consumes the grouped representation.
 
 ## 6. Repository Structure
 
@@ -152,13 +162,19 @@ packages/
     writers/               csv, xlsx, buffer collection
     storage/               local-file-storage (traversal-safe), memory-file-storage
     registry.ts            format detection + reader/writer factories
+  matching-engine/src/
+    types.ts               public contract: normalized identifiers, MatchedPrimary/Event/Entity, MatchStats, MatchResult
+    normalize.ts           normalizeIdentifier (trim/collapse/case + opt-in dangerous steps) and renderCellText
+    match.ts               matchRecords (join + grouping + deterministic latest), compareEventsLatestFirst
+    scripts/benchmark.mts  synthetic benchmark (10k–250k entities) for performance observations
   rule-engine/src/         conditions.ts, evaluate.ts, actions.ts, template.ts, validate.ts
   ai/src/                  noop-provider.ts, policy.ts, factory.ts
   workflow-engine/src/
     engine.ts              executeWorkflow (ordered steps, state merge, traces, cancel handling)
     registry.ts            WorkflowRegistry, RegisteredWorkflow (configuration definition + resolveRunInput), createDefaultWorkflowRegistry
     workflows/account-faults/  types.ts (config/state/columns), configuration.ts (roles, resolveRunInput, preview),
-                               rules.ts (taxonomy + 7 rules), steps.ts (5 steps), workflow.ts (program + registered workflow)
+                               rules.ts (taxonomy + 7 rules), steps.ts (5 steps; group-events delegates to matching-engine),
+                               workflow.ts (program + registered workflow)
   db/src/
     schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_steps, run_decisions, review_items, artifacts
     client.ts, migrations.ts, scripts/migrate.ts
@@ -185,16 +201,71 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status, title, detail, suggestedValues, evidence, resolution |
 | `Artifact` | Generated output file | kind (output_csv/output_xlsx/review_queue_csv), format, fileName, storageKey, sizeBytes |
 | `RuleSet` / `Rule` | Versioned business rules | priority, when (all/any condition tree), then (set/set_if_empty), confidence, explanationTemplate |
+| `MatchedEntity<TPrimary, TEvent>` | In-memory (not persisted) result of the matching engine: one entity with its complete, latest-first event history | key, rawKeys[], primaries[], events[], latest, issues[], counts |
 
 Important enums: `RunStatus = queued|running|succeeded|failed|canceled`;
 `ReviewReason = no_events|no_rule_match|rule_conflict|low_confidence|ambiguous_latest_timestamp|conflicting_fault_history|unparsed_timestamp|duplicate_primary_key`;
-`AiPolicy = never|on_no_rule_match|on_low_confidence|always`.
+`AiPolicy = never|on_no_rule_match|on_low_confidence|always`;
+`MatchIssueCode = no_events|duplicate_primary|ambiguous_latest_timestamp|unparsed_timestamp|no_valid_timestamp|identifier_transformed`.
 
 Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`, `RecommendedAction`,
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
 confidence, review status, review reasons, explanation), 7 default rules over a 7-option taxonomy.
 
 ## 8. Completed
+
+### Product session 3 — Matching, grouping & latest-event engine (2026-09-16)
+
+- [x] New package **`@sheetpilot/matching-engine`** (depends only on `@sheetpilot/file-processing` for the
+      canonical identifier/timestamp helpers):
+  - `types.ts` — the generic public contract: `IdentifierNormalizationOptions`,
+    `NormalizedIdentifier`, `IdentifierTransformation`, `MatchRecordsInput/Options`,
+    `MatchedPrimary`/`MatchedEvent`/`MatchedEntity`, `MatchStats`, `MatchResult` and
+    `MATCH_ISSUE_CODES`.
+  - `normalize.ts` — `normalizeIdentifier(value, options)` derives a comparison key from any cell-like
+    value. **Pipeline (documented + reported):** non-breaking space → trim → collapse whitespace →
+    (opt-in) strip separators → (opt-in) strip leading zeros → upper case. Default options reproduce
+    `normalizeKey` from `file-processing` exactly. Every step that actually changed the value is returned
+    as a transformation code; the two steps that can merge genuinely distinct identifiers
+    (`strip-separators`, `strip-leading-zeros`) are **off by default and flagged `dangerous`**, and an
+    entity touched by one gets the `identifier_transformed` issue. Numbers, booleans and dates are never
+    text-mangled (`coerce-number` is reported for numbers).
+  - `match.ts` — `matchRecords(input, options)`:
+    - **Data structures:** one `Map<normalizedKey, MutableEntity>` for O(1) lookup, an ordered
+      `entities[]` for first-seen deterministic order, a `Set` per entity for distinct `rawKeys`, and an
+      `orphans[]` list. No input array is mutated.
+    - **Algorithm:** (1) normalize + index every primary key, merging duplicates into one entity; (2)
+      normalize every event key, parse its timestamp, attach it to its entity or to `orphans`; (3) per
+      entity, order the complete history with `compareEventsLatestFirst` and derive issues/counts; (4)
+      compute the aggregate `MatchStats`.
+    - **Deterministic latest selection** (`compareEventsLatestFirst`): valid timestamps descending; a
+      valid timestamp always beats an unparseable/missing one; all ties (including equal timestamps and
+      all-invalid/all-missing histories) break on **higher source row first** (later row wins), so the
+      result never depends on array or map iteration order.
+    - **Edge-case semantics:** missing timestamps → status `missing`, cannot beat a real date; equal
+      latest timestamps → `ambiguous_latest_timestamp` (later row still chosen deterministically);
+      unparseable timestamps → `unparsed_timestamp`; an entity with no valid timestamp at all →
+      `no_valid_timestamp` and the latest is chosen by source order; duplicate primary rows →
+      `duplicate_primary` (critical) while keeping every row; blank identifiers are skipped and counted,
+      never silently matched.
+    - **Statistics:** `primaryRecords`, `eventRecords`, `primaryRecordsWithoutKey`,
+      `eventRecordsWithoutKey`, `eventsWithKey`, `entities`, `matchedEntities`, `unmatchedEntities`,
+      `duplicatePrimaryEntities`, `entitiesWithOneEvent`, `entitiesWithMultipleEvents`,
+      `orphanEventRecords`, `orphanEventEntities`, `malformedTimestamps`, `missingTimestamps`,
+      `ambiguousLatestEntities`, `identifierTransformedEntities`.
+    - **Complexity:** O(P + E + Σ eᵢ log eᵢ) time and O(P + E) memory (P primaries, E events, eᵢ events per
+      entity); the join itself is a single linear pass.
+- [x] `@sheetpilot/workflow-engine`: the account-faults `load-primary`/`load-events` steps now normalize
+      through `normalizeIdentifier`, and `group-events` delegates the entire join/latest/statistics work to
+      `matchRecords`, mapping the generic result back to `AccountGroup` (unchanged downstream behaviour; the
+      classify/build-output steps are untouched).
+- [x] Tests: +35 (163 total, 19 files) — `packages/matching-engine/src/normalize.test.ts` (15) and
+      `match.test.ts` (20, including a 2,000-entity × 5-event dataset).
+- [x] Benchmark: `packages/matching-engine/scripts/benchmark.mts` (synthetic). Measured on this machine
+      (Windows, Node 24): 30k events **163 ms** (184k events/s), 150k events **461 ms** (325k events/s),
+      500k events **1.2 s** (407k events/s), 1,000k events **2.7 s** (368k events/s) — linear, no
+      orphan/matching anomalies.
+- [x] Docs: ADR-012, `docs/architecture.md`, README, this file.
 
 ### Product session 2 — Column mapping & workflow configuration (2026-09-16)
 
@@ -301,11 +372,12 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 
 | Verification | Command | Result |
 | --- | --- | --- |
-| Types | `npm run typecheck` | clean across all 9 workspaces |
+| Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 17 files / 128 tests passed |
+| Tests | `npm test` | 19 files / 163 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) |
+| Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
 | Configurations (API) | `POST /api/v1/workflow-configurations/validate`, create, then `POST /api/v1/runs { configurationId }` | validation returns issues + resolved config; saved config version bumps; configured run succeeds and records `configurationId` |
@@ -379,6 +451,19 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
 21. **`secondary`/optional roles are modelled but unused.** The configuration model supports non-required
     and multi-value roles, but the setup UI currently uses only the account-faults single-dataset roles and
     a multi-value output-columns role; multi-dataset-per-role selection is not wired.
+22. **The matching engine runs on fully loaded arrays.** `matchRecords` itself is a single linear pass and
+    handles millions of events (see §9), but the workflow still loads both files with `readAllRows`, so
+    memory scales with the file. A streaming/chunked loader can be added behind the same contract later.
+23. **Engine issues are not yet part of the review routing.** `matchRecords` computes
+    `ambiguous_latest_timestamp`, `unparsed_timestamp`, `no_valid_timestamp`, `duplicate_primary`,
+    `no_events` and `identifier_transformed`, but the account-faults workflow still derives its own
+    `ReviewReason`s in the `classify` step. Wiring engine issues directly into review reasons is a
+    follow-up.
+24. **Dangerous identifier normalization is opt-in but not exposed.** `stripSeparators`/`stripLeadingZeros`
+    are off by default and nothing in the API/UI sets them yet, so no configuration can currently merge
+    identifiers that differ by punctuation or leading zeros.
+25. **The engine preserves duplicate events.** Identical event rows are never deduplicated (they can be
+    legitimate repeated reports); callers that need deduplication must do it before calling `matchRecords`.
 
 ## 11. Technical Decisions
 
@@ -396,6 +481,8 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-010 ingestion produces a persisted, bounded dataset profile; rows stay in storage and are paged.
 - ADR-011 a workflow declares its mapping requirements as data; configurations are validated in `core` and
   persisted/versioned, and runs resolve them through the workflow's `resolveRunInput`.
+- ADR-012 matching/grouping/latest-event selection is a standalone, example-agnostic engine; identifier
+  normalization reports every transformation and only performs dangerous merges when explicitly opted in.
 
 Additional decisions made during implementation:
 
@@ -439,13 +526,15 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 128 tests / 17 files passing (`npm test`).** Coverage by area:
+**Status: 163 tests / 19 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
 | Domain schemas | `packages/core/src/domain/rules.test.ts` | defaults, nested groups, validation errors |
 | Env config | `packages/config/src/schema.test.ts` | defaults, coercion, cross-field failures |
 | Normalization/parsing | `packages/file-processing/src/normalize.test.ts` | keys, ISO/slash/Excel timestamps, invalid input |
+| Identifier normalization | `packages/matching-engine/src/normalize.test.ts` | blank/whitespace/NBSP handling, case folding + opt-out, number↔numeric-string unification, boolean/date safety, opt-in dangerous separator/leading-zero stripping (and flagging), `normalizeKey` parity, idempotency |
+| Matching engine | `packages/matching-engine/src/match.test.ts` | one-to-many grouping, full history order, zero-event entities, orphan events, duplicate primaries, timestamp ties, invalid/missing timestamps, numeric/whitespace identifiers, blank-key skipping, dangerous-normalization merging, `rowIndexBase`, first-seen entity order, `dayFirst`/custom parsers, aggregate stats, 2,000-entity dataset |
 | CSV | `packages/file-processing/src/csv.test.ts` | quoted delimiters, embedded newlines, BOM, limits, round-trip writing |
 | XLSX | `packages/file-processing/src/xlsx.test.ts` | type round-trip (string/number/boolean/date/null), formula-injection guard, empty sheets |
 | Inference/detection | `packages/file-processing/src/inference.test.ts` | column typing, nullability, format sniffing, reader/writer factories |
@@ -464,7 +553,9 @@ Not yet implemented (risks acknowledged):
 Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
 including `datasets` and `workflow_configurations`), rule engine property/fuzz tests, a load test for large
 CSV/`DATASET_MAX_SCAN_ROWS` inspection, Playwright browser tests for the datasets/setup/new-run flows,
-configuration-resolution tests for multi-dataset roles, and coverage reporting in CI.
+configuration-resolution tests for multi-dataset roles, and coverage reporting in CI. For the matching
+engine: a randomized/property test asserting that the latest selection is invariant under input shuffling,
+and a very-large-file (streaming) test once the loader is chunked.
 
 ## 14. Environment
 
@@ -489,8 +580,9 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 3: pick the highest-value next slice** (queue `03-session.md`). The configuration layer
-now exists, so the platform's weakest points are durability and the review loop. Recommended order:
+**Product session 4: pick the highest-value next slice** (queue `04-session.md`). The matching engine and
+configuration layer now exist, so the platform's weakest points are durability and the review loop.
+Recommended order:
 
 1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0002`), and exercise
    the API against `REPOSITORY_DRIVER=postgres` (ingest a dataset, save a configuration, run it, page
@@ -502,7 +594,9 @@ now exists, so the platform's weakest points are durability and the review loop.
    version) instead of shipping rules only as code. Bump the rule-set version on material changes.
 4. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
    re-points assignments while keeping column mappings, and deprecating the legacy `/files` wizard.
-5. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, review
+5. **Matching-engine follow-ups:** surface engine issues as review reasons, expose the identifier
+   normalization options through configuration, and stream/chunk the loader.
+6. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, review
    ergonomics (bulk actions, keyboard), and route-level code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
@@ -514,8 +608,8 @@ now exists, so the platform's weakest points are durability and the review loop.
 - **Verification-first culture.** Run `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`
   before declaring anything done. `progress.md` must reflect reality, not intentions.
 - **Layer boundaries are load-bearing.** `core` must not import other packages; `workflow-engine` must not
-  import Fastify/React; `web` must not import Node-only packages (`file-processing`, `db`, `workflow-engine`).
-  New cross-layer values go through `core` contracts/ports.
+  import Fastify/React; `web` must not import Node-only packages (`file-processing`, `matching-engine`,
+  `db`, `workflow-engine`). New cross-layer values go through `core` contracts/ports.
 - **Internal packages export TypeScript source** (`"exports": "./src/index.ts"`). Consumers (tsx, tsup,
   Vite, vitest) compile them. Created with npm workspaces — do not switch to pnpm without updating
   `package-lock.json` and every workspace script.
@@ -549,12 +643,20 @@ now exists, so the platform's weakest points are durability and the review loop.
 - **Upload validation lives in `packages/file-processing/src/upload.ts`.** It sanitises filenames and
   enforces extension/content-type/size/magic-byte rules; add new formats there and in
   `TabularReader.describe`/`read`, not in route handlers.
+- **Matching is the reusable join engine.** `packages/matching-engine/src/match.ts` owns
+  primary↔event joining, grouping, deterministic latest-event selection and join statistics; never
+  re-implement grouping/latest logic inside a workflow. Feed it raw records via accessors, then map
+  `MatchedEntity` to the workflow's own types. `normalizeIdentifier` is the single normalization path and
+  its default options must stay byte-for-byte equal to `normalizeKey` in `file-processing`; dangerous
+  steps (`stripSeparators`, `stripLeadingZeros`) stay opt-in and are reported. Latest-selection ties always
+  break on the later source row — keep `compareEventsLatestFirst` as the one comparator.
 - **Environment note:** this working copy was moved from `D:\deepseekmodeltestingforexcelproj` to
   `D:\ExcelProjectBydeepseek`; the workspace `node_modules/@sheetpilot/*` links had to be relinked with
   `npm install`. If module resolution fails after moving the repo again, re-run `npm install`.
 - **Files a new agent should read first:** this file → `docs/architecture.md` →
   `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` +
   `packages/core/src/domain/workflow-config.ts` → `packages/file-processing/src/inspection.ts` →
+  `packages/matching-engine/src/{types,normalize,match}.ts` →
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
@@ -567,3 +669,4 @@ now exists, so the platform's weakest points are durability and the review loop.
 | Foundation | 2026-09-15 | Monorepo, core/domain/ports, config, file-processing, rule engine, AI seam, workflow engine + account-fault-triage workflow, Drizzle schema + in-memory/Postgres repositories, Fastify API, React SPA, samples, smoke script, docs. Verified: lint/typecheck/86 tests/build/smoke/dev servers. |
 | Product 1 | 2026-09-16 | File ingestion & dataset inspection: dataset domain + port + DTOs + errors, `TabularReader.describe()`, `inspectDataset` (types/emptiness/uniqueness/samples/warnings/flags), `validateUpload`, `datasets` table + migration + repositories, `DatasetService` + dataset API, Datasets upload/detail UI, +26 tests (112 total). Verified: lint/typecheck/112 tests/build. |
 | Product 2 | 2026-09-16 | Column mapping & workflow configuration: roles-as-data, semantic column mapping + pure validation, persisted/versioned `WorkflowConfiguration` + repository + `workflow_configurations` table/migration, `WorkflowConfigurationService` + API, `resolveRunInput` (config keys from mapped columns), Setup wizard UI with live validation/confirmations, +16 tests (128 total). Verified: lint/typecheck/128 tests/build/smoke (incl. configuration flow). |
+| Product 3 | 2026-09-16 | Reusable matching/grouping/latest-event engine: new `@sheetpilot/matching-engine` (reported identifier normalization with opt-in dangerous steps, primary↔event join, deterministic latest selection, full history, join statistics), account-faults `group-events` delegates to it, +35 tests (163 total), benchmark (1M events ≈ 2.7 s). Verified: lint/typecheck/163 tests/build/smoke. |

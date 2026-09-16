@@ -11,7 +11,9 @@ types, emptiness/uniqueness, samples and validation warnings); rows stay in obje
 on demand, so no stage loads a whole dataset into browser memory. A **workflow configuration** then
 assigns datasets to declared roles and maps semantic columns (entity id, timestamp, description, output
 columns) to real columns, with validation and explicit confirmation for ambiguous mappings; the saved,
-versioned configuration can start a run and be reused.
+versioned configuration can start a run and be reused. A reusable **matching engine**
+(`@sheetpilot/matching-engine`) joins primary records to their events on a normalized identifier, keeps the
+complete event history and selects the latest event deterministically, reporting every join anomaly.
 
 The first workflow implemented is **account fault triage**: a primary file lists accounts with columns
 that need to be filled in, an events file contains fault reports (the same account may appear many
@@ -38,6 +40,7 @@ packages/
   core/                Domain model, zod schemas, API contracts, ports (zero runtime deps except zod)
   config/              Typed environment loading/validation (fail-fast, no secrets in code)
   file-processing/     CSV/XLSX readers & writers, schema inference, dataset inspection, upload validation, storage drivers
+  matching-engine/     Reusable primary↔event matching: identifier normalization, grouping, deterministic latest event
   rule-engine/         Rule DSL evaluation, deterministic winner selection, explanations, validation
   ai/                  ClassificationProvider port implementation, AI policy, provider factory
   workflow-engine/     Workflow program runner + the account-fault-triage workflow (roles, mapping resolver)
@@ -92,6 +95,7 @@ npm run smoke                          # terminal 2: uploads samples, runs the w
 | `npm run format` / `format:check` | Prettier write / verify |
 | `npm test` / `test:watch` | Vitest unit + integration tests |
 | `npm run smoke` | End-to-end smoke test against a running API |
+| `npm run benchmark -w @sheetpilot/matching-engine` | Synthetic primary↔event join benchmark (10k–250k entities) |
 | `npm run db:generate` | Generate SQL migrations from the Drizzle schema |
 | `npm run db:push` | Push the schema to a Postgres database (development) |
 
@@ -123,9 +127,11 @@ and testable without infrastructure.
 
 ## Status
 
-This repository is the foundation: the workflow engine, file processing, rule engine, review queue, API
-and UI are implemented and tested end to end for the account fault triage workflow. File ingestion
-includes production-quality validation and a dataset inspection/preview UI, and the column-mapping/workflow
-configuration layer lets a nontechnical user connect files and columns once and reuse the setup.
-Scheduling, editable rules, AI providers, authentication and multi-tenancy are deliberately deferred — see
-[`progress.md`](./progress.md) §15 for the prioritized next steps.
+This repository is the foundation: the workflow engine, file processing, matching engine, rule engine,
+review queue, API and UI are implemented and tested end to end for the account fault triage workflow. File
+ingestion includes production-quality validation and a dataset inspection/preview UI, the
+column-mapping/workflow configuration layer lets a nontechnical user connect files and columns once and
+reuse the setup, and the reusable matching engine performs the deterministic primary↔event join and
+latest-event selection with reported identifier normalization. Scheduling, editable rules, AI providers,
+authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
+prioritized next steps.
