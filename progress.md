@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 5 — AI-assisted classification layer)
+**Last updated:** 2026-09-16 (product session 6 — review queue & human-in-the-loop)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -24,24 +24,26 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Product session 5 objective: the AI-assisted classification layer.** AI is now an optional,
-policy-gated **assistant** behind a provider-neutral port, not a decision-maker. `@sheetpilot/ai` owns the
-provider contract (`ClassificationProvider`), a strict structured result contract, an
-`AiClassificationService` (policy gate → redaction → timeout → bounded retries → strict schema validation →
-normalized failure), a deterministic-first merge (`resolveAssistedDecision`), and an OpenAI-compatible
-adapter whose `fetch`/base URL/model are all injectable. Providers receive only a bounded, structured
-request (entity key, latest event, capped history, classification targets, evaluated rule summaries) and
-must return a validated JSON object (`proposedCode`, `reasoning`, `confidence`, `ambiguity[]`,
-`missingInformation[]`). **AI can never override a matched rule**: it may corroborate a weak rule or supply
-values only when no rule matched, is recorded as `decisionSource: ai_suggested`, and is routed to review
-unless auto-approval is explicitly enabled. Failures (timeout, rate limit, invalid credentials, malformed,
-unexpected class) become review reasons, never a failed run. Provenance is persisted in the decision log
-and a new `__DecisionSource` output column. **Status: achieved** (see §8, verified in §9).
+**Product session 6 objective: the review queue & human-in-the-loop.** The review loop is now the product's
+differentiator. Automation still writes immutable `DecisionRecord`s; a mutable `ReviewItem` is the work
+item a human acts on. The human-facing **state** is derived, not stored: `AUTO_RESOLVED` (no item),
+`NEEDS_REVIEW` (open), `APPROVED`, `OVERRIDDEN`, `DISMISSED`, and `ERROR` (an assistive step such as AI
+failed). The queue surfaces only exceptions and supports shared filter presets (`needs_review`,
+`unresolved`, `conflicts`, `low_confidence`, `processing_errors`, `overridden`, `resolved`, `all`) plus
+`runId`/`reason`/`severity` filters and per-filter counts. Each item is enriched for a fast decision:
+automation result (source, confidence, matched rules, rule status, values, applicable-rule summaries,
+explanation), the latest event and earlier event history, the validated AI outcome, the flag reason and the
+applicable rules. Resolving (`accepted`/`overridden`/`dismissed`) is handled by a new `ReviewService`, which
+appends an immutable `ReviewResolutionLog` audit entry (automation snapshot, suggested vs applied values,
+**exactly which fields changed**, note, timestamp) and rewrites the run's `output_csv`/`output_xlsx` so the
+export matches the reviewed result (`__ReviewStatus` becomes `APPROVED`/`OVERRIDDEN`). Human decisions are
+therefore tracked separately from automated ones and can later teach rule suggestions. **Status: achieved**
+(see §8, verified in §9).
 
-**Next (product session 6):** the human review loop. See §15: the AI layer now produces suggestions and
-provenance, so the review queue should surface them richly (deterministic vs AI-suggested vs overridden),
-support fast filtering/bulk actions and preserve a full audit trail of what automation decided, why, and
-what the human changed. Durability (Postgres verification, review→artifact regeneration) remains open.
+**Next (product session 7):** durable persistence and the wider review loop. See §15: verify Postgres
+(migrations `0000`–`0004`, `REPOSITORY_DRIVER=postgres`, gated repository integration tests), immutable
+rule/configuration version snapshots, and the first pass at turning human corrections into rule
+suggestions. Scheduling/watched-folder ingestion and streaming the loader remain on the roadmap.
 
 ## 3. Product Vision
 
@@ -79,7 +81,8 @@ core workflow is excellent.
 | Rule management | `RuleSetService` + `/api/v1/rule-sets` + Rules UI page | Validated before save (`validateRuleSet`), versioned on every save, one active set per workflow, resolved per run |
 | AI | `@sheetpilot/ai` — provider port + orchestration | `ClassificationProvider` port; `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized outcomes); `resolveAssistedDecision` (deterministic-first merge); `OpenAiClassificationProvider` (configurable base URL/model, injectable `fetch`); `NoopClassificationProvider` is the safe default (sends nothing) |
 | AI safety | Policy, redaction and provenance | Only consulted per `AiPolicy`; never overrides a matched rule; a bounded structured request (no raw rows); `AI_EXCLUDED_FIELDS` redaction; failures become review reasons (`ai_failed`/`ai_low_confidence`/`ai_ambiguous`/`ai_proposed_alternative`); `decisionSource` + full AI outcome persisted and exposed via DTOs; `__DecisionSource` output column |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 209 tests, 21 files, all green |
+| Review / human-in-the-loop | Derived `ReviewState` + append-only `review_resolutions` audit + `ReviewService` | Filter presets + per-filter counts; rich item DTO (automation, latest event, history, AI outcome, applicable rules); resolve/override/dismiss records the audit trail and regenerates the output; human decisions tracked separately from automation |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 222 tests, 23 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -101,6 +104,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                           ├──▶ rule-engine (deterministic rules, explanations)
                                           ├──▶ ai (policy gate + ClassificationProvider port +
                                           │      AiClassificationService + deterministic-first resolve)
+                                          ├──▶ review (derived ReviewState + append-only resolution
+                                          │      audit + ReviewService output regeneration)
                                           ▼
                                   core (domain, schemas, ports)  ◀── db (Drizzle schema + repos)
 ```
@@ -137,6 +142,15 @@ timeout and bounded retries, strictly validates the result and normalizes every 
 a matched rule → the resolved source/values/confidence plus the full AI provenance are persisted in the
 decision record (`decisionSource`, `aiAssisted`, evidence `ai.outcome`) and surfaced through decision/review
 DTOs and the `__DecisionSource` output column.
+Review lifecycle: automation persists immutable decision records and, only for flagged accounts, mutable
+review items → `GET /api/v1/review-items` filters by shared presets/`runId`/reason and returns derived
+`state` + `counts` + an enriched item DTO (automation block, latest event, event history, AI outcome,
+applicable rules) parsed from evidence → `ReviewService.resolve` snapshots the automation values, applies
+the human values (an accept with no values keeps the automation result), updates the item and appends a
+`ReviewResolutionLog` (changed fields, note, timestamp) → the run's `output_csv`/`output_xlsx` are patched so
+the export matches the decision and `__ReviewStatus` becomes `APPROVED`/`OVERRIDDEN` → `GET
+/api/v1/review-items/:id/history` exposes the append-only audit and the decision log shows `AUTO_RESOLVED`
+for accounts automation handled alone.
 
 ## 6. Repository Structure
 
@@ -151,7 +165,9 @@ apps/
     services/dataset-service.ts  validate → store → inspect → persist; paged row reads
     services/workflow-configuration-service.ts  validate + persist configurations; resolve runs from a configuration
     services/rule-set-service.ts  validate + version + activate rule sets; one active set per workflow
-    services/run-service.ts    run creation/execution, step persistence, artifacts, review resolution; injects the active rule set
+    services/run-service.ts    run creation/execution, step persistence, artifacts; injects the active rule set
+    services/review-service.ts human review resolution, append-only audit trail, output-artifact regeneration
+    server.test.ts / review.test.ts  API integration + E2E, including the review queue, audit trail and regeneration
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
     http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, files, datasets, runs, review-items, artifacts
@@ -177,6 +193,8 @@ packages/
                            (decision status, resulting values, evaluated conditions, conflicts, review reasons), validation issues
     domain/ai.ts           AI decision contract: consult reasons, decision source, ambiguity flags, failure
                            kinds, structured request/result/outcome schemas, target + event + rule summaries
+    domain/review.ts       Review domain: derived ReviewState (+ labels), queue filter presets, automation and
+                           event schemas, append-only ReviewResolutionLog, changedFields + evidence parsers
     api/contracts.ts       HTTP request/response schemas shared with the web app
     ports/                 repositories, datasets, workflow-configurations, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
@@ -207,7 +225,7 @@ packages/
                                rules.ts (taxonomy + 7 rules), steps.ts (5 steps; group-events delegates to matching-engine),
                                workflow.ts (program + registered workflow)
   db/src/
-    schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_steps, run_decisions, review_items, artifacts
+    schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_steps, run_decisions, review_items, review_resolutions, artifacts
     client.ts, migrations.ts, scripts/migrate.ts
     repositories/memory/   full in-memory implementation of every port (used by default + tests)
     repositories/postgres/ Drizzle implementation (type-checks; NOT yet run against a live database)
@@ -229,7 +247,8 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, configurationId, config, stats, error, timestamps |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, decisionSource (`deterministic`/`ai_suggested`/`none`), confidence, reviewReasons, outputValues, evidence (rule trace + AI outcome/provenance) |
-| `ReviewItem` | A case for human review | entityKey, reason, severity, status, title, detail, suggestedValues, evidence, resolution |
+| `ReviewItem` | A case for human review | entityKey, reason, severity, status (`open`/`resolved_accepted`/`resolved_overridden`/`dismissed`), title, detail, suggestedValues, evidence, resolution |
+| `ReviewResolutionLog` | Append-only audit of one human decision (never overwritten) | reviewItemId, runId, entityKey, action, previousStatus, resultingState, automation (source/confidence/rules/values), suggestedValues, appliedValues, changedFields, note, resolvedBy, createdAt |
 | `Artifact` | Generated output file | kind (output_csv/output_xlsx/review_queue_csv), format, fileName, storageKey, sizeBytes |
 | `RuleSet` / `Rule` | Versioned business rules | priority, when (all/any condition tree), then (set/set_if_empty), confidence, explanationTemplate |
 | `MatchedEntity<TPrimary, TEvent>` | In-memory (not persisted) result of the matching engine: one entity with its complete, latest-first event history | key, rawKeys[], primaries[], events[], latest, issues[], counts |
@@ -239,7 +258,9 @@ Important enums: `RunStatus = queued|running|succeeded|failed|canceled`;
 `AiPolicy = never|on_no_rule_match|on_low_confidence|always`;
 `DecisionSource = deterministic|ai_suggested|none`;
 `AiFailureKind = timeout|rate_limited|invalid_credentials|unavailable|provider_error|malformed_response|unexpected_classification`;
-`MatchIssueCode = no_events|duplicate_primary|ambiguous_latest_timestamp|unparsed_timestamp|no_valid_timestamp|identifier_transformed`.
+`MatchIssueCode = no_events|duplicate_primary|ambiguous_latest_timestamp|unparsed_timestamp|no_valid_timestamp|identifier_transformed`;
+`ReviewState = AUTO_RESOLVED|NEEDS_REVIEW|APPROVED|OVERRIDDEN|DISMISSED|ERROR` (derived, never persisted);
+`ReviewFilter = needs_review|unresolved|conflicts|low_confidence|processing_errors|overridden|resolved|all`.
 
 Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`, `RecommendedAction`,
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
@@ -248,6 +269,59 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 6 — Review queue & human-in-the-loop (2026-09-16)
+
+- [x] `@sheetpilot/core`:
+  - new `domain/review.ts` — the review vocabulary and audit contract: derived `ReviewState`
+    (`AUTO_RESOLVED`/`NEEDS_REVIEW`/`APPROVED`/`OVERRIDDEN`/`DISMISSED`/`ERROR`) + labels,
+    `reviewStateForItem`/`reviewStateForDecision`, the shared queue filter presets
+    (`reviewFilterSchema` + `REVIEW_FILTER_DEFINITIONS`: needs_review, unresolved, conflicts,
+    low_confidence, processing_errors, overridden, resolved, all), the `reviewAutomationSchema` (source,
+    confidence, matched rules, values, rule status, explanation, applicable-rule summaries) and
+    `reviewEventSchema`, the append-only `reviewResolutionLogSchema`, and the pure helpers `changedFields`,
+    `reviewAutomationFromEvidence`, `reviewEventsFromEvidence` (tolerant parsing of workflow evidence).
+  - `ports/repositories.ts` — `ReviewListOptions` gained `statuses`/`reasons`/`severities`/`runId`;
+    new `ReviewCounts` + `ReviewItemRepository.counts()`; new `ReviewResolutionRepository`
+    (`create`/`listByItem`/`listByRun`) added to `Repositories`; `ArtifactRepository.update`.
+  - `api/contracts.ts` — `reviewItemDtoSchema` gained derived `state`, `automation`, `latestEvent`,
+    `eventHistory` and `resolution.changedFields`; new `reviewResolutionLogDtoSchema`,
+    `reviewHistoryResponseSchema`, `reviewCountsSchema`, `reviewQueueResponseSchema`; `decisionDtoSchema`
+    gained `reviewState`.
+- [x] `@sheetpilot/db`: new `review_resolutions` table (14 columns, indexed by item + run) + generated
+  migration `0004_lethal_agent_zero.sql`; in-memory and Postgres repositories (filters, counts, audit log,
+  artifact update). The Postgres list filter uses `inArray`/`and`, so multi-status/reason/severity filters
+  are pushed to SQL.
+- [x] `apps/api`:
+  - new `ReviewService` — `resolve` snapshots the automation values from the decision record, applies the
+    human values (an accept with no explicit values keeps the automation result), updates the item and
+    appends a `ReviewResolutionLog` with `changedFields`; then patches the run's `output_csv`/`output_xlsx`
+    (matched by the configured `primaryAccountColumn` via `normalizeKey`) and sets `__ReviewStatus`
+    to `APPROVED`/`OVERRIDDEN`. `history(itemId)` exposes the audit trail.
+  - `GET /api/v1/review-items` now supports `filter`, `runId`, multi `reason`, `severity` and returns
+    `counts`; new `GET /api/v1/review-items/:id` and `GET /api/v1/review-items/:id/history`; resolve now
+    routes through `ReviewService` (`RunService.resolveReviewItem` removed).
+  - `GET /api/v1/runs/:id/decisions` joins review items so each decision exposes `reviewState`
+    (`AUTO_RESOLVED` when automation handled it).
+  - DTOs: `toReviewItemDto` builds the automation block + latest event + history from evidence;
+    `toReviewResolutionLogDto` added.
+- [x] `apps/web`:
+  - the **Review queue** page is now a master/detail reviewer: filter chips with live counts, a compact
+    inbox, and a detail panel showing the automation result (source/confidence/rules/values/explanation),
+    applicable rules, the latest fault + full event history, and the AI suggestion (or its failure). Accept /
+    Override (editable + addable fields) / Dismiss with a note, keyboard shortcuts (`a`/`o`/`d`/`j`) and
+    automatic "next item" navigation; a per-item audit trail renders what automation proposed, what the human
+    changed and when.
+  - the run-detail review card shows the derived state and the changed fields; `lib/status.ts` gained
+    `reviewStateTone`; new reviewer/inbox/audit CSS.
+- [x] Tests: +13 (222 total, 23 files) — `packages/core/src/domain/review.test.ts` (7: state derivation,
+  filter presets, changed fields, evidence parsing, audit schema) and `apps/api/src/review.test.ts` (6:
+  rich DTO + counts, conflict/low-confidence/error filters, override with audit + output regeneration +
+  decision state, accept keeps automation values, double-resolve 409 + unknown 404, resolved/overridden/
+  auto-resolved states). The `classify` evidence now includes `confidence`.
+- [x] `scripts/smoke.mjs` now exercises the filtered queue with counts, an override with an audit entry, and
+  verifies the regenerated output contains the human value.
+- [x] Docs: ADR-015, `docs/architecture.md` (human review lifecycle + abstractions), README, this file.
 
 ### Product session 5 — AI-assisted classification layer (2026-09-16)
 
@@ -513,7 +587,7 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 21 files / 209 tests passed |
+| Tests | `npm test` | 23 files / 222 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items); `__DecisionSource` present in the output CSV |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
@@ -523,7 +597,9 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | Rule management (API) | start the API, then `GET /api/v1/rule-sets`, `POST .../validate` (valid + invalid regex), `POST /api/v1/rule-sets`, run and read `/runs/:id/decisions` | seeded active set listed (7 rules); invalid regex fails validation; save bumps version and deactivates the previous set; a run resolves the active set and applies it |
 | AI layer (unit) | `npx vitest run packages/ai` | 31 tests: policy, factory, JSON/schema parsing, redaction, all resolution branches, service timeout/retry/exhaustion/malformed/disabled, OpenAI adapter with a mocked `fetch` (no live calls) |
 | AI layer (API E2E) | `npx vitest run apps/api/src/ai-classification.test.ts` | an injected mock provider produces a persisted `ai_suggested` decision (provenance + values), and the auto-approved account is absent from the review queue |
-| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) |
+| Review (core) | `npx vitest run packages/core/src/domain/review.test.ts` | derived states, filter presets, changed-value detection, tolerant evidence parsing, audit-log schema defaults |
+| Review (API E2E) | `npx vitest run apps/api/src/review.test.ts` | filter presets + counts, rich item DTO, override → audit entry + regenerated `output_csv` + `OVERRIDDEN` decision state, accept keeps automation values, double-resolve 409, unknown 404, `AUTO_RESOLVED` in the decision log |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) + `0004_lethal_agent_zero.sql` (`review_resolutions` + indexes) |
 
 Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
 in the **Datasets** UI → **Setup**: assign datasets to roles, map the account/timestamp/description/output
@@ -531,9 +607,13 @@ columns with live validation (errors block, ambiguous mappings need confirmation
 versioned configuration, and continue to processing → background run executes the deterministic
 classification (latest-fault selection) → (optional, policy-gated) AI assistance for uncertain cases behind
 a provider abstraction, never overriding a matched rule and always recorded with provenance → output
-CSV/XLSX + review queue CSV → decision log (deterministic vs AI-suggested + AI outcome) → review queue with
-accept/override/dismiss → review counters. The legacy path (upload via `/files`, start a run with explicit
-file ids and the config form) still works.
+CSV/XLSX + review queue CSV → decision log (deterministic vs AI-suggested + AI outcome, with a derived
+`reviewState` per account) → **Review queue**: filter to only what needs attention, see the latest fault +
+full history, the deterministic result, applicable rules, confidence and any AI suggestion side by side,
+then accept/override/dismiss with a note, keyboard shortcuts and next-item navigation → each decision appends
+an audit entry (what automation proposed, what changed, when) and rewrites the output file so the export
+matches the reviewed result. The legacy path (upload via `/files`, start a run with explicit file ids and
+the config form) still works.
 
 Sample run results (canonical `samples/account-faults` files with the default noop provider): 9 accounts,
 13 events, 10 output rows, 2 auto-approved, 7 review items (conflicting history, no events, no rule match,
@@ -555,8 +635,11 @@ paths.
 4. **The OpenAI provider requires credentials and is unverified live.** `AI_PROVIDER=openai` fails fast at
    startup unless `OPENAI_API_KEY` and `AI_MODEL` are set (see §12 for the privacy implications); the
    default `noop` provider reports itself unavailable and sends nothing.
-5. **Review resolutions do not regenerate artifacts** — resolving an item records the decision but the
-   output CSV/XLSX is not rewritten yet (next session item).
+5. **Review resolutions regenerate the output only when the run has a mapped account column.** The
+   audit trail is always recorded, but `ReviewService` can only patch `output_csv`/`output_xlsx` when
+   `run.config.primaryAccountColumn` is set (it is for configured runs and for legacy runs that supplied the
+   config); otherwise it logs a warning and keeps the resolution. The review-queue CSV is intentionally left
+   as the original snapshot.
 6. **Cancellation is internal only** — `RunService.cancelRun` exists but is not exposed as an endpoint.
 7. **XLSX reading/writing is buffered in memory** — fine for operational files, not for very large
    workbooks; the reader/writer interfaces already allow a streaming implementation later.
@@ -646,6 +729,23 @@ paths.
     except for `__DecisionSource` staying `deterministic`; the agreement is only in the decision evidence.
 38. **The `openai` provider is selected by env only.** There is no per-workflow or per-configuration provider
     choice, and no way to A/B or shadow-evaluate a model; `AI_PROVIDER` is global.
+39. **Reviewers are anonymous.** `resolvedBy` is always `null`; there is no auth, so the audit trail records
+    *what* changed and when, but not *who*. Audit is append-only per resolution, but the current UI only
+    offers one resolution per item (re-resolving a resolved item returns `409`); the data model already
+    supports a full history if a later session allows reopening.
+40. **Queue counts are computed by scanning review items** (`ReviewItemRepository.counts()` reads all rows in
+    both adapters) rather than by indexed aggregate queries. Fine for operational queues; revisit with SQL
+    `count`/`group by` when the queue grows.
+41. **Human corrections are not fed back into rules yet.** The audit log (`changedFields`, automation vs
+    applied values) is the groundwork, but there is no "suggest a rule from N similar overrides" feature, and
+    nothing auto-creates or edits a rule from a review decision.
+42. **Output regeneration re-reads and rewrites the whole artifact.** Patching a single entity parses the
+    entire CSV/XLSX, rewrites it, and updates the artifact size; acceptable for operational files, not for
+    very large outputs. Concurrent resolutions of two items in the same run patch serially (single-threaded
+    per request) and each rewrite starts from the latest stored file.
+43. **`__ReviewStatus` in the regenerated file becomes `APPROVED`/`OVERRIDDEN`**, while runs that were never
+    reviewed keep `AUTO_APPROVED`/`REVIEW_REQUIRED`. The decision record itself is unchanged (immutable), so
+    the file and the decision log intentionally differ after a human decision.
 
 ## 11. Technical Decisions
 
@@ -740,7 +840,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 209 tests / 21 files passing (`npm test`).** Coverage by area:
+**Status: 222 tests / 23 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -762,6 +862,8 @@ Not yet implemented (risks acknowledged):
 | AI layer | `packages/ai/src/ai.test.ts` | policy reasons, factory (noop default, openai requires key+model), noop result, balanced-JSON/schema parsing (prose + fences accepted; missing/malformed JSON and out-of-range confidence rejected; unknown keys stripped), redaction (excluded fields, entity key, latest-only), resolution (confident rule wins, AI never overrides, auto-approve gating, low-confidence/ambiguous flags, AI failure), service (not-consulted/disabled/skipped, suggested values, unknown class, redaction before provider, rate-limit retry then success, attempt-budget exhaustion, no retry on malformed, timeout of a hanging provider), OpenAI adapter with a mocked `fetch` (body shape/`response_format`, 401/429/malformed mapping) |
 | Workflow (AI) | `packages/workflow-engine/.../account-faults.test.ts` | +5 AI scenarios: confident AI proposal auto-approved only when no rule matched, AI can never override a confident rule (`ai_proposed_alternative`), low-confidence AI routes to review, provider failure keeps the run succeeding (`ai_failed`), and the request contains no raw row (bounded, non-identifying data) |
 | AI API | `apps/api/src/ai-classification.test.ts` | injected mock provider end to end through the HTTP API: a persisted `ai_suggested` decision with `decisionSource`, values and validated AI outcome, and the auto-approved account absent from the review queue |
+| Review domain | `packages/core/src/domain/review.test.ts` | derived `ReviewState` (incl. `ERROR` for `ai_failed`), `AUTO_RESOLVED` for no item, one definition per filter preset, `changedFields` (incl. removed fields), tolerant automation/event evidence parsing with fallbacks, audit-log schema defaults |
+| Review API | `apps/api/src/review.test.ts` | filter presets + `counts`, rich item DTO (automation block, latest event, history), override → `OVERRIDDEN` state + one audit entry with automation snapshot/`changedFields` + regenerated `output_csv` containing the human value + `OVERRIDDEN` decision state, accept records the automation values with no changed fields, double-resolve `409`, unknown item/history `404`, decision log shows `AUTO_RESOLVED` |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
@@ -803,30 +905,33 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 6: the review queue & human-in-the-loop** (queue `06-session.md`). The AI layer now produces
-suggestions and provenance, so the review loop is the natural next slice. Recommended order:
+**Product session 7: durable persistence & the loop back into rules** (queue `07-session.md`). The review
+loop is now complete and audited, and the next structural gap is durability plus using human decisions.
+Recommended order:
 
-1. **Human review system.** Make the review queue the product's differentiator: show, per item, the entity,
-   latest event, relevant history, the deterministic rule result, the AI suggestion (when present), the
-   confidence, the exact reason it was flagged, the applicable rules, and the current status
-   (`AUTO_RESOLVED`/`NEEDS_REVIEW`/`APPROVED`/`OVERRIDDEN`/`ERROR`). Support open → understand → see evidence
-   → accept / override → save → next, as fast as possible, with filtering (needs review, unresolved,
-   conflicts, low confidence, processing errors) and human overrides tracked separately from automated
-   decisions (audit what automation decided, why, what the human changed, and when).
-2. **Review → artifact regeneration.** Resolving a review item records the decision but does not rewrite the
-   output CSV/XLSX. Apply resolutions to the output rows and regenerate the artifacts
-   (`RunService`/artifact writer) so the exported file matches the reviewed result.
-3. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0003`), and exercise the
-   API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (including
-   `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug` and `run_decisions.decision_source`).
-4. **Rule-management follow-ups:** immutable rule-set version snapshots, validate action fields against the
-   workflow's declared output columns, an "accept an AI suggestion as a rule" flow, and import/export JSON.
-5. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
-   re-points assignments while keeping column mappings, and deprecating the legacy `/files` wizard.
-6. **AI follow-ups:** expose `decisionSource` filtering in the review/UI, per-configuration provider choice,
-   token/cost accounting, prompt-injection fixtures and an adapter contract test against a local endpoint.
-7. Then: scheduling/watched-folder ingestion, exposing identifier normalization options through configuration,
-   streaming/chunking the loader, and route-level code splitting for the web bundle.
+1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0004`), and exercise the
+   API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (memory vs Postgres
+   parity) covering the new `review_resolutions` audit, `reviewItems.counts()` / filtered listings,
+   `artifacts.update`, `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug`, and
+   `run_decisions.decision_source`. Fix any divergence the tests surface (the adapters have never run against
+   a live database).
+2. **Turn human corrections into rule suggestions.** Mine `review_resolutions` (`changedFields`, automation
+   vs applied values) into candidate rules/condition hypotheses and surface them (read-only) on the Rules
+   page or a review-insights panel — never auto-save a rule. This is the payoff of the audit trail.
+3. **Immutable version snapshots.** Rule sets and workflow configurations currently overwrite on save and
+   only increment `version`; add immutable history rows (or a versions table) so a run and its resolutions
+   can be tied to the exact rules/mapping used.
+4. **Review-loop polish:** reviewers are anonymous (`resolvedBy` null) — add at least a name/actor input (and
+   then auth), support reopening/re-resolving an item (the data model already supports history), and expose
+   reason/severity filters in the UI (the API supports them today).
+5. **AI follow-ups:** per-configuration provider choice, token/cost accounting, prompt-injection fixtures and
+   an adapter contract test against a local endpoint. Also consider `decisionSource`-based filtering in the
+   decision log UI.
+6. **Streaming/chunking:** the loader still reads whole files into memory (`readAllRows`) and artifact
+   regeneration re-reads whole outputs; add a streaming/chunked path behind the existing `TabularReader`
+   contract.
+7. Then: scheduling/watched-folder ingestion, exposing identifier normalization options through
+   configuration, and route-level code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -862,9 +967,21 @@ suggestions and provenance, so the review loop is the natural next slice. Recomm
   label/severity/order maps. Tests must inject a mock provider; ordinary `npm test` must never hit the
   network. The taxonomy target `values` are what an accepted AI proposal writes, so keep them in sync with
   the corresponding rule actions.
-- **Review status vocabulary:** `open`, `resolved_accepted`, `resolved_overridden`, `dismissed`.
-  `__ReviewStatus` in output files is `AUTO_APPROVED` or `REVIEW_REQUIRED`; `__DecisionSource` is
-  `deterministic` or `ai_suggested` (or empty/`none` when nothing produced values).
+- **Review status vocabulary:** persisted item status is `open`, `resolved_accepted`, `resolved_overridden`,
+  `dismissed`. The **derived** human-facing `ReviewState` is `AUTO_RESOLVED` (no item), `NEEDS_REVIEW`
+  (`open`, except `ai_failed` → `ERROR`), `APPROVED`, `OVERRIDDEN`, `DISMISSED`; it lives in
+  `packages/core/src/domain/review.ts` (`reviewStateForItem`) and is never stored. `__ReviewStatus` in the
+  original output file is `AUTO_APPROVED`/`REVIEW_REQUIRED`; after a human resolution the regenerated file
+  uses `APPROVED`/`OVERRIDDEN`. `__DecisionSource` is `deterministic` or `ai_suggested` (or empty/`none`
+  when nothing produced values) and is never overwritten by a human decision.
+- **Human decisions are append-only and separate from automation.** Never mutate a `DecisionRecord` when a
+  human resolves an item; write a `ReviewResolutionLog` instead. `ReviewService.resolve` is the single
+  resolution entry point (it records automation snapshot → applied values → `changedFields` and regenerates
+  the output). An "accept" with no explicit values must keep the automation result, not store `{}`. The
+  queue filter presets are defined once (`REVIEW_FILTER_DEFINITIONS` in `core`) and both the API and UI read
+  them; new presets/reasons go there and in the `ReviewReason` enum, never inline in a route or component.
+  Output regeneration requires `run.config.primaryAccountColumn` (uses the same `normalizeKey` as the
+  pipeline) — do not invent a fallback column.
 - **Roadmap guardrail:** don't add enterprise features (SSO, billing, complex RBAC) before the core
   workflow, review loop and Postgres durability are excellent.
 - **Dataset ingestion is the front door.** All uploads flow through
@@ -898,6 +1015,8 @@ suggestions and provenance, so the review loop is the natural next slice. Recomm
   `packages/file-processing/src/inspection.ts` →
   `packages/matching-engine/src/{types,normalize,match}.ts` →
   `packages/ai/src/{service,resolve,redact,openai-provider}.ts` →
+  `packages/core/src/domain/review.ts` →
+  `apps/api/src/services/review-service.ts` →
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
@@ -913,3 +1032,4 @@ suggestions and provenance, so the review loop is the natural next slice. Recomm
 | Product 3 | 2026-09-16 | Reusable matching/grouping/latest-event engine: new `@sheetpilot/matching-engine` (reported identifier normalization with opt-in dangerous steps, primary↔event join, deterministic latest selection, full history, join statistics), account-faults `group-events` delegates to it, +35 tests (163 total), benchmark (1M events ≈ 2.7 s). Verified: lint/typecheck/163 tests/build/smoke. |
 | Product 4 | 2026-09-16 | Rule engine & rule management: scoped conditions (`latest`/`any_event`/`all_events`) and full `RuleEvaluation` decision metadata, semantic `validateRuleSet` warnings/errors, `RuleSetService` + `/api/v1/rule-sets` (validated, versioned, one active set, resolved per run), Rules UI editor, +16 tests (179 total). Verified: lint/typecheck/179 tests/build/smoke. |
 | Product 5 | 2026-09-16 | AI-assisted classification layer: provider-neutral `ClassificationProvider` + structured request/result/outcome contracts, `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized failures), deterministic-first `resolveAssistedDecision` (AI never overrides a rule; auto-approval off by default), OpenAI-compatible adapter, `decisionSource` + AI provenance persisted (migration `0003`), review-card AI panel + run decision source, `__DecisionSource` output column, +30 tests (209 total). Verified: lint/typecheck/209 tests/build/smoke. |
+| Product 6 | 2026-09-16 | Review queue & human-in-the-loop: derived `ReviewState` + shared queue filter presets, append-only `review_resolutions` audit (migration `0004`) + repository, `ReviewService` (resolve/override/dismiss, automation snapshot, `changedFields`, output-artifact regeneration), enriched review DTOs (automation block, latest event, history, AI outcome, applicable rules), per-filter counts + filtered queue API, master/detail review workspace with keyboard shortcuts and audit trail, run-detail decision state, +13 tests (222 total). Verified: lint/typecheck/222 tests/build/smoke (filtered queue, override audit, regenerated output). |

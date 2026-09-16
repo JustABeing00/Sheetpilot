@@ -10,9 +10,12 @@ import type {
   FileAsset,
   FileRepository,
   Repositories,
+  ReviewCounts,
   ReviewItem,
   ReviewItemRepository,
   ReviewListOptions,
+  ReviewResolutionLog,
+  ReviewResolutionRepository,
   RuleSetRepository,
   RunListOptions,
   RunRepository,
@@ -45,6 +48,66 @@ function paginate<T>(items: T[], options?: { limit?: number; offset?: number }):
     : items.slice(offset, offset + options.limit);
 }
 
+const CONFLICT_REASONS = new Set([
+  'rule_conflict',
+  'conflicting_fault_history',
+  'ambiguous_latest_timestamp',
+]);
+const LOW_CONFIDENCE_REASONS = new Set(['low_confidence', 'ai_low_confidence']);
+
+function matchesReviewOptions(
+  item: { runId: string; status: string; reason: string; severity: string },
+  options?: ReviewListOptions,
+): boolean {
+  const statuses = options?.statuses ?? (options?.status ? [options.status] : undefined);
+  if (options?.runId !== undefined && item.runId !== options.runId) {
+    return false;
+  }
+  if (statuses && !statuses.includes(item.status as never)) {
+    return false;
+  }
+  if (options?.reasons && !options.reasons.includes(item.reason as never)) {
+    return false;
+  }
+  if (options?.severities && !options.severities.includes(item.severity as never)) {
+    return false;
+  }
+  return true;
+}
+
+function reviewCounts(items: ReviewItem[]): ReviewCounts {
+  const result: ReviewCounts = {
+    total: items.length,
+    open: 0,
+    needsReview: 0,
+    overridden: 0,
+    conflicts: 0,
+    lowConfidence: 0,
+    processingErrors: 0,
+  };
+  for (const item of items) {
+    if (item.status === 'open') {
+      result.open += 1;
+    }
+    if (item.status === 'open' && item.reason !== 'ai_failed') {
+      result.needsReview += 1;
+    }
+    if (item.status === 'resolved_overridden') {
+      result.overridden += 1;
+    }
+    if (CONFLICT_REASONS.has(item.reason)) {
+      result.conflicts += 1;
+    }
+    if (LOW_CONFIDENCE_REASONS.has(item.reason)) {
+      result.lowConfidence += 1;
+    }
+    if (item.reason === 'ai_failed') {
+      result.processingErrors += 1;
+    }
+  }
+  return result;
+}
+
 export function createInMemoryRepositories(): Repositories {
   const fileStore = new Map<string, FileAsset>();
   const datasetStore = new Map<string, DatasetProfile>();
@@ -54,6 +117,7 @@ export function createInMemoryRepositories(): Repositories {
   const stepStore = new Map<string, StepRun[]>();
   const decisionStore = new Map<string, DecisionRecord[]>();
   const reviewStore = new Map<string, ReviewItem>();
+  const resolutionStore = new Map<string, ReviewResolutionLog>();
   const artifactStore = new Map<string, Artifact>();
   const ruleSetStore = new Map<string, StoredRuleSet>();
 
@@ -197,15 +261,14 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(item);
     },
     listByRun: (runId, options?: ReviewListOptions) => {
-      const filtered = [...reviewStore.values()].filter(
-        (item) =>
-          item.runId === runId && (options?.status === undefined || item.status === options.status),
+      const filtered = [...reviewStore.values()].filter((item) =>
+        matchesReviewOptions(item, { ...options, runId }),
       );
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
     list: (options?: ReviewListOptions) => {
-      const filtered = [...reviewStore.values()].filter(
-        (item) => options?.status === undefined || item.status === options.status,
+      const filtered = [...reviewStore.values()].filter((item) =>
+        matchesReviewOptions(item, options),
       );
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
@@ -218,10 +281,39 @@ export function createInMemoryRepositories(): Repositories {
         [...reviewStore.values()].filter((item) => item.runId === runId && item.status === 'open')
           .length,
       ),
+    counts: () => Promise.resolve(reviewCounts([...reviewStore.values()])),
+  };
+
+  const reviewResolutions: ReviewResolutionRepository = {
+    create: (entry) => {
+      resolutionStore.set(entry.id, entry);
+      return Promise.resolve(entry);
+    },
+    listByItem: (reviewItemId) =>
+      Promise.resolve(
+        byDateDesc(
+          [...resolutionStore.values()].filter((entry) => entry.reviewItemId === reviewItemId),
+          (entry) => entry.createdAt,
+        ),
+      ),
+    listByRun: (runId, options) =>
+      Promise.resolve(
+        paginate(
+          byDateDesc(
+            [...resolutionStore.values()].filter((entry) => entry.runId === runId),
+            (entry) => entry.createdAt,
+          ),
+          options,
+        ),
+      ),
   };
 
   const artifacts: ArtifactRepository = {
     create: (artifact) => {
+      artifactStore.set(artifact.id, artifact);
+      return Promise.resolve(artifact);
+    },
+    update: (artifact) => {
       artifactStore.set(artifact.id, artifact);
       return Promise.resolve(artifact);
     },
@@ -262,6 +354,7 @@ export function createInMemoryRepositories(): Repositories {
     steps,
     decisions,
     reviewItems,
+    reviewResolutions,
     artifacts,
     ruleSets,
   };

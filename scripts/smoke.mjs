@@ -232,6 +232,52 @@ async function main() {
     `configured run: ${configuredFinished.status}, ${configuredFinished.stats.accounts} accounts, ${configuredFinished.reviewItemCount} review items`,
   );
 
+  // Human review loop: filter presets with counts, an append-only audit trail and output regeneration.
+  const reviewFilter = await request(
+    `/api/v1/review-items?filter=needs_review&runId=${configuredFinished.id}`,
+  );
+  assert(
+    reviewFilter.counts.needsReview >= reviewFilter.items.length,
+    'review queue must report per-filter counts',
+  );
+  const overrideTarget = reviewFilter.items.find(
+    (item) => Object.keys(item.suggestedValues).length > 0,
+  );
+  assert(overrideTarget, 'expected a review item with suggested values');
+
+  const overridden = await request(`/api/v1/review-items/${overrideTarget.id}/resolve`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      action: 'overridden',
+      values: { RootCause: 'Smoke Override' },
+      note: 'smoke override',
+    }),
+  });
+  assert(overridden.state === 'OVERRIDDEN', `expected OVERRIDDEN, got ${overridden.state}`);
+
+  const history = await request(`/api/v1/review-items/${overrideTarget.id}/history`);
+  assert(history.items.length === 1, 'a resolution must append exactly one audit entry');
+  assert(
+    history.items[0].changedFields.includes('RootCause'),
+    'the audit entry must record which fields the human changed',
+  );
+
+  const configuredArtifacts = await request(`/api/v1/runs/${configuredFinished.id}/artifacts`);
+  const configuredCsvArtifact = configuredArtifacts.items.find(
+    (item) => item.kind === 'output_csv',
+  );
+  const configuredCsv = await (
+    await fetch(`${baseUrl}${configuredCsvArtifact.downloadUrl}`)
+  ).text();
+  assert(
+    configuredCsv.includes('Smoke Override'),
+    'the regenerated output must reflect the human override',
+  );
+  console.log(
+    `review        : ${reviewFilter.items.length} needs-review, ${overrideTarget.entityKey} -> OVERRIDDEN, output regenerated, ${history.items.length} audit entry`,
+  );
+
   // Rule management: rules are data, validated before saving and versioned on save.
   const ruleSets = await request('/api/v1/rule-sets?workflowSlug=account-fault-triage');
   assert(ruleSets.items.length >= 1, 'expected at least one seeded rule set');

@@ -286,3 +286,44 @@ deterministic-first product promise). Trusting the model to return a value per o
 output shape becomes model-dependent; choosing a taxonomy target and mapping it is auditable). Reusing the
 rule engine as the AI output contract (rejected: rules are a different, richer abstraction; a small
 purpose-built result schema is easier to validate and evolve).
+
+## ADR-015 — Human review is a first-class, audited state machine over immutable automation records
+
+**Decision.** Automation and human decisions are stored separately and never overwrite each other. A run
+still writes immutable `DecisionRecord`s (what automation decided, why and with what confidence). A
+`ReviewItem` is the mutable work item a human acts on, and every resolution appends an immutable
+`ReviewResolutionLog` row capturing: the action, the previous status, the automation result (source,
+confidence, matched rules, values), the suggested values, the human's applied values, exactly which fields
+changed, the note, the reviewer and the timestamp. The human-facing **state** is derived, not stored:
+`AUTO_RESOLVED` (no review item), `NEEDS_REVIEW` (open), `APPROVED` (accepted), `OVERRIDDEN`, `DISMISSED` and
+`ERROR` (an assistive step such as AI failed). Reviewers act on exactly the cases that need attention:
+`GET /api/v1/review-items` supports queue presets (`needs_review`, `unresolved`, `conflicts`,
+`low_confidence`, `processing_errors`, `overridden`, `resolved`, `all`) plus `runId`/`reason`/`severity`
+filtering and returns per-filter counts. Resolving an item also rewrites the generated `output_csv`/`output_xlsx`
+so the exported file matches the reviewed decision, and the `__ReviewStatus` column becomes `APPROVED` or
+`OVERRIDDEN`; the review-queue artifact is left untouched.
+
+**Why.** The product promise is "automation handles the routine, humans see only the unusual" - which is only
+credible if a reviewer can (a) see precisely why a case was flagged, (b) see the deterministic result and any
+AI suggestion side by side, and (c) act in seconds without losing the history of what automation proposed.
+Overwriting the decision record would destroy that history, so the audit log is append-only and the decision
+record stays the immutable automation truth. Deriving the state from the persisted status keeps one vocabulary
+shared by the API, the queue and the decision log instead of several drifting enums. Storing the audit trail
+(and the `changedFields`) now is deliberate groundwork: a later session can mine human corrections to propose
+rule improvements without re-running the pipeline.
+
+**Consequences.** A new `review_resolutions` table (migration `0004`) and repository, plus
+`ReviewItemRepository.counts()` and an `ArtifactRepository.update` for regeneration. `ReviewService` owns
+resolution (previously in `RunService`); accepting without explicit values records the automation result
+explicitly rather than an empty resolution. Regeneration patches output rows by matching the configured
+`primaryAccountColumn` with the same normalization the pipeline uses, so it works for configured and legacy
+runs that supplied the column; runs without that config keep the resolution but cannot patch the file (logged,
+not silently wrong). Reviewers are still unauthenticated (`resolvedBy` is always `null`), and states remain
+derived rather than a stored column to avoid a second source of truth.
+
+**Alternatives considered.** Storing the state as a column on `review_items` (rejected: duplicates the status
+and can drift). Letting a review resolution mutate the `DecisionRecord` (rejected: destroys the automation
+audit trail). Re-running the whole workflow after each resolution (rejected: expensive and could change
+unrelated rows; targeted patching is deterministic and cheap). Building a separate "review entries" table for
+auto-resolved decisions (rejected as premature: the decision log already lists every account, and the queue
+should only surface exceptions).

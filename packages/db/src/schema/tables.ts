@@ -15,6 +15,8 @@ import type {
   DatasetAssignment,
   DatasetColumn,
   DatasetWarning,
+  OutputValue,
+  ReviewAutomation,
   SampleRow,
   WorkflowConfigField,
 } from '@sheetpilot/core';
@@ -188,6 +190,30 @@ export const reviewItems = pgTable(
   (table) => [index('review_items_run_status_idx').on(table.runId, table.status)],
 );
 
+export const reviewResolutions = pgTable(
+  'review_resolutions',
+  {
+    id: text('id').primaryKey(),
+    reviewItemId: text('review_item_id').notNull(),
+    runId: text('run_id').notNull(),
+    entityKey: text('entity_key').notNull(),
+    action: text('action').notNull(),
+    previousStatus: text('previous_status').notNull(),
+    resultingState: text('resulting_state').notNull(),
+    automation: jsonb('automation').$type<ReviewAutomation>().notNull(),
+    suggestedValues: jsonb('suggested_values').$type<Record<string, OutputValue>>().notNull(),
+    appliedValues: jsonb('applied_values').$type<Record<string, OutputValue>>().notNull(),
+    changedFields: jsonb('changed_fields').$type<string[]>().notNull(),
+    note: text('note').notNull(),
+    resolvedBy: text('resolved_by'),
+    createdAt: timestampColumn('created_at'),
+  },
+  (table) => [
+    index('review_resolutions_item_idx').on(table.reviewItemId),
+    index('review_resolutions_run_idx').on(table.runId),
+  ],
+);
+
 export const artifacts = pgTable(
   'artifacts',
   {
@@ -213,5 +239,6 @@ export const schema = {
   runSteps,
   runDecisions,
   reviewItems,
+  reviewResolutions,
   artifacts,
 };

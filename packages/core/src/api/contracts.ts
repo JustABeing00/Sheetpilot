@@ -32,6 +32,7 @@ import {
 } from '../domain/workflow-config.js';
 import { ruleSchema, ruleValidationIssueSchema } from '../domain/rules.js';
 import { aiAssistOutcomeSchema } from '../domain/ai.js';
+import { reviewAutomationSchema, reviewEventSchema, reviewStateSchema } from '../domain/review.js';
 
 export const isoDateTimeSchema = z
   .string()
@@ -268,9 +269,15 @@ export const reviewItemDtoSchema = z.object({
   reason: reviewReasonSchema,
   severity: reviewSeveritySchema,
   status: reviewItemStatusSchema,
+  /** Derived, human-facing state: AUTO_RESOLVED / NEEDS_REVIEW / APPROVED / OVERRIDDEN / DISMISSED / ERROR. */
+  state: reviewStateSchema,
   title: z.string(),
   detail: z.string(),
   suggestedValues: z.record(z.string(), outputValueSchema),
+  /** What automation decided before any human touched the case. */
+  automation: reviewAutomationSchema,
+  latestEvent: reviewEventSchema.nullable(),
+  eventHistory: z.array(reviewEventSchema),
   evidence: jsonObjectSchema,
   ai: aiAssistOutcomeSchema.nullable(),
   resolution: z
@@ -279,12 +286,48 @@ export const reviewItemDtoSchema = z.object({
       values: z.record(z.string(), outputValueSchema),
       note: z.string(),
       resolvedBy: z.string().nullable(),
+      /** Fields where the human's applied value differs from the automated value. */
+      changedFields: z.array(z.string()),
     })
     .nullable(),
   createdAt: isoDateTimeSchema,
   resolvedAt: isoDateTimeSchema.nullable(),
 });
 export type ReviewItemDto = z.infer<typeof reviewItemDtoSchema>;
+
+export const reviewResolutionLogDtoSchema = z.object({
+  id: z.string(),
+  reviewItemId: z.string(),
+  runId: z.string(),
+  entityKey: z.string(),
+  action: reviewActionSchema,
+  previousStatus: reviewItemStatusSchema,
+  resultingState: reviewStateSchema,
+  automation: reviewAutomationSchema,
+  suggestedValues: z.record(z.string(), outputValueSchema),
+  appliedValues: z.record(z.string(), outputValueSchema),
+  changedFields: z.array(z.string()),
+  note: z.string(),
+  resolvedBy: z.string().nullable(),
+  createdAt: isoDateTimeSchema,
+});
+export type ReviewResolutionLogDto = z.infer<typeof reviewResolutionLogDtoSchema>;
+
+export const reviewHistoryResponseSchema = z.object({
+  items: z.array(reviewResolutionLogDtoSchema),
+});
+export type ReviewHistoryResponse = z.infer<typeof reviewHistoryResponseSchema>;
+
+export const reviewCountsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  open: z.number().int().nonnegative(),
+  needsReview: z.number().int().nonnegative(),
+  overridden: z.number().int().nonnegative(),
+  conflicts: z.number().int().nonnegative(),
+  lowConfidence: z.number().int().nonnegative(),
+  processingErrors: z.number().int().nonnegative(),
+});
+export type ReviewCountsDto = z.infer<typeof reviewCountsSchema>;
 
 export const decisionDtoSchema = z.object({
   id: z.string(),
@@ -298,6 +341,8 @@ export const decisionDtoSchema = z.object({
   outputValues: z.record(z.string(), outputValueSchema),
   evidence: jsonObjectSchema,
   ai: aiAssistOutcomeSchema.nullable(),
+  /** AUTO_RESOLVED when automation handled it; otherwise the state of its review item. */
+  reviewState: reviewStateSchema,
   createdAt: isoDateTimeSchema,
 });
 export type DecisionDto = z.infer<typeof decisionDtoSchema>;
@@ -427,6 +472,11 @@ export const reviewItemListResponseSchema = z.object({
   items: z.array(reviewItemDtoSchema),
   openCount: z.number().int().nonnegative(),
 });
+
+export const reviewQueueResponseSchema = reviewItemListResponseSchema.extend({
+  counts: reviewCountsSchema,
+});
+export type ReviewQueueResponse = z.infer<typeof reviewQueueResponseSchema>;
 export type ReviewItemListResponse = z.infer<typeof reviewItemListResponseSchema>;
 
 export const decisionListResponseSchema = z.object({

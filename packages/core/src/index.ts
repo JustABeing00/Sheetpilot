@@ -7,6 +7,7 @@ export * from './domain/workflow-config.js';
 export * from './domain/ids.js';
 export * from './domain/rules.js';
 export * from './domain/ai.js';
+export * from './domain/review.js';
 export * from './api/contracts.js';
 export * from './ports/clock.js';
 export * from './ports/logger.js';

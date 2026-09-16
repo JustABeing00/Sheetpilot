@@ -13,7 +13,8 @@ import type {
   WorkflowRun,
   WorkflowId,
 } from '../domain/entities.js';
-import type { RunStatus, ReviewItemStatus } from '../domain/enums.js';
+import type { RunStatus, ReviewItemStatus, ReviewReason, ReviewSeverity } from '../domain/enums.js';
+import type { ReviewResolutionLog } from '../domain/review.js';
 import type { StoredRuleSet } from '../domain/rules.js';
 import type { DatasetRepository } from './datasets.js';
 import type { WorkflowConfigurationRepository } from './workflow-configurations.js';
@@ -63,9 +64,29 @@ export interface DecisionRepository {
 }
 
 export interface ReviewListOptions {
+  /** Single-status filter (run-scoped listings keep using this). */
   status?: ReviewItemStatus;
+  /** Multi-status filter (e.g. every unresolved status). Takes precedence over `status`. */
+  statuses?: ReviewItemStatus[];
+  /** Only items whose primary reason is in this list. */
+  reasons?: ReviewReason[];
+  /** Only items with one of these severities. */
+  severities?: ReviewSeverity[];
+  /** Restrict to a single run. */
+  runId?: RunId;
   limit?: number;
   offset?: number;
+}
+
+/** Bucketed counts for the review queue's filter chips, computed across the whole queue. */
+export interface ReviewCounts {
+  total: number;
+  open: number;
+  needsReview: number;
+  overridden: number;
+  conflicts: number;
+  lowConfidence: number;
+  processingErrors: number;
 }
 
 export interface ReviewItemRepository {
@@ -77,10 +98,24 @@ export interface ReviewItemRepository {
   countOpen(): Promise<number>;
   countByRun(runId: RunId): Promise<number>;
   countOpenByRun(runId: RunId): Promise<number>;
+  counts(): Promise<ReviewCounts>;
+}
+
+export interface ReviewHistoryListOptions {
+  limit?: number;
+  offset?: number;
+}
+
+/** Append-only audit of human review decisions. */
+export interface ReviewResolutionRepository {
+  create(entry: ReviewResolutionLog): Promise<ReviewResolutionLog>;
+  listByItem(reviewItemId: string): Promise<ReviewResolutionLog[]>;
+  listByRun(runId: RunId, options?: ReviewHistoryListOptions): Promise<ReviewResolutionLog[]>;
 }
 
 export interface ArtifactRepository {
   create(artifact: Artifact): Promise<Artifact>;
+  update(artifact: Artifact): Promise<Artifact>;
   getById(id: ArtifactId): Promise<Artifact | null>;
   listByRun(runId: RunId): Promise<Artifact[]>;
 }
@@ -102,6 +137,7 @@ export interface Repositories {
   steps: StepRunRepository;
   decisions: DecisionRepository;
   reviewItems: ReviewItemRepository;
+  reviewResolutions: ReviewResolutionRepository;
   artifacts: ArtifactRepository;
   ruleSets: RuleSetRepository;
 }

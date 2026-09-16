@@ -3,6 +3,7 @@ import {
   decisionListResponseSchema,
   NotFoundError,
   reviewItemListResponseSchema,
+  reviewStateForDecision,
   runListResponseSchema,
   runStatusSchema,
   ValidationError,
@@ -113,13 +114,18 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
     const limit = clampLimit(query['limit'], 100);
     const offset = parseOffset(query['offset']);
-    const [records, total] = await Promise.all([
+    const [records, total, reviewItems] = await Promise.all([
       container.repositories.decisions.listByRun(id, { limit, offset }),
       container.repositories.decisions.countByRun(id),
+      container.repositories.reviewItems.listByRun(id, { limit: 1000 }),
     ]);
 
+    const itemByEntity = new Map(reviewItems.map((item) => [item.entityKey, item]));
+
     return decisionListResponseSchema.parse({
-      items: records.map(toDecisionDto),
+      items: records.map((record) =>
+        toDecisionDto(record, reviewStateForDecision(itemByEntity.get(record.entityKey))),
+      ),
       total,
     });
   });

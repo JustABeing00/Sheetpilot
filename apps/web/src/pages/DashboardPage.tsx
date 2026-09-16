@@ -9,7 +9,7 @@ export function DashboardPage() {
   const health = useHealth();
   const workflows = useWorkflows();
   const runs = useRuns();
-  const reviewQueue = useReviewQueue('open');
+  const reviewQueue = useReviewQueue('needs_review');
 
   const recentRuns = runs.data?.items.slice(0, 6) ?? [];
   const latestRun = recentRuns[0];

@@ -537,6 +537,7 @@ function buildEvidence(decision: EntityDecision): Record<string, unknown> {
     matchedRules: decision.evaluation.matchedRules,
     resultingValues: decision.evaluation.resultingValues,
     decisionSource: decision.decisionSource,
+    confidence: decision.confidence,
     ai: decision.ai,
   };
 }

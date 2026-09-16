@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 import {
   artifactSchema,
   datasetProfileSchema,
   decisionRecordSchema,
   fileAssetSchema,
   reviewItemSchema,
+  reviewResolutionLogSchema,
   storedRuleSetSchema,
   stepRunSchema,
   workflowConfigurationSchema,
@@ -15,19 +16,24 @@ import {
   type DecisionRecord,
   type FileAsset,
   type Repositories,
+  type ReviewCounts,
   type ReviewItem,
+  type ReviewListOptions,
+  type ReviewResolutionLog,
   type StepRun,
   type StoredRuleSet,
   type Workflow,
   type WorkflowConfiguration,
   type WorkflowRun,
 } from '@sheetpilot/core';
+import type { SQL } from 'drizzle-orm';
 import type { Database } from '../../client.js';
 import {
   artifacts,
   datasets,
   files,
   reviewItems,
+  reviewResolutions,
   ruleSets,
   runDecisions,
   runs,
@@ -35,6 +41,33 @@ import {
   workflowConfigurations,
   workflows,
 } from '../../schema/tables.js';
+
+const CONFLICT_REASONS = [
+  'rule_conflict',
+  'conflicting_fault_history',
+  'ambiguous_latest_timestamp',
+];
+const LOW_CONFIDENCE_REASONS = ['low_confidence', 'ai_low_confidence'];
+
+function reviewCondition(options?: ReviewListOptions, runId?: string): SQL | undefined {
+  const conditions: SQL[] = [];
+  const scope = runId ?? options?.runId;
+  if (scope) {
+    conditions.push(eq(reviewItems.runId, scope));
+  }
+  if (options?.statuses && options.statuses.length > 0) {
+    conditions.push(inArray(reviewItems.status, options.statuses));
+  } else if (options?.status) {
+    conditions.push(eq(reviewItems.status, options.status));
+  }
+  if (options?.reasons && options.reasons.length > 0) {
+    conditions.push(inArray(reviewItems.reason, options.reasons));
+  }
+  if (options?.severities && options.severities.length > 0) {
+    conditions.push(inArray(reviewItems.severity, options.severities));
+  }
+  return conditions.length === 0 ? undefined : and(...conditions);
+}
 
 const toFileAsset = (row: typeof files.$inferSelect): FileAsset => fileAssetSchema.parse(row);
 const toDataset = (row: typeof datasets.$inferSelect): DatasetProfile =>
@@ -50,6 +83,8 @@ const toDecision = (row: typeof runDecisions.$inferSelect): DecisionRecord =>
   decisionRecordSchema.parse(row);
 const toReviewItem = (row: typeof reviewItems.$inferSelect): ReviewItem =>
   reviewItemSchema.parse({ ...row, resolution: row.resolution ?? null });
+const toReviewResolution = (row: typeof reviewResolutions.$inferSelect): ReviewResolutionLog =>
+  reviewResolutionLogSchema.parse(row);
 const toArtifact = (row: typeof artifacts.$inferSelect): Artifact => artifactSchema.parse(row);
 const toRuleSet = (row: typeof ruleSets.$inferSelect): StoredRuleSet =>
   storedRuleSetSchema.parse(row);
@@ -328,11 +363,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         const rows = await db
           .select()
           .from(reviewItems)
-          .where(
-            options?.status
-              ? and(eq(reviewItems.runId, runId), eq(reviewItems.status, options.status))
-              : eq(reviewItems.runId, runId),
-          )
+          .where(reviewCondition(options, runId))
           .orderBy(desc(reviewItems.createdAt))
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
@@ -342,7 +373,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         const rows = await db
           .select()
           .from(reviewItems)
-          .where(options?.status ? eq(reviewItems.status, options.status) : undefined)
+          .where(reviewCondition(options))
           .orderBy(desc(reviewItems.createdAt))
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
@@ -369,11 +400,97 @@ export function createPostgresRepositories(db: Database): Repositories {
           .where(and(eq(reviewItems.runId, runId), eq(reviewItems.status, 'open')));
         return row?.value ?? 0;
       },
+      async counts() {
+        const rows = await db
+          .select({ status: reviewItems.status, reason: reviewItems.reason })
+          .from(reviewItems);
+        const result: ReviewCounts = {
+          total: rows.length,
+          open: 0,
+          needsReview: 0,
+          overridden: 0,
+          conflicts: 0,
+          lowConfidence: 0,
+          processingErrors: 0,
+        };
+        for (const row of rows) {
+          if (row.status === 'open') {
+            result.open += 1;
+            if (row.reason !== 'ai_failed') {
+              result.needsReview += 1;
+            }
+          }
+          if (row.status === 'resolved_overridden') {
+            result.overridden += 1;
+          }
+          if (CONFLICT_REASONS.includes(row.reason)) {
+            result.conflicts += 1;
+          }
+          if (LOW_CONFIDENCE_REASONS.includes(row.reason)) {
+            result.lowConfidence += 1;
+          }
+          if (row.reason === 'ai_failed') {
+            result.processingErrors += 1;
+          }
+        }
+        return result;
+      },
+    },
+
+    reviewResolutions: {
+      async create(entry) {
+        const [row] = await db
+          .insert(reviewResolutions)
+          .values({
+            id: entry.id,
+            reviewItemId: entry.reviewItemId,
+            runId: entry.runId,
+            entityKey: entry.entityKey,
+            action: entry.action,
+            previousStatus: entry.previousStatus,
+            resultingState: entry.resultingState,
+            automation: entry.automation,
+            suggestedValues: entry.suggestedValues,
+            appliedValues: entry.appliedValues,
+            changedFields: entry.changedFields,
+            note: entry.note,
+            resolvedBy: entry.resolvedBy,
+            createdAt: entry.createdAt,
+          })
+          .returning();
+        return toReviewResolution(row!);
+      },
+      async listByItem(reviewItemId) {
+        const rows = await db
+          .select()
+          .from(reviewResolutions)
+          .where(eq(reviewResolutions.reviewItemId, reviewItemId))
+          .orderBy(desc(reviewResolutions.createdAt));
+        return rows.map(toReviewResolution);
+      },
+      async listByRun(runId, options) {
+        const rows = await db
+          .select()
+          .from(reviewResolutions)
+          .where(eq(reviewResolutions.runId, runId))
+          .orderBy(desc(reviewResolutions.createdAt))
+          .limit(options?.limit ?? 200)
+          .offset(options?.offset ?? 0);
+        return rows.map(toReviewResolution);
+      },
     },
 
     artifacts: {
       async create(artifact) {
         const [row] = await db.insert(artifacts).values(artifact).returning();
+        return toArtifact(row!);
+      },
+      async update(artifact) {
+        const [row] = await db
+          .update(artifacts)
+          .set({ sizeBytes: artifact.sizeBytes, createdAt: artifact.createdAt })
+          .where(eq(artifacts.id, artifact.id))
+          .returning();
         return toArtifact(row!);
       },
       async getById(id) {

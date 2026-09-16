@@ -6,6 +6,8 @@ import type {
   DatasetSummary,
   FileAsset,
   ReviewItem,
+  ReviewResolutionLog,
+  ReviewState,
   RunDto,
   RunSummaryDto,
   StepRun,
@@ -14,7 +16,13 @@ import type {
   WorkflowConfigurationSummary,
   WorkflowRun,
 } from '@sheetpilot/core';
-import { aiAssistOutcomeSchema } from '@sheetpilot/core';
+import {
+  aiAssistOutcomeSchema,
+  changedFields,
+  reviewAutomationFromEvidence,
+  reviewEventsFromEvidence,
+  reviewStateForItem,
+} from '@sheetpilot/core';
 import type { RegisteredWorkflow } from '@sheetpilot/workflow-engine';
 import type {
   ArtifactDto,
@@ -23,6 +31,7 @@ import type {
   DecisionDto,
   FileAssetDto,
   ReviewItemDto,
+  ReviewResolutionLogDto,
   RuleSetDto,
   RuleSetSummaryDto,
   StepRunDto,
@@ -196,6 +205,9 @@ export function toRunSummaryDto(run: WorkflowRun, description: RunDescription): 
 }
 
 export function toReviewItemDto(item: ReviewItem, workflowSlug: string | null): ReviewItemDto {
+  const automation = reviewAutomationFromEvidence(item.evidence, item.suggestedValues);
+  const { latestEvent, history } = reviewEventsFromEvidence(item.evidence);
+
   return {
     id: item.id,
     runId: item.runId,
@@ -204,9 +216,13 @@ export function toReviewItemDto(item: ReviewItem, workflowSlug: string | null): 
     reason: item.reason,
     severity: item.severity,
     status: item.status,
+    state: reviewStateForItem(item),
     title: item.title,
     detail: item.detail,
     suggestedValues: item.suggestedValues,
+    automation,
+    latestEvent,
+    eventHistory: history,
     evidence: item.evidence,
     ai: toAiOutcome(item.evidence),
     resolution: item.resolution
@@ -215,6 +231,7 @@ export function toReviewItemDto(item: ReviewItem, workflowSlug: string | null): 
           values: item.resolution.values,
           note: item.resolution.note,
           resolvedBy: item.resolution.resolvedBy,
+          changedFields: changedFields(automation.values, item.resolution.values),
         }
       : null,
     createdAt: item.createdAt.toISOString(),
@@ -222,7 +239,26 @@ export function toReviewItemDto(item: ReviewItem, workflowSlug: string | null): 
   };
 }
 
-export function toDecisionDto(record: DecisionRecord): DecisionDto {
+export function toReviewResolutionLogDto(entry: ReviewResolutionLog): ReviewResolutionLogDto {
+  return {
+    id: entry.id,
+    reviewItemId: entry.reviewItemId,
+    runId: entry.runId,
+    entityKey: entry.entityKey,
+    action: entry.action,
+    previousStatus: entry.previousStatus,
+    resultingState: entry.resultingState,
+    automation: entry.automation,
+    suggestedValues: entry.suggestedValues,
+    appliedValues: entry.appliedValues,
+    changedFields: entry.changedFields,
+    note: entry.note,
+    resolvedBy: entry.resolvedBy,
+    createdAt: entry.createdAt.toISOString(),
+  };
+}
+
+export function toDecisionDto(record: DecisionRecord, reviewState: ReviewState): DecisionDto {
   return {
     id: record.id,
     runId: record.runId,
@@ -235,6 +271,7 @@ export function toDecisionDto(record: DecisionRecord): DecisionDto {
     outputValues: record.outputValues,
     evidence: record.evidence,
     ai: toAiOutcome(record.evidence),
+    reviewState,
     createdAt: record.createdAt.toISOString(),
   };
 }

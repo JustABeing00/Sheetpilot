@@ -165,6 +165,32 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    adds a `__DecisionSource` column. Human accept/override lives on the review item, so deterministic,
    AI-suggested and human-reviewed results never blur together.
 
+## Human review lifecycle
+
+1. Automation writes **immutable** `DecisionRecord`s (one per account) and, only for flagged accounts, a
+   mutable `ReviewItem` holding the primary reason, severity, suggested values and the full evidence
+   (fault count, latest/earlier faults, explanation, rule trace, AI outcome). Accounts with no review item
+   are `AUTO_RESOLVED`; nothing is invented for them.
+2. The queue (`GET /api/v1/review-items`) is filtered by presets shared with the UI
+   (`needs_review`/`unresolved`/`conflicts`/`low_confidence`/`processing_errors`/`overridden`/`resolved`/`all`)
+   or by `runId`/`reason`/`severity`, and returns `counts` so the UI can show "show me only what needs me"
+   with per-filter badges. `state` is derived from the item (`NEEDS_REVIEW`/`APPROVED`/`OVERRIDDEN`/
+   `DISMISSED`/`ERROR`) and, for decisions without an item, `AUTO_RESOLVED`.
+3. The review DTO is enriched for fast decisions: the automation block (source, confidence, matched rule ids,
+   rule status, values, applicable rule summaries, explanation), the latest event and the earlier event
+   history, and the validated AI outcome — all parsed from persisted evidence, never recomputed.
+4. `POST /api/v1/review-items/:id/resolve` (`accepted`/`overridden`/`dismissed`) is handled by
+   `ReviewService`: it snapshots the automation values, applies the human values (an accept with no explicit
+   values keeps the automation result), updates the item and appends a `ReviewResolutionLog`. The log is the
+   audit trail: previous status, automation source/confidence/values, suggested values, applied values,
+   `changedFields`, note and timestamp. `GET /api/v1/review-items/:id/history` returns it.
+5. When applied values exist, `ReviewService` rewrites the run's `output_csv`/`output_xlsx` rows for that
+   entity (matched by the configured `primaryAccountColumn` through `normalizeKey`), sets
+   `__ReviewStatus` to `APPROVED`/`OVERRIDDEN` and updates the artifact size, so the exported file matches
+   the reviewed decision. The review-queue CSV is left as the original snapshot. Runs started without a
+   configured `primaryAccountColumn` keep the resolution (and audit) but cannot patch the file; the service
+   logs that instead of guessing.
+
 ## Key abstractions (ports & contracts)
 
 | Concept | Location | Notes |
@@ -196,6 +222,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `resolveAssistedDecision` | `packages/ai/src/resolve.ts` | The single deterministic-first merge; AI never overrides a matched rule |
 | `OpenAiClassificationProvider` | `packages/ai/src/openai-provider.ts` | OpenAI-compatible adapter (configurable base URL/model, injectable `fetch`), maps HTTP/network faults to `AiFailureKind`s |
 | `decideAiUsage` | `packages/ai/src/policy.ts` | AI is only consulted per explicit policy and never overrides a deterministic match |
+| `ReviewState` / `reviewStateForItem` | `packages/core/src/domain/review.ts` | Derived human-facing state (`AUTO_RESOLVED`/`NEEDS_REVIEW`/`APPROVED`/`OVERRIDDEN`/`DISMISSED`/`ERROR`) and the shared queue filter presets |
+| `ReviewResolutionLog` | `packages/core/src/domain/review.ts` | Append-only audit of each human decision: automation snapshot, suggested vs applied values, `changedFields`, note, timestamp |
+| `ReviewResolutionRepository` | `packages/core/src/ports/repositories.ts` | Persistence port for the audit trail (in-memory and Postgres adapters) |
+| `ReviewService` | `apps/api/src/services/review-service.ts` | Resolves review items, appends the audit entry and regenerates the output artifacts to match the human decision |
 | API DTO schemas | `packages/core/src/api/contracts.ts` | Single source of truth for request/response shapes used by API and web |
 
 ## Determinism and traceability rules
@@ -222,7 +252,9 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
   (`deterministic`/`ai_suggested`/`none`), evidence (fault count, latest fault, earlier faults, explanation,
   rule trace, AI outcome/provenance) and review reasons.
 - Artifacts include `__DecisionSource` and `__Explanation` columns and a review queue CSV so the result is
-  auditable outside the app. A human resolution is tracked separately on the review item.
+  auditable outside the app. A human resolution is tracked separately on the review item and in the
+  append-only `review_resolutions` log, and (when the run has a mapped account column) is written back into
+  the output file with `__ReviewStatus` set to `APPROVED`/`OVERRIDDEN`.
 
 ## Extension points for later sessions
 
@@ -247,4 +279,5 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 - No scheduler/cron or watched-folder ingestion yet.
 - No editable UI for rules; rule sets ship as code-validated data.
 - Runs execute in-process (no worker pool); large-file parallelism and cancellation API come later.
-- Review resolutions are recorded but do not yet regenerate the output artifact.
+- Reviewers are unauthenticated (`resolvedBy` is always `null`); human corrections are audited but not yet
+  fed back into rule suggestions.

@@ -142,6 +142,12 @@ policy-gated **assistant** behind a provider abstraction: it can only be consult
 are insufficient, it can never override a matched rule, its output is strictly validated (proposed class,
 reasoning, confidence, ambiguity/missing-information flags), and any AI suggestion is recorded with full
 provenance (`decisionSource`, provider, model, agreement) and routed to review unless auto-approval is
-explicitly enabled. Provider failures degrade to a review reason, never a wrong result. Scheduling,
-authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
-prioritized next steps.
+explicitly enabled. Provider failures degrade to a review reason, never a wrong result. Human review is a
+first-class, fast loop: the **Review queue** filters to only what needs attention (needs review, conflicts,
+low confidence, processing errors, overridden), shows each case's latest event, full event history,
+deterministic result, applicable rules, confidence and any AI suggestion side by side, and supports
+accept/override/dismiss with keyboard shortcuts and next-item navigation. Every human decision is an
+append-only audit entry (what automation proposed, what the human changed, when) and, for runs with a mapped
+account column, is written back into the generated output so the export matches the reviewed result.
+Scheduling, authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15
+for the prioritized next steps.

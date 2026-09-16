@@ -22,6 +22,23 @@ export function statusTone(status: string): BadgeTone {
   }
 }
 
+export function reviewStateTone(state: string): BadgeTone {
+  switch (state) {
+    case 'APPROVED':
+    case 'AUTO_RESOLVED':
+      return 'success';
+    case 'OVERRIDDEN':
+      return 'info';
+    case 'ERROR':
+      return 'danger';
+    case 'DISMISSED':
+      return 'neutral';
+    case 'NEEDS_REVIEW':
+    default:
+      return 'warning';
+  }
+}
+
 export function severityTone(severity: string): BadgeTone {
   switch (severity) {
     case 'critical':

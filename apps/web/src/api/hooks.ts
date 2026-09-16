@@ -11,8 +11,10 @@ import {
   fileListResponseSchema,
   healthResponseSchema,
   metaResponseSchema,
+  reviewHistoryResponseSchema,
   reviewItemDtoSchema,
   reviewItemListResponseSchema,
+  reviewQueueResponseSchema,
   ruleSetDtoSchema,
   ruleSetListResponseSchema,
   ruleSetValidationResponseSchema,
@@ -26,6 +28,7 @@ import {
   type CreateRunRequest,
   type CreateWorkflowConfigurationRequest,
   type ResolveReviewItemRequest,
+  type ReviewFilter,
   type UpdateRuleSetRequest,
   type UpdateWorkflowConfigurationRequest,
   type ValidateRuleSetRequest,
@@ -43,7 +46,8 @@ export const queryKeys = {
   decisions: (runId: string) => ['runs', runId, 'decisions'] as const,
   runReviewItems: (runId: string) => ['runs', runId, 'review-items'] as const,
   artifacts: (runId: string) => ['runs', runId, 'artifacts'] as const,
-  reviewQueue: (status: string) => ['review-items', status] as const,
+  reviewQueue: (filter: string) => ['review-items', filter] as const,
+  reviewHistory: (itemId: string) => ['review-items', itemId, 'history'] as const,
   files: ['files'] as const,
   datasets: ['datasets'] as const,
   dataset: (id: string) => ['datasets', id] as const,
@@ -132,12 +136,20 @@ export function useRunArtifacts(runId: string | undefined) {
   });
 }
 
-export function useReviewQueue(status: 'open' | 'all') {
-  const query = status === 'open' ? '?status=open&limit=200' : '?limit=200';
+export function useReviewQueue(filter: ReviewFilter) {
+  const query = filter === 'all' ? '?limit=200' : `?filter=${filter}&limit=200`;
   return useQuery({
-    queryKey: queryKeys.reviewQueue(status),
-    queryFn: () => apiGet(`/api/v1/review-items${query}`, reviewItemListResponseSchema),
+    queryKey: queryKeys.reviewQueue(filter),
+    queryFn: () => apiGet(`/api/v1/review-items${query}`, reviewQueueResponseSchema),
     refetchInterval: 5000,
+  });
+}
+
+export function useReviewHistory(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.reviewHistory(itemId ?? ''),
+    queryFn: () => apiGet(`/api/v1/review-items/${itemId}/history`, reviewHistoryResponseSchema),
+    enabled: Boolean(itemId),
   });
 }
 

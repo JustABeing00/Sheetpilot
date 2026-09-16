@@ -4,7 +4,7 @@ import { AI_AMBIGUITY_LABELS, AI_FAILURE_LABELS } from '@sheetpilot/core';
 import { useResolveReviewItem } from '../api/hooks.js';
 import { formatCellValue, formatDateTime, humanizeToken } from '../lib/format.js';
 import { Badge } from './ui.js';
-import { severityTone } from '../lib/status.js';
+import { reviewStateTone, severityTone } from '../lib/status.js';
 
 interface EvidenceView {
   faultCount?: number;
@@ -48,7 +48,7 @@ export function ReviewItemCard({
           <span className="entity-key">{item.entityKey}</span>
           <div className="review-card-badges">
             <Badge tone={severityTone(item.severity)}>{humanizeToken(item.reason)}</Badge>
-            <Badge tone={isOpen ? 'warning' : 'success'}>{humanizeToken(item.status)}</Badge>
+            <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
             {item.workflowSlug ? <span className="muted">{item.workflowSlug}</span> : null}
           </div>
         </div>
@@ -234,7 +234,10 @@ export function ReviewItemCard({
         </div>
       ) : (
         <div className="resolution">
-          <Badge tone="success">{humanizeToken(item.status)}</Badge>
+          <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
+          {item.resolution?.changedFields.length ? (
+            <span className="muted small">Changed {item.resolution.changedFields.join(', ')}</span>
+          ) : null}
           {item.resolution?.note ? <span className="muted">{item.resolution.note}</span> : null}
           <span className="muted">{formatDateTime(item.resolvedAt)}</span>
         </div>

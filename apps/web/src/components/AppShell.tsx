@@ -15,7 +15,7 @@ const navigation = [
 export function AppShell() {
   const meta = useMeta();
   const health = useHealth();
-  const reviewQueue = useReviewQueue('open');
+  const reviewQueue = useReviewQueue('needs_review');
 
   const openCount = reviewQueue.data?.openCount ?? 0;
   const online = health.isSuccess;

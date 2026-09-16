@@ -1,6 +1,5 @@
 import {
   artifactSchema,
-  ConflictError,
   decisionRecordSchema,
   newId,
   NotFoundError,
@@ -14,8 +13,6 @@ import {
   type FileStorage,
   type Logger,
   type Repositories,
-  type ResolveReviewItemRequest,
-  type ReviewItem,
   type TabularFormat,
   type WorkflowRun,
 } from '@sheetpilot/core';
@@ -163,42 +160,6 @@ export class RunService {
     }
     controller.abort();
     return true;
-  }
-
-  async resolveReviewItem(id: string, input: ResolveReviewItemRequest): Promise<ReviewItem> {
-    const item = await this.deps.repositories.reviewItems.getById(id);
-    if (!item) {
-      throw new NotFoundError('Review item', id);
-    }
-    if (item.status !== 'open') {
-      throw new ConflictError(`Review item '${id}' has already been resolved`);
-    }
-
-    const status =
-      input.action === 'accepted'
-        ? 'resolved_accepted'
-        : input.action === 'overridden'
-          ? 'resolved_overridden'
-          : 'dismissed';
-
-    const updated = reviewItemSchema.parse({
-      ...item,
-      status,
-      resolution: {
-        action: input.action,
-        values: input.values,
-        note: input.note,
-        resolvedBy: null,
-      },
-      resolvedAt: this.deps.clock.now(),
-    });
-
-    const saved = await this.deps.repositories.reviewItems.update(updated);
-    this.deps.logger.info(
-      { reviewItemId: id, runId: item.runId, action: input.action },
-      'review item resolved',
-    );
-    return saved;
   }
 
   private async requireFile(fileId: string, label: string): Promise<void> {
