@@ -38,7 +38,8 @@ export interface CreateRunInput {
   workflowSlug: string;
   primaryFileId: string;
   eventsFileId: string;
-  config: Record<string, string | number | boolean>;
+  configurationId?: string | null;
+  config: Record<string, unknown>;
 }
 
 function describeError(error: unknown): string {
@@ -66,6 +67,7 @@ export class RunService {
       status: 'queued',
       primaryFileId: input.primaryFileId,
       eventsFileId: input.eventsFileId,
+      configurationId: input.configurationId ?? null,
       config: input.config,
       stats: {},
       error: null,

@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 1 — file ingestion & dataset inspection)
+**Last updated:** 2026-09-16 (product session 2 — column mapping & workflow configuration)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -24,17 +24,17 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Product session 1 objective: production-quality file ingestion and dataset inspection.** Users can
-upload `.csv`/`.xlsx`/`.xlsm` files, the server validates, stores and analyses them, and a dataset
-preview UI shows the original filename next to the internal dataset id, detected sheets, columns,
-inferred types, row counts and validation warnings. **Status: achieved** (see §8, verified in §9). The
-architecture deliberately keeps rows in object storage and pages them so no stage loads a full dataset
-into browser memory, and keeps inspection behind a `TabularReader`/`inspectDataset` seam so it can be
-swapped for streaming/chunked/DuckDB processing later.
+**Product session 2 objective: column mapping and workflow configuration.** A workflow declares its
+requirements as data (dataset roles + semantic column roles + options). Users assign ingested datasets to
+roles, map semantic roles (entity id, timestamp, description, output columns) to real detected columns,
+get live compatibility validation with explicit confirmation for ambiguous mappings, and save a reusable,
+versioned configuration that can start a run. **Status: achieved** (see §8, verified in §9). Column keys
+are no longer hardcoded in the UI: the workflow definition drives the setup screen, and
+`resolveRunInput` translates a configuration into the run's config keys.
 
-**Next (product session 2):** column mapping and workflow configuration — assign dataset roles, map
-semantic roles (entity id, timestamp, description, output columns) to real detected columns, validate
-compatibility and persist a reusable, versionable workflow configuration. See §15.
+**Next (product session 3):** continue building the reusable workflow platform. Priorities from the
+backlog: Postgres verification, review→artifact regeneration, rule management/editing, review ergonomics,
+scheduling/automated ingestion, and the real AI provider. See §15.
 
 ## 3. Product Vision
 
@@ -65,10 +65,11 @@ core workflow is excellent.
 | Database | Postgres 16 via Drizzle ORM 0.45 + drizzle-kit; in-memory repositories by default | SQL migrations generated; no live Postgres verified yet |
 | File processing | `csv-parse` / `csv-stringify` (streaming), `exceljs` (buffered) | Behind `TabularReader`/`TabularWriter` async generator interfaces; readers also expose `describe()` for sheets+headers |
 | Dataset inspection | `inspectDataset` in `@sheetpilot/file-processing` | Bounded one-pass scan → `DatasetProfile` (types, emptiness, uniqueness, samples, warnings); persisted via `DatasetRepository` |
+| Workflow configuration | `@sheetpilot/core` domain + `WorkflowConfigurationService` (API) | Roles-as-data (`WorkflowConfigurationDefinition`), pure validation, persisted/versioned `WorkflowConfiguration`, workflow-specific `resolveRunInput` |
 | Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
 | Rules | Custom DSL in `@sheetpilot/rule-engine` | priority → specificity → id winner selection, explanation templates |
 | AI | `ClassificationProvider` port + `NoopClassificationProvider` + policy function | Real provider intentionally not implemented yet |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 112 tests, 15 files, all green |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 128 tests, 17 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -82,7 +83,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                           ┌─────────────────┴─────────────────┐
                                           ▼                                   ▼
                               workflow-engine (programs,             file-processing (CSV/XLSX,
-                              step traces)                           storage drivers)
+                              step traces, role/mapping              storage drivers)
+                              definitions + resolveRunInput)
                                           │                                   │
                                           ├──▶ rule-engine (deterministic rules, explanations)
                                           ├──▶ ai (policy + ClassificationProvider port)
@@ -94,6 +96,12 @@ Dependency rule: inner layers never import outer layers; `web` only consumes `co
 Ingestion lifecycle: `POST /api/v1/datasets` (or `/files`) → `DatasetService.ingest` validates the
 upload, stores it, runs bounded `inspectDataset`, persists `FileAsset` + `DatasetProfile` → the UI reads
 the profile and pages rows via `GET /api/v1/datasets/:id/rows`.
+Configuration lifecycle: a workflow declares dataset roles + semantic column roles → the Setup UI assigns
+datasets and maps columns against `DatasetProfile.columns` → `POST /api/v1/workflow-configurations/validate`
+returns structural/semantic issues (from `validateWorkflowConfiguration` in `core`) plus a resolved-config
+preview → saving persists a versioned `WorkflowConfiguration` →
+`POST /api/v1/runs { configurationId }` resolves it through `RegisteredWorkflow.resolveRunInput` into file
+ids + config keys.
 Run lifecycle: `POST /files` → `POST /runs` (202, queued) → background `RunService.execute` →
 step traces + artifacts + decision log + review items → run `succeeded`.
 
@@ -108,30 +116,32 @@ apps/
     logger.ts              pino logger
     services/file-service.ts   thin compatibility wrapper (delegates upload to DatasetService)
     services/dataset-service.ts  validate → store → inspect → persist; paged row reads
+    services/workflow-configuration-service.ts  validate + persist configurations; resolve runs from a configuration
     services/run-service.ts    run creation/execution, step persistence, artifacts, review resolution
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
-    http/routes/*.ts       health, meta, workflows, files, datasets, runs, review-items, artifacts
+    http/routes/*.ts       health, meta, workflows, workflow-configurations, files, datasets, runs, review-items, artifacts
     fixtures.ts            reads the sample CSVs for tests
     server.test.ts         API integration + E2E test (upload → run → artifacts → review resolve)
   web/src/
     api/client.ts          typed fetch, zod response parsing, ApiError
     api/hooks.ts           TanStack Query hooks for every endpoint
-    app/router.tsx         routes: /, /runs, /runs/new, /runs/:id, /review, /workflows, /workflows/:slug
+    app/router.tsx         routes: /, /runs, /runs/new, /runs/:id, /review, /workflows, /workflows/:slug, /datasets, /datasets/:id, /setup, /setup/:configurationId
     components/AppShell.tsx        sidebar shell, API status, open-review counter
     components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
     components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
-    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, NotFound
-    lib/format.ts, lib/rules.ts, lib/status.ts, lib/datasets.ts   formatting, condition descriptions, badge tones, dataset column/flag helpers
+    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, NotFound
+    lib/format.ts, lib/rules.ts, lib/status.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones, dataset column/flag helpers, mapping suggestions
     styles/app.css         design tokens + component styles (light professional theme)
 packages/
   core/src/
     domain/enums.ts        RunStatus, ReviewReason, AiPolicy, file/artifact formats …
     domain/entities.ts     Workflow, FileAsset, WorkflowRun, StepRun, DecisionRecord, ReviewItem, Artifact…
     domain/dataset.ts      DatasetProfile/Analysis/Column/Warning schemas, DatasetSummary
+    domain/workflow-config.ts  dataset/column role definitions, WorkflowConfiguration, validateWorkflowConfiguration
     domain/rules.ts        Rule, ConditionGroup, RuleAction, RuleSet, RuleEvaluation
     api/contracts.ts       HTTP request/response schemas shared with the web app
-    ports/                 repositories, datasets, file-storage, classification, logger, clock
+    ports/                 repositories, datasets, workflow-configurations, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
   config/src/schema.ts     zod env schema, .env discovery, fail-fast validation
   file-processing/src/
@@ -146,11 +156,11 @@ packages/
   ai/src/                  noop-provider.ts, policy.ts, factory.ts
   workflow-engine/src/
     engine.ts              executeWorkflow (ordered steps, state merge, traces, cancel handling)
-    registry.ts            WorkflowRegistry, RegisteredWorkflow, createDefaultWorkflowRegistry
-    workflows/account-faults/  types.ts (config/state/columns), rules.ts (taxonomy + 7 rules),
-                               steps.ts (5 steps), workflow.ts (program + registered workflow)
+    registry.ts            WorkflowRegistry, RegisteredWorkflow (configuration definition + resolveRunInput), createDefaultWorkflowRegistry
+    workflows/account-faults/  types.ts (config/state/columns), configuration.ts (roles, resolveRunInput, preview),
+                               rules.ts (taxonomy + 7 rules), steps.ts (5 steps), workflow.ts (program + registered workflow)
   db/src/
-    schema/tables.ts       workflows, rule_sets, files, datasets, runs, run_steps, run_decisions, review_items, artifacts
+    schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_steps, run_decisions, review_items, artifacts
     client.ts, migrations.ts, scripts/migrate.ts
     repositories/memory/   full in-memory implementation of every port (used by default + tests)
     repositories/postgres/ Drizzle implementation (type-checks; NOT yet run against a live database)
@@ -167,7 +177,9 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `Workflow` | A registered workflow definition | slug, name, version, steps, configFields |
 | `FileAsset` | An uploaded input file | kind (primary/events/generic), format, size, checksum, rowCount, columnNames, storageKey |
 | `DatasetProfile` | Normalized structural view of an uploaded file (the pre-mapping representation) | sheetNames/sheetName, rowCount (+exact/truncated), scanLimit, columns[] (type, empty/unique counts, samples, duplicate/date/identifier flags), sampleRows, warnings, fileId |
-| `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, config, stats, error, timestamps |
+| `WorkflowConfigurationDefinition` | What a workflow needs mapped (declared as data) | datasetRoles[] (key, label, required, multiple), columnRoles[] (key, datasetRole, semantic, required, multiple, configKey), options[] |
+| `WorkflowConfiguration` | A saved, versioned setup: which datasets play which roles and which real columns fill semantic roles | workflowSlug/version, name, version, assignments[] (role→datasetId), mappings[] (role→datasetId→column, confirmed), options |
+| `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, configurationId, config, stats, error, timestamps |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, confidence, reviewReasons, outputValues, evidence |
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status, title, detail, suggestedValues, evidence, resolution |
@@ -183,6 +195,43 @@ Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`
 confidence, review status, review reasons, explanation), 7 default rules over a 7-option taxonomy.
 
 ## 8. Completed
+
+### Product session 2 — Column mapping & workflow configuration (2026-09-16)
+
+- [x] `@sheetpilot/core`: new `domain/workflow-config.ts` — `DatasetRoleDefinition`,
+      `ColumnRoleDefinition`, `WorkflowConfigurationDefinition`, `ColumnMapping`, `DatasetAssignment`,
+      `WorkflowConfiguration(+Summary)`, `configurationIssue*` schemas, and the pure
+      `validateWorkflowConfiguration` (structural + semantic checks: missing roles/columns, unknown
+      datasets/columns, empty columns, incompatible identifiers, unparseable timestamps, duplicate
+      assignments, ambiguous mappings, required/invalid options). `looksLikeTimestamp` mirrors the
+      accepted timestamp shapes for compatibility checks. New `WorkflowConfigurationRepository` port
+      (added to `Repositories`), new `InvalidConfigurationError` (422 `invalid_configuration`),
+      `WorkflowRun.configurationId`, and new API contracts (`workflowConfigurationDtoSchema`,
+      create/update/validate request schemas, validation response with `resolvedConfig` preview);
+      `workflowDetailDtoSchema` now carries the workflow's `configuration` definition.
+- [x] `@sheetpilot/workflow-engine`: `RegisteredWorkflow` gained `configuration` and optional
+      `resolveRunInput`; the account-faults workflow declares its roles/options in
+      `workflows/account-faults/configuration.ts` and resolves a saved configuration into
+      `{ primaryFileId, eventsFileId, config }` (mapping semantic roles to `primaryAccountColumn`,
+      `eventsAccountColumn`, `eventsTimestampColumn`, `eventsDescriptionColumn`, `primaryOutputColumns`).
+      The build-output step honours a mapped output-column selection (empty = all primary columns).
+- [x] `@sheetpilot/db`: new `workflow_configurations` table (11 columns, indexed by workflow slug) plus
+      `runs.configuration_id`; generated migration `drizzle/0002_slow_colonel_america.sql`; in-memory and
+      Postgres workflow-configuration repositories.
+- [x] `apps/api`: `WorkflowConfigurationService` (create/update with re-validation and version bumps,
+      list/get, validate with resolved-config preview, `buildRunInput`), routes
+      `GET/POST /api/v1/workflow-configurations`, `POST /api/v1/workflow-configurations/validate`,
+      `GET/PUT /api/v1/workflow-configurations/:id`; `POST /api/v1/runs` now accepts `configurationId`;
+      DTO mappers + container wiring.
+- [x] `apps/web`: new **Setup** page (workflow picker → assign datasets to roles → map columns with
+      detected-column pickers, type/flag hints and sample values → options → live debounced validation
+      with confirmable warnings and a resolved-config preview → save → continue to processing); router +
+      nav entries; `lib/configurations.ts` suggestion/tone helpers; CSS.
+- [x] Tests: +16 (128 total, 17 files) — `packages/core/src/domain/workflow-config.test.ts` (10) and
+      `apps/api/src/workflow-configuration.test.ts` (6 API tests, including create/list/version and a run
+      started from a configuration).
+- [x] Docs: ADR-011, `docs/architecture.md` (configuration lifecycle + abstractions), `scripts/smoke.mjs`
+      (now validates, saves and runs an account-faults configuration end to end), this file.
 
 ### Product session 1 — File ingestion & dataset inspection (2026-09-16)
 
@@ -254,17 +303,21 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 9 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 15 files / 112 tests passed |
+| Tests | `npm test` | 17 files / 128 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
-| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK |
+| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
-| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables) + `0001_pretty_dorian_gray.sql` (`datasets`) |
+| Configurations (API) | `POST /api/v1/workflow-configurations/validate`, create, then `POST /api/v1/runs { configurationId }` | validation returns issues + resolved config; saved config version bumps; configured run succeeds and records `configurationId` |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) |
 
-Working end to end: upload a dataset (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
-in the **Datasets** UI → upload CSV/XLSX → inspect metadata → start run (202, background execution) →
-step traces → deterministic classification with the latest-fault selection → output CSV/XLSX + review
-queue CSV → decision log → review queue with accept/override/dismiss → review counters.
+Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
+in the **Datasets** UI → **Setup**: assign datasets to roles, map the account/timestamp/description/output
+columns with live validation (errors block, ambiguous mappings need confirmation), save a reusable
+versioned configuration, and continue to processing → background run executes the deterministic
+classification (latest-fault selection) → output CSV/XLSX + review queue CSV → decision log → review
+queue with accept/override/dismiss → review counters. The legacy path (upload via `/files`, start a run
+with explicit file ids and the config form) still works.
 
 Sample run results (canonical `samples/account-faults` files): 9 accounts, 13 events, 10 output rows,
 2 auto-approved, 7 review items (conflicting history, no events, no rule match, low confidence, duplicate
@@ -313,6 +366,19 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
     wizard) and `POST /api/v1/datasets` returns the rich `DatasetDto`; both create a `FileAsset` and a
     `DatasetProfile`. Session 2 should build column mapping on the dataset profile and may deprecate the
     `/files` route for new UI.
+18. **Configurations are versioned, not snapshotted.** Saving (create or update) increments `version`, but
+    previous versions are overwritten — there is no immutable history yet. Update is additive: it keeps
+    the id and replaces the row.
+19. **Configurations reference dataset ids, not re-detected columns.** Reusing a setup for a new daily file
+    means editing the configuration to re-point the dataset assignments; if the new file's column names
+    differ, the mappings must be updated too (validation will flag the old names as `unknown_column`).
+20. **Configuration validation is structural + sample-based, not a full scan.** It uses the bounded
+    `DatasetProfile` (types, flags, sample values) and the `looksLikeTimestamp` heuristic in `core`, not the
+    authoritative parser in `file-processing`. It catches obvious mistakes and requires confirmation for
+    atypical mappings but does not prove every row parses.
+21. **`secondary`/optional roles are modelled but unused.** The configuration model supports non-required
+    and multi-value roles, but the setup UI currently uses only the account-faults single-dataset roles and
+    a multi-value output-columns role; multi-dataset-per-role selection is not wired.
 
 ## 11. Technical Decisions
 
@@ -328,6 +394,8 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-008 explainability is persisted (decision log + review evidence + `__` output columns).
 - ADR-009 uploads validated on ingestion (format sniffing, row count, column names).
 - ADR-010 ingestion produces a persisted, bounded dataset profile; rows stay in storage and are paged.
+- ADR-011 a workflow declares its mapping requirements as data; configurations are validated in `core` and
+  persisted/versioned, and runs resolve them through the workflow's `resolveRunInput`.
 
 Additional decisions made during implementation:
 
@@ -371,7 +439,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 112 tests / 15 files passing (`npm test`).** Coverage by area:
+**Status: 128 tests / 17 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -384,6 +452,8 @@ Not yet implemented (risks acknowledged):
 | Dataset inspection | `packages/file-processing/src/inspection.test.ts` | types, empties, dates, identifiers, leading zeros, duplicate columns, mixed types, scan truncation, empty/headerless errors, multi-sheet XLSX, corrupt workbook |
 | Upload validation | `packages/file-processing/src/upload.test.ts` | filename sanitisation, extension/content-type/size/magic-byte rejections |
 | Dataset API | `apps/api/src/dataset.test.ts` | ingest + list + detail, row paging, re-analysis, traversal-safe names, 415/422/404/413 error states |
+| Configuration validation | `packages/core/src/domain/workflow-config.test.ts` | missing roles/columns, unknown datasets/columns, date-as-identifier and non-date-timestamp confirmation flow, empty columns, required/invalid options, duplicate assignments |
+| Configuration API | `apps/api/src/workflow-configuration.test.ts` | workflow definition exposed to UI, validate incomplete/complete + resolved preview, invalid save rejected (422), create/list/get/update version bump, run started from a configuration records `configurationId` |
 | Rules | `packages/rule-engine/src/rule-engine.test.ts` | 15 operators, tie-breaks, conflicts, actions, validation |
 | AI policy | `packages/ai/src/ai.test.ts` | policy decisions, noop provider, fail-fast factory |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
@@ -392,8 +462,9 @@ Not yet implemented (risks acknowledged):
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
 
 Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
-including `datasets`), rule engine property/fuzz tests, a load test for large CSV/`DATASET_MAX_SCAN_ROWS`
-inspection, Playwright browser tests for the datasets/new-run flows, and coverage reporting in CI.
+including `datasets` and `workflow_configurations`), rule engine property/fuzz tests, a load test for large
+CSV/`DATASET_MAX_SCAN_ROWS` inspection, Playwright browser tests for the datasets/setup/new-run flows,
+configuration-resolution tests for multi-dataset roles, and coverage reporting in CI.
 
 ## 14. Environment
 
@@ -418,28 +489,21 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 2: column mapping & workflow configuration** (queue `02-session.md`). Build on the
-`DatasetProfile` from session 1:
+**Product session 3: pick the highest-value next slice** (queue `03-session.md`). The configuration layer
+now exists, so the platform's weakest points are durability and the review loop. Recommended order:
 
-1. **Dataset roles as data, not hardcoded names.** Model roles (`primary`, `events`, …) as domain objects
-   (`DatasetRole`) rather than "File 1/File 2" so new workflows can define their own roles. The existing
-   `FileKind` enum (`primary|events|generic`) is a starting point but should become configurable.
-2. **Semantic column mapping.** Define mapping models (e.g. `entityKey`, `timestamp`, `description`,
-   `outputColumns[]`) in `@sheetpilot/core` and resolve them against `DatasetProfile.columns` (use the
-   `likelyIdentifier`/`likelyDate` flags as safe defaults). Persist mappings so later runs reuse them.
-3. **Match configuration + validation.** Validate compatibility: required columns exist, mapped
-   identifier columns don't hold incompatible data (e.g. dates), timestamp columns are parseable, and
-   warn/require confirmation on ambiguous mappings. Feed the deterministic classification steps by
-   replacing the workflow's `configFields` string keys with the mapped column names.
-4. **Persistent, serializable, versionable workflow configuration model** (new entity + repository +
-   DTOs, following the `DatasetProfile` pattern) — do **not** bury configuration in UI components.
-5. **Setup UX**: upload datasets → assign roles → map columns with detected-column pickers → validate →
-   continue to processing. Keep it legible for a nontechnical Excel user, with defaults, inline
-   validation feedback and explicit confirmation for ambiguous mappings.
-6. Not yet: the full classification engine (still deferred).
-
-Then keep the previously identified priorities (Postgres verification, review→artifact regeneration,
-rule management, review ergonomics, scheduling, real AI provider) as the backlog.
+1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0002`), and exercise
+   the API against `REPOSITORY_DRIVER=postgres` (ingest a dataset, save a configuration, run it, page
+   rows). Add gated repository integration tests. In-memory mode still loses everything on restart.
+2. **Review → artifact regeneration.** Resolving a review item currently records the decision but does not
+   rewrite the output CSV/XLSX. Apply resolutions to the output rows and regenerate the artifacts
+   (`RunService`/artifact writer) so the exported file matches the reviewed result.
+3. **Rule management.** Expose the persisted `rule_sets` through the API/UI (list, edit with validation,
+   version) instead of shipping rules only as code. Bump the rule-set version on material changes.
+4. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
+   re-points assignments while keeping column mappings, and deprecating the legacy `/files` wizard.
+5. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, review
+   ergonomics (bulk actions, keyboard), and route-level code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -473,8 +537,15 @@ rule management, review ergonomics, scheduling, real AI provider) as the backlog
 - **Dataset ingestion is the front door.** All uploads flow through
   `apps/api/src/services/dataset-service.ts` → `packages/file-processing/src/inspectDataset` → a persisted
   `DatasetProfile`. Rows live only in object storage and are paged via `DatasetService.readRows`; never
-  read a whole dataset into the API response or the browser. Reuse `DatasetProfile.columns` (types,
-  emptiness, `likelyDate`, `likelyIdentifier`) when building session 2's mapping UI.
+  read a whole dataset into the API response or the browser. `DatasetProfile.columns` (types, emptiness,
+  `likelyDate`, `likelyIdentifier`) is what the Setup mapping UI suggests defaults from.
+- **Workflow configuration is data.** Roles and semantic column roles live in the workflow's
+  `configuration` definition (`packages/workflow-engine/src/workflows/account-faults/configuration.ts`);
+  never hardcode dataset/column names in React. Validation is the pure
+  `validateWorkflowConfiguration` in `packages/core/src/domain/workflow-config.ts` (errors block,
+  confirmable issues are errors until `mapping.confirmed`), reused by
+  `WorkflowConfigurationService`. A run from a configuration goes through `RegisteredWorkflow.resolveRunInput`;
+  if you add a workflow, declare its roles and a resolver or the run endpoints cannot use configurations.
 - **Upload validation lives in `packages/file-processing/src/upload.ts`.** It sanitises filenames and
   enforces extension/content-type/size/magic-byte rules; add new formats there and in
   `TabularReader.describe`/`read`, not in route handlers.
@@ -482,9 +553,11 @@ rule management, review ergonomics, scheduling, real AI provider) as the backlog
   `D:\ExcelProjectBydeepseek`; the workspace `node_modules/@sheetpilot/*` links had to be relinked with
   `npm install`. If module resolution fails after moving the repo again, re-run `npm install`.
 - **Files a new agent should read first:** this file → `docs/architecture.md` →
-  `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` →
-  `packages/file-processing/src/inspection.ts` → `apps/api/src/services/dataset-service.ts` →
-  `packages/workflow-engine/src/workflows/account-faults/{types,steps}.ts` →
+  `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` +
+  `packages/core/src/domain/workflow-config.ts` → `packages/file-processing/src/inspection.ts` →
+  `apps/api/src/services/dataset-service.ts` →
+  `apps/api/src/services/workflow-configuration-service.ts` →
+  `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
   `apps/api/src/services/run-service.ts`.
 
 ### Session log
@@ -493,3 +566,4 @@ rule management, review ergonomics, scheduling, real AI provider) as the backlog
 | --- | --- | --- |
 | Foundation | 2026-09-15 | Monorepo, core/domain/ports, config, file-processing, rule engine, AI seam, workflow engine + account-fault-triage workflow, Drizzle schema + in-memory/Postgres repositories, Fastify API, React SPA, samples, smoke script, docs. Verified: lint/typecheck/86 tests/build/smoke/dev servers. |
 | Product 1 | 2026-09-16 | File ingestion & dataset inspection: dataset domain + port + DTOs + errors, `TabularReader.describe()`, `inspectDataset` (types/emptiness/uniqueness/samples/warnings/flags), `validateUpload`, `datasets` table + migration + repositories, `DatasetService` + dataset API, Datasets upload/detail UI, +26 tests (112 total). Verified: lint/typecheck/112 tests/build. |
+| Product 2 | 2026-09-16 | Column mapping & workflow configuration: roles-as-data, semantic column mapping + pure validation, persisted/versioned `WorkflowConfiguration` + repository + `workflow_configurations` table/migration, `WorkflowConfigurationService` + API, `resolveRunInput` (config keys from mapped columns), Setup wizard UI with live validation/confirmations, +16 tests (128 total). Verified: lint/typecheck/128 tests/build/smoke (incl. configuration flow). |

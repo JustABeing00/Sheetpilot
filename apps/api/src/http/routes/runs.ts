@@ -5,6 +5,7 @@ import {
   reviewItemListResponseSchema,
   runListResponseSchema,
   runStatusSchema,
+  ValidationError,
   type RunDto,
   type RunSummaryDto,
   type WorkflowRun,
@@ -59,12 +60,28 @@ async function requireRun(container: AppContainer, runId: string): Promise<Workf
 export function registerRunRoutes(app: FastifyInstance, container: AppContainer): void {
   app.post('/api/v1/runs', async (request, reply) => {
     const body = parseOrThrow(createRunRequestSchema, request.body, 'create run request');
-    const run = await container.runService.createRun({
-      workflowSlug: body.workflowSlug,
-      primaryFileId: body.primaryFileId,
-      eventsFileId: body.eventsFileId,
-      config: body.config,
-    });
+
+    let run: WorkflowRun;
+    if (body.configurationId) {
+      const resolved = await container.workflowConfigurationService.buildRunInput(
+        body.configurationId,
+      );
+      run = await container.runService.createRun(resolved);
+    } else {
+      const { workflowSlug, primaryFileId, eventsFileId } = body;
+      if (!workflowSlug || !primaryFileId || !eventsFileId) {
+        throw new ValidationError(
+          'Provide configurationId, or workflowSlug together with primaryFileId and eventsFileId',
+        );
+      }
+      run = await container.runService.createRun({
+        workflowSlug,
+        primaryFileId,
+        eventsFileId,
+        configurationId: null,
+        config: body.config,
+      });
+    }
 
     reply.status(202);
     return describeRun(container, run, true);

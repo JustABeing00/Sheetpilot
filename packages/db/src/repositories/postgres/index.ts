@@ -7,6 +7,7 @@ import {
   reviewItemSchema,
   storedRuleSetSchema,
   stepRunSchema,
+  workflowConfigurationSchema,
   workflowRunSchema,
   workflowSchema,
   type Artifact,
@@ -18,6 +19,7 @@ import {
   type StepRun,
   type StoredRuleSet,
   type Workflow,
+  type WorkflowConfiguration,
   type WorkflowRun,
 } from '@sheetpilot/core';
 import type { Database } from '../../client.js';
@@ -30,12 +32,16 @@ import {
   runDecisions,
   runs,
   runSteps,
+  workflowConfigurations,
   workflows,
 } from '../../schema/tables.js';
 
 const toFileAsset = (row: typeof files.$inferSelect): FileAsset => fileAssetSchema.parse(row);
 const toDataset = (row: typeof datasets.$inferSelect): DatasetProfile =>
   datasetProfileSchema.parse(row);
+const toWorkflowConfiguration = (
+  row: typeof workflowConfigurations.$inferSelect,
+): WorkflowConfiguration => workflowConfigurationSchema.parse(row);
 const toWorkflow = (row: typeof workflows.$inferSelect): Workflow => workflowSchema.parse(row);
 const toRun = (row: typeof runs.$inferSelect): WorkflowRun => workflowRunSchema.parse(row);
 const toStepRun = (row: typeof runSteps.$inferSelect): StepRun =>
@@ -83,6 +89,51 @@ export function createPostgresRepositories(db: Database): Repositories {
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
         return rows.map(toDataset);
+      },
+    },
+
+    workflowConfigurations: {
+      async create(configuration) {
+        const [row] = await db.insert(workflowConfigurations).values(configuration).returning();
+        return toWorkflowConfiguration(row!);
+      },
+      async update(configuration) {
+        const [row] = await db
+          .update(workflowConfigurations)
+          .set({
+            name: configuration.name,
+            description: configuration.description,
+            version: configuration.version,
+            assignments: configuration.assignments,
+            mappings: configuration.mappings,
+            options: configuration.options,
+            updatedAt: configuration.updatedAt,
+          })
+          .where(eq(workflowConfigurations.id, configuration.id))
+          .returning();
+        return toWorkflowConfiguration(row!);
+      },
+      async getById(id) {
+        const [row] = await db
+          .select()
+          .from(workflowConfigurations)
+          .where(eq(workflowConfigurations.id, id))
+          .limit(1);
+        return row ? toWorkflowConfiguration(row) : null;
+      },
+      async list(options) {
+        const rows = await db
+          .select()
+          .from(workflowConfigurations)
+          .where(
+            options?.workflowSlug
+              ? eq(workflowConfigurations.workflowSlug, options.workflowSlug)
+              : undefined,
+          )
+          .orderBy(desc(workflowConfigurations.updatedAt))
+          .limit(options?.limit ?? 100)
+          .offset(options?.offset ?? 0);
+        return rows.map(toWorkflowConfiguration);
       },
     },
 

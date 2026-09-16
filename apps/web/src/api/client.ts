@@ -76,6 +76,18 @@ export async function apiPost<T>(path: string, body: unknown, schema: ZodType<T>
   return parseResponse(response, schema);
 }
 
+export async function apiPut<T>(path: string, body: unknown, schema: ZodType<T>): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return parseResponse(response, schema);
+}
+
 export async function apiUpload<T>(path: string, form: FormData, schema: ZodType<T>): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',

@@ -20,6 +20,7 @@ export const accountFaultConfigSchema = z
     eventsAccountColumn: z.string().min(1).default('Account Number'),
     eventsTimestampColumn: z.string().min(1).default('Fault Date'),
     eventsDescriptionColumn: z.string().min(1).default('Fault Description'),
+    primaryOutputColumns: z.array(z.string()).default([]),
     reviewBelowConfidence: z.number().min(0).max(1).default(0.8),
     includeSystemColumns: z.boolean().default(true),
     aiPolicy: aiPolicySchema.default('on_no_rule_match'),
@@ -117,7 +118,9 @@ export const ACCOUNT_FAULT_SYSTEM_COLUMNS = [
 export const accountFaultInputSchema = z.object({
   primaryFileId: z.string().min(1),
   eventsFileId: z.string().min(1),
-  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  config: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+    .default({}),
 });
 export type AccountFaultInput = z.infer<typeof accountFaultInputSchema>;
 

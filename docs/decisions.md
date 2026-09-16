@@ -134,3 +134,31 @@ Uniqueness tracking is additionally capped, so `uniqueCount` can be approximate 
 `.xls` is rejected with guidance. The reader contract gained `describe()` (sheets + headers) so the
 inspection logic is format-agnostic and a streaming/DuckDB implementation can replace it later behind
 the same `TabularReader` interface.
+
+## ADR-011 — Workflow configuration is a persisted, declared domain object
+
+**Decision.** A workflow declares its mapping requirements as data
+(`WorkflowConfigurationDefinition`: dataset roles + semantic column roles + scalar options). A user then
+creates a `WorkflowConfiguration` that assigns datasets to roles and real detected columns to semantic
+column roles; it is validated by a pure function in `@sheetpilot/core` and persisted through a
+`WorkflowConfigurationRepository` (in-memory and Postgres). Starting a run resolves the configuration into
+concrete file ids and workflow config keys through the workflow's `resolveRunInput`.
+
+**Why.** The product must let a nontechnical Excel user say "this column is the account number, this one is
+the fault date" once and reuse it every day. Hardcoding "File 1"/"File 2" or column keys in React would make
+every new workflow a UI rewrite and hide business configuration in components. Roles-as-data keeps the UI
+generic, the validation shared between API and (via the validation endpoint) the browser, and the mapping
+auditable and versioned.
+
+**Consequences.** Configurations reference dataset ids and column *names*; reusing a setup for a new daily
+file means re-pointing the dataset assignments (column names usually stay the same). Saving a configuration
+increments a `version` but does not keep historical snapshots yet (backlog). `resolveRunInput` is optional
+on a workflow, so a workflow without declared roles can still run the legacy way. Ambiguous or atypical
+mappings (for example a date column used as an identifier) block saving until the user explicitly confirms
+them; confirmations are stored on the mapping. Validation is structural + semantic only — it does not scan
+all rows, so it uses the bounded `DatasetProfile` and sample values.
+
+**Alternatives considered.** Inline config fields in the workflow definition (rejected: status quo, no
+reuse/versioning). Letting the UI own the role/mapping shapes (rejected: layer violation and duplicated
+validation). A dedicated `@sheetpilot/config-engine` package (deferred: `core` already holds the domain and
+the validation is pure, so a package would add boilerplate without a boundary).

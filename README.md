@@ -2,12 +2,16 @@
 
 SheetPilot turns recurring Excel/CSV operational workflows into repeatable, explainable pipelines:
 
-> upload daily files → inspect what was detected → match & group records → select the latest record →
-> apply deterministic rules → generate the completed output → review only the unusual cases.
+> upload daily files → inspect what was detected → map columns to workflow roles once → match & group
+> records → select the latest record → apply deterministic rules → generate the completed output →
+> review only the unusual cases.
 
 Uploaded files are ingested into a normalized, persisted **dataset profile** (sheets, columns, inferred
 types, emptiness/uniqueness, samples and validation warnings); rows stay in object storage and are paged
-on demand, so no stage loads a whole dataset into browser memory.
+on demand, so no stage loads a whole dataset into browser memory. A **workflow configuration** then
+assigns datasets to declared roles and maps semantic columns (entity id, timestamp, description, output
+columns) to real columns, with validation and explicit confirmation for ambiguous mappings; the saved,
+versioned configuration can start a run and be reused.
 
 The first workflow implemented is **account fault triage**: a primary file lists accounts with columns
 that need to be filled in, an events file contains fault reports (the same account may appear many
@@ -29,14 +33,14 @@ for the architecture deep dive.
 ```
 apps/
   api/                 Fastify HTTP API (application layer, composition root, services, routes)
-  web/                 React + Vite single-page app (dashboard, runs, review queue, workflows)
+  web/                 React + Vite single-page app (dashboard, datasets, setup, runs, review queue, workflows)
 packages/
   core/                Domain model, zod schemas, API contracts, ports (zero runtime deps except zod)
   config/              Typed environment loading/validation (fail-fast, no secrets in code)
   file-processing/     CSV/XLSX readers & writers, schema inference, dataset inspection, upload validation, storage drivers
   rule-engine/         Rule DSL evaluation, deterministic winner selection, explanations, validation
   ai/                  ClassificationProvider port implementation, AI policy, provider factory
-  workflow-engine/     Workflow program runner + the account-fault-triage workflow
+  workflow-engine/     Workflow program runner + the account-fault-triage workflow (roles, mapping resolver)
   db/                  Drizzle (Postgres) schema + migrations, in-memory and Postgres repositories
 samples/account-faults Canonical demo files and expected outcomes (used by tests and smoke script)
 scripts/smoke.mjs      End-to-end smoke test against a running API
@@ -62,6 +66,10 @@ the run. You should get 10 output rows, 2 auto-approved accounts, 7 review items
 
 To inspect a file first, open **Datasets**, upload `samples/account-faults/fault_events.csv`, and read the
 detected sheets, columns, inferred types and validation warnings; the row preview is paged.
+
+For the guided path, open **Setup**: upload both sample files under **Datasets**, then assign them to the
+primary/events roles, map the account/date/description columns (the page suggests defaults and validates
+as you go), save the configuration, and click **Continue to processing**.
 
 No configuration is required: the API defaults to in-memory repositories and local file storage.
 Copy `.env.example` to `.env` to change ports, storage, Postgres, logging or AI settings.
@@ -116,7 +124,8 @@ and testable without infrastructure.
 ## Status
 
 This repository is the foundation: the workflow engine, file processing, rule engine, review queue, API
-and UI are implemented and tested end to end for the account fault triage workflow. File ingestion now
-includes production-quality validation and a dataset inspection/preview UI. Scheduling, editable rules,
-AI providers, authentication and multi-tenancy are deliberately deferred — see
+and UI are implemented and tested end to end for the account fault triage workflow. File ingestion
+includes production-quality validation and a dataset inspection/preview UI, and the column-mapping/workflow
+configuration layer lets a nontechnical user connect files and columns once and reuse the setup.
+Scheduling, editable rules, AI providers, authentication and multi-tenancy are deliberately deferred — see
 [`progress.md`](./progress.md) §15 for the prioritized next steps.

@@ -10,6 +10,9 @@ import {
   timestamp,
 } from 'drizzle-orm/pg-core';
 import type {
+  ColumnMapping,
+  ConfigurationOptionValue,
+  DatasetAssignment,
   DatasetColumn,
   DatasetWarning,
   SampleRow,
@@ -90,6 +93,24 @@ export const datasets = pgTable(
   (table) => [index('datasets_file_idx').on(table.fileId)],
 );
 
+export const workflowConfigurations = pgTable(
+  'workflow_configurations',
+  {
+    id: text('id').primaryKey(),
+    workflowSlug: text('workflow_slug').notNull(),
+    workflowVersion: integer('workflow_version').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    version: integer('version').notNull(),
+    assignments: jsonb('assignments').$type<DatasetAssignment[]>().notNull(),
+    mappings: jsonb('mappings').$type<ColumnMapping[]>().notNull(),
+    options: jsonb('options').$type<Record<string, ConfigurationOptionValue>>().notNull(),
+    createdAt: timestampColumn('created_at'),
+    updatedAt: timestampColumn('updated_at'),
+  },
+  (table) => [index('workflow_configurations_slug_idx').on(table.workflowSlug)],
+);
+
 export const runs = pgTable(
   'runs',
   {
@@ -100,6 +121,7 @@ export const runs = pgTable(
     status: text('status').notNull(),
     primaryFileId: text('primary_file_id').notNull(),
     eventsFileId: text('events_file_id').notNull(),
+    configurationId: text('configuration_id'),
     config: jsonb('config').$type<Record<string, unknown>>().notNull(),
     stats: jsonb('stats').$type<Record<string, number>>().notNull(),
     error: text('error'),
@@ -185,6 +207,7 @@ export const schema = {
   ruleSets,
   files,
   datasets,
+  workflowConfigurations,
   runs,
   runSteps,
   runDecisions,

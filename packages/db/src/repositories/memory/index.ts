@@ -20,6 +20,9 @@ import type {
   StepRunRepository,
   StoredRuleSet,
   Workflow,
+  WorkflowConfiguration,
+  WorkflowConfigurationListOptions,
+  WorkflowConfigurationRepository,
   WorkflowRepository,
   WorkflowRun,
 } from '@sheetpilot/core';
@@ -45,6 +48,7 @@ function paginate<T>(items: T[], options?: { limit?: number; offset?: number }):
 export function createInMemoryRepositories(): Repositories {
   const fileStore = new Map<string, FileAsset>();
   const datasetStore = new Map<string, DatasetProfile>();
+  const configurationStore = new Map<string, WorkflowConfiguration>();
   const workflowStore = new Map<string, Workflow>();
   const runStore = new Map<string, WorkflowRun>();
   const stepStore = new Map<string, StepRun[]>();
@@ -81,6 +85,31 @@ export function createInMemoryRepositories(): Repositories {
           options,
         ),
       ),
+  };
+
+  const workflowConfigurations: WorkflowConfigurationRepository = {
+    create: (configuration) => {
+      configurationStore.set(configuration.id, configuration);
+      return Promise.resolve(configuration);
+    },
+    update: (configuration) => {
+      configurationStore.set(configuration.id, configuration);
+      return Promise.resolve(configuration);
+    },
+    getById: (id) => Promise.resolve(configurationStore.get(id) ?? null),
+    list: (options?: WorkflowConfigurationListOptions) => {
+      const filtered = [...configurationStore.values()].filter(
+        (configuration) =>
+          options?.workflowSlug === undefined ||
+          configuration.workflowSlug === options.workflowSlug,
+      );
+      return Promise.resolve(
+        paginate(
+          byDateDesc(filtered, (configuration) => configuration.updatedAt),
+          options,
+        ),
+      );
+    },
   };
 
   const workflows: WorkflowRepository = {
@@ -219,6 +248,7 @@ export function createInMemoryRepositories(): Repositories {
   return {
     files,
     datasets,
+    workflowConfigurations,
     workflows,
     runs,
     steps,

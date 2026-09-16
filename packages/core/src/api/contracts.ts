@@ -22,6 +22,13 @@ import {
   datasetWarningSchema,
   sampleRowSchema,
 } from '../domain/dataset.js';
+import {
+  columnMappingSchema,
+  configurationIssueSchema,
+  configurationOptionValueSchema,
+  datasetAssignmentSchema,
+  workflowConfigurationDefinitionSchema,
+} from '../domain/workflow-config.js';
 import { ruleSchema } from '../domain/rules.js';
 
 export const isoDateTimeSchema = z
@@ -76,6 +83,7 @@ export const runDtoSchema = z.object({
   status: runStatusSchema,
   primaryFileId: z.string(),
   eventsFileId: z.string(),
+  configurationId: z.string().nullable(),
   primaryFileName: z.string().nullable(),
   eventsFileName: z.string().nullable(),
   config: jsonObjectSchema,
@@ -168,6 +176,88 @@ export type DatasetAnalysisResponse = z.infer<typeof datasetAnalysisResponseSche
 export const datasetListResponseSchema = z.object({ items: z.array(datasetSummaryDtoSchema) });
 export type DatasetListResponse = z.infer<typeof datasetListResponseSchema>;
 
+export const resolvedRunConfigSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+);
+export type ResolvedRunConfig = z.infer<typeof resolvedRunConfigSchema>;
+
+export const workflowConfigurationDtoSchema = z.object({
+  id: z.string(),
+  workflowSlug: z.string(),
+  workflowVersion: z.number().int().positive(),
+  name: z.string(),
+  description: z.string(),
+  version: z.number().int().positive(),
+  assignments: z.array(datasetAssignmentSchema),
+  mappings: z.array(columnMappingSchema),
+  options: z.record(z.string(), configurationOptionValueSchema),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type WorkflowConfigurationDto = z.infer<typeof workflowConfigurationDtoSchema>;
+
+export const workflowConfigurationSummaryDtoSchema = z.object({
+  id: z.string(),
+  workflowSlug: z.string(),
+  workflowVersion: z.number().int().positive(),
+  name: z.string(),
+  description: z.string(),
+  version: z.number().int().positive(),
+  datasetCount: z.number().int().nonnegative(),
+  mappingCount: z.number().int().nonnegative(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type WorkflowConfigurationSummaryDto = z.infer<typeof workflowConfigurationSummaryDtoSchema>;
+
+export const workflowConfigurationListResponseSchema = z.object({
+  items: z.array(workflowConfigurationSummaryDtoSchema),
+});
+export type WorkflowConfigurationListResponse = z.infer<
+  typeof workflowConfigurationListResponseSchema
+>;
+
+const workflowConfigurationBodySchema = z.object({
+  assignments: z.array(datasetAssignmentSchema).default([]),
+  mappings: z.array(columnMappingSchema).default([]),
+  options: z.record(z.string(), configurationOptionValueSchema).default({}),
+});
+
+export const createWorkflowConfigurationRequestSchema = workflowConfigurationBodySchema.extend({
+  workflowSlug: z.string().min(1),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).default(''),
+});
+export type CreateWorkflowConfigurationRequest = z.infer<
+  typeof createWorkflowConfigurationRequestSchema
+>;
+
+export const updateWorkflowConfigurationRequestSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+  assignments: z.array(datasetAssignmentSchema).optional(),
+  mappings: z.array(columnMappingSchema).optional(),
+  options: z.record(z.string(), configurationOptionValueSchema).optional(),
+});
+export type UpdateWorkflowConfigurationRequest = z.infer<
+  typeof updateWorkflowConfigurationRequestSchema
+>;
+
+export const validateWorkflowConfigurationRequestSchema = workflowConfigurationBodySchema.extend({
+  workflowSlug: z.string().min(1),
+});
+export type ValidateWorkflowConfigurationRequest = z.infer<
+  typeof validateWorkflowConfigurationRequestSchema
+>;
+
+export const configurationValidationResponseSchema = z.object({
+  valid: z.boolean(),
+  issues: z.array(configurationIssueSchema),
+  resolvedConfig: resolvedRunConfigSchema.nullable(),
+});
+export type ConfigurationValidationResponse = z.infer<typeof configurationValidationResponseSchema>;
+
 export const reviewItemDtoSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -235,6 +325,7 @@ export type WorkflowSummaryDto = z.infer<typeof workflowSummaryDtoSchema>;
 
 export const workflowDetailDtoSchema = workflowSummaryDtoSchema.extend({
   configFields: z.array(workflowConfigFieldSchema),
+  configuration: workflowConfigurationDefinitionSchema,
   ruleSet: z.object({
     slug: z.string(),
     name: z.string(),
@@ -244,12 +335,26 @@ export const workflowDetailDtoSchema = workflowSummaryDtoSchema.extend({
 });
 export type WorkflowDetailDto = z.infer<typeof workflowDetailDtoSchema>;
 
-export const createRunRequestSchema = z.object({
-  workflowSlug: z.string().min(1),
-  primaryFileId: z.string().min(1),
-  eventsFileId: z.string().min(1),
-  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
-});
+export const createRunRequestSchema = z
+  .object({
+    workflowSlug: z.string().min(1).optional(),
+    primaryFileId: z.string().min(1).optional(),
+    eventsFileId: z.string().min(1).optional(),
+    configurationId: z.string().min(1).optional(),
+    config: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+      .default({}),
+  })
+  .refine(
+    (value) =>
+      Boolean(value.configurationId) ||
+      Boolean(value.workflowSlug && value.primaryFileId && value.eventsFileId),
+    {
+      message:
+        'Provide either configurationId or the workflowSlug together with primaryFileId and eventsFileId',
+      path: ['configurationId'],
+    },
+  );
 export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
 
 export const resolveReviewItemRequestSchema = z.object({

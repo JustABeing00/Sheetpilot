@@ -4,6 +4,7 @@ import { useHealth, useMeta, useReviewQueue } from '../api/hooks.js';
 const navigation = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/datasets', label: 'Datasets' },
+  { to: '/setup', label: 'Setup' },
   { to: '/runs/new', label: 'New run' },
   { to: '/runs', label: 'Runs' },
   { to: '/review', label: 'Review queue' },

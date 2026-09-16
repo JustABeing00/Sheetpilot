@@ -19,6 +19,7 @@ import type { AppConfig } from '@sheetpilot/config';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { RunService } from './services/run-service.js';
+import { WorkflowConfigurationService } from './services/workflow-configuration-service.js';
 
 export interface AppContainer {
   config: AppConfig;
@@ -30,6 +31,7 @@ export interface AppContainer {
   registry: WorkflowRegistry;
   fileService: FileService;
   datasetService: DatasetService;
+  workflowConfigurationService: WorkflowConfigurationService;
   runService: RunService;
   close(): Promise<void>;
 }
@@ -126,6 +128,12 @@ export async function createContainer(
     },
   });
   const fileService = new FileService({ repositories, datasetService });
+  const workflowConfigurationService = new WorkflowConfigurationService({
+    repositories,
+    registry,
+    clock,
+    logger,
+  });
   const runService = new RunService({ repositories, storage, registry, clock, logger });
 
   return {
@@ -138,6 +146,7 @@ export async function createContainer(
     registry,
     fileService,
     datasetService,
+    workflowConfigurationService,
     runService,
     async close() {
       await databaseHandle?.close();

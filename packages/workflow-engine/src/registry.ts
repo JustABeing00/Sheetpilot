@@ -1,11 +1,14 @@
 import {
   NotFoundError,
   type ClassificationProvider,
+  type DatasetProfile,
   type FileRepository,
   type FileStorage,
   type MetricRecord,
   type RuleSet,
   type WorkflowConfigField,
+  type WorkflowConfiguration,
+  type WorkflowConfigurationDefinition,
 } from '@sheetpilot/core';
 import type { Row } from '@sheetpilot/file-processing';
 import type { NewDecisionRecord, NewReviewItem, StepContext, WorkflowExecution } from './types.js';
@@ -19,6 +22,18 @@ export interface WorkflowOutputs {
   stats: MetricRecord;
 }
 
+/** Concrete run input derived from a saved configuration. */
+export interface ResolvedRunInput {
+  primaryFileId: string;
+  eventsFileId: string;
+  config: Record<string, unknown>;
+}
+
+export interface ResolveRunInputContext {
+  configuration: WorkflowConfiguration;
+  datasets: DatasetProfile[];
+}
+
 export interface RegisteredWorkflow {
   slug: string;
   name: string;
@@ -26,8 +41,10 @@ export interface RegisteredWorkflow {
   description: string;
   stepSummaries: ReadonlyArray<{ id: string; name: string }>;
   configFields: ReadonlyArray<WorkflowConfigField>;
+  configuration: WorkflowConfigurationDefinition;
   ruleSet: RuleSet;
   execute(input: unknown, ctx: StepContext): Promise<WorkflowExecution<WorkflowOutputs>>;
+  resolveRunInput?(context: ResolveRunInputContext): ResolvedRunInput;
 }
 
 export class WorkflowRegistry {

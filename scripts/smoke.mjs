@@ -30,6 +30,14 @@ async function uploadFile(kind, fileName) {
   return request('/api/v1/files', { method: 'POST', body: form });
 }
 
+async function uploadDataset(kind, fileName) {
+  const content = await readFile(path.join(samplesDir, fileName));
+  const form = new FormData();
+  form.set('kind', kind);
+  form.set('file', new Blob([content], { type: 'text/csv' }), fileName);
+  return request('/api/v1/datasets', { method: 'POST', body: form });
+}
+
 async function waitForRun(runId, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -108,6 +116,102 @@ async function main() {
     body: JSON.stringify({ action: 'accepted', note: 'smoke test' }),
   });
   console.log(`review item   : ${resolved.entityKey} -> ${resolved.status}`);
+
+  // Workflow configuration layer: datasets -> roles -> column mapping -> validation -> run.
+  const primaryDataset = await uploadDataset('primary', 'primary_accounts.csv');
+  const eventsDataset = await uploadDataset('events', 'fault_events.csv');
+  console.log(
+    `datasets      : primary ${primaryDataset.id} (${primaryDataset.columns.length} cols), events ${eventsDataset.id} (${eventsDataset.columns.length} cols)`,
+  );
+
+  const mappingPayload = {
+    workflowSlug: 'account-fault-triage',
+    assignments: [
+      { role: 'primary', datasetId: primaryDataset.id, sheetName: null },
+      { role: 'events', datasetId: eventsDataset.id, sheetName: null },
+    ],
+    mappings: [
+      {
+        role: 'primaryEntityKey',
+        datasetId: primaryDataset.id,
+        sheetName: null,
+        column: 'Account Number',
+        confirmed: false,
+      },
+      {
+        role: 'eventsEntityKey',
+        datasetId: eventsDataset.id,
+        sheetName: null,
+        column: 'Account Number',
+        confirmed: false,
+      },
+      {
+        role: 'eventsTimestamp',
+        datasetId: eventsDataset.id,
+        sheetName: null,
+        column: 'Fault Date',
+        confirmed: false,
+      },
+      {
+        role: 'eventsDescription',
+        datasetId: eventsDataset.id,
+        sheetName: null,
+        column: 'Fault Description',
+        confirmed: false,
+      },
+    ],
+    options: { reviewBelowConfidence: 0.8, includeSystemColumns: true },
+  };
+
+  const validation = await request('/api/v1/workflow-configurations/validate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(mappingPayload),
+  });
+  assert(
+    validation.valid,
+    `configuration must validate, issues: ${JSON.stringify(validation.issues)}`,
+  );
+  assert(
+    validation.resolvedConfig?.primaryAccountColumn === 'Account Number',
+    'validation must resolve the primary account column',
+  );
+  console.log(
+    `validation    : valid, resolved primaryAccountColumn=${validation.resolvedConfig.primaryAccountColumn}`,
+  );
+
+  const configuration = await request('/api/v1/workflow-configurations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...mappingPayload,
+      name: 'Smoke configuration',
+      description: 'Created by scripts/smoke.mjs',
+    }),
+  });
+  console.log(`configuration : ${configuration.id} (v${configuration.version})`);
+
+  const configuredRun = await request('/api/v1/runs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ configurationId: configuration.id }),
+  });
+  const configuredFinished = await waitForRun(configuredRun.id);
+  assert(
+    configuredFinished.status === 'succeeded',
+    `configuration run status was ${configuredFinished.status}`,
+  );
+  assert(
+    configuredFinished.configurationId === configuration.id,
+    'run must reference the configuration it was started from',
+  );
+  assert(
+    configuredFinished.stats.accounts === 9,
+    `expected 9 accounts from the configured run, got ${configuredFinished.stats.accounts}`,
+  );
+  console.log(
+    `configured run: ${configuredFinished.status}, ${configuredFinished.stats.accounts} accounts, ${configuredFinished.reviewItemCount} review items`,
+  );
 
   console.log('\nSmoke test passed.');
   console.log(`Sample output (first 3 lines):\n${rows.slice(0, 3).join('\n')}`);

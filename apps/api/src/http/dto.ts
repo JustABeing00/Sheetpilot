@@ -8,6 +8,8 @@ import type {
   RunDto,
   RunSummaryDto,
   StepRun,
+  WorkflowConfiguration,
+  WorkflowConfigurationSummary,
   WorkflowRun,
 } from '@sheetpilot/core';
 import type { RegisteredWorkflow } from '@sheetpilot/workflow-engine';
@@ -19,9 +21,46 @@ import type {
   FileAssetDto,
   ReviewItemDto,
   StepRunDto,
+  WorkflowConfigurationDto,
+  WorkflowConfigurationSummaryDto,
   WorkflowDetailDto,
   WorkflowSummaryDto,
 } from '@sheetpilot/core';
+
+export function toWorkflowConfigurationDto(
+  configuration: WorkflowConfiguration,
+): WorkflowConfigurationDto {
+  return {
+    id: configuration.id,
+    workflowSlug: configuration.workflowSlug,
+    workflowVersion: configuration.workflowVersion,
+    name: configuration.name,
+    description: configuration.description,
+    version: configuration.version,
+    assignments: configuration.assignments,
+    mappings: configuration.mappings,
+    options: configuration.options,
+    createdAt: configuration.createdAt.toISOString(),
+    updatedAt: configuration.updatedAt.toISOString(),
+  };
+}
+
+export function toWorkflowConfigurationSummaryDto(
+  configuration: WorkflowConfigurationSummary,
+): WorkflowConfigurationSummaryDto {
+  return {
+    id: configuration.id,
+    workflowSlug: configuration.workflowSlug,
+    workflowVersion: configuration.workflowVersion,
+    name: configuration.name,
+    description: configuration.description,
+    version: configuration.version,
+    datasetCount: configuration.datasetCount,
+    mappingCount: configuration.mappingCount,
+    createdAt: configuration.createdAt.toISOString(),
+    updatedAt: configuration.updatedAt.toISOString(),
+  };
+}
 
 export function toDatasetDto(dataset: DatasetProfile): DatasetDto {
   return {
@@ -113,6 +152,7 @@ export function toRunDto(run: WorkflowRun, steps: StepRun[], description: RunDes
     status: run.status,
     primaryFileId: run.primaryFileId,
     eventsFileId: run.eventsFileId,
+    configurationId: run.configurationId,
     primaryFileName: description.primaryFileName,
     eventsFileName: description.eventsFileName,
     config: run.config,
@@ -137,6 +177,7 @@ export function toRunSummaryDto(run: WorkflowRun, description: RunDescription): 
     status: run.status,
     primaryFileId: run.primaryFileId,
     eventsFileId: run.eventsFileId,
+    configurationId: run.configurationId,
     primaryFileName: description.primaryFileName,
     eventsFileName: description.eventsFileName,
     stats: run.stats,
@@ -219,6 +260,11 @@ export function toWorkflowDetailDto(workflow: RegisteredWorkflow): WorkflowDetai
   return {
     ...toWorkflowSummaryDto(workflow),
     configFields: workflow.configFields.map((field) => ({ ...field })),
+    configuration: {
+      datasetRoles: workflow.configuration.datasetRoles.map((role) => ({ ...role })),
+      columnRoles: workflow.configuration.columnRoles.map((role) => ({ ...role })),
+      options: workflow.configuration.options.map((field) => ({ ...field })),
+    },
     ruleSet: {
       slug: workflow.ruleSet.slug,
       name: workflow.ruleSet.name,

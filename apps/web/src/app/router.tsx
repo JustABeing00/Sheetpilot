@@ -8,6 +8,7 @@ import { NotFoundPage } from '../pages/NotFoundPage.js';
 import { ReviewQueuePage } from '../pages/ReviewQueuePage.js';
 import { RunDetailPage } from '../pages/RunDetailPage.js';
 import { RunsPage } from '../pages/RunsPage.js';
+import { SetupPage } from '../pages/SetupPage.js';
 import { WorkflowDetailPage } from '../pages/WorkflowDetailPage.js';
 import { WorkflowsPage } from '../pages/WorkflowsPage.js';
 
@@ -22,6 +23,8 @@ export const router = createBrowserRouter([
       { path: 'runs/:runId', element: <RunDetailPage /> },
       { path: 'datasets', element: <DatasetsPage /> },
       { path: 'datasets/:datasetId', element: <DatasetDetailPage /> },
+      { path: 'setup', element: <SetupPage /> },
+      { path: 'setup/:configurationId', element: <SetupPage /> },
       { path: 'review', element: <ReviewQueuePage /> },
       { path: 'workflows', element: <WorkflowsPage /> },
       { path: 'workflows/:slug', element: <WorkflowDetailPage /> },

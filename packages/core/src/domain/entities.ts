@@ -94,6 +94,7 @@ export const workflowRunSchema = z.object({
   status: runStatusSchema,
   primaryFileId: fileIdSchema,
   eventsFileId: fileIdSchema,
+  configurationId: z.string().min(1).nullable().default(null),
   config: jsonObjectSchema.default({}),
   stats: metricRecordSchema.default({}),
   error: z.string().nullable().default(null),

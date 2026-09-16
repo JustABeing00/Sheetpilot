@@ -85,6 +85,12 @@ export class ProcessingError extends AppError {
   }
 }
 
+export class InvalidConfigurationError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'invalid_configuration', statusCode: 422, details });
+  }
+}
+
 export class StorageError extends AppError {
   constructor(message: string, details?: unknown, cause?: unknown) {
     super(message, { code: 'storage_error', statusCode: 500, details, cause });

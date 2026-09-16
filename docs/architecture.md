@@ -14,12 +14,12 @@
 ```mermaid
 flowchart TB
   subgraph UI["apps/web — Frontend / UI"]
-    pages["Dashboard · Datasets · New run · Runs · Run detail · Review queue · Workflows"]
+    pages["Dashboard · Datasets · Setup · New run · Runs · Run detail · Review queue · Workflows"]
   end
 
   subgraph API["apps/api — API / application layer"]
     routes["HTTP routes (Fastify)"]
-    services["DatasetService · FileService · RunService"]
+    services["DatasetService · WorkflowConfigurationService · FileService · RunService"]
     container["Composition root (container.ts)"]
   end
 
@@ -69,7 +69,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    `POST /api/v1/datasets` returns the richer dataset DTO directly; `GET /api/v1/datasets/:id/rows`
    pages rows from storage so the browser never receives the full table.
 2. `POST /api/v1/runs` → `RunService.createRun` validates the workflow + files, persists a `queued` run
-   and returns **202** immediately; execution happens in the background.
+   and returns **202** immediately; execution happens in the background. A run can be started either with
+   explicit file ids (legacy wizard) or with a `configurationId`, in which case
+   `WorkflowConfigurationService.buildRunInput` resolves the saved mapping into file ids and workflow
+   config keys first.
 3. `RunService.execute` builds a `StepContext`, creates the run's step records, then calls
    `workflow.execute(input, ctx)`.
 4. `executeWorkflow` (engine) runs the workflow program's steps sequentially, merging state and recording
@@ -79,6 +82,26 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 6. `RunService` persists step results, writes artifacts (output CSV, output XLSX, review queue CSV),
    stores decision records and review items, then marks the run succeeded with statistics.
 7. The web app polls `GET /api/v1/runs/:id` while the run is queued/running and renders the trace.
+
+## Configuration lifecycle
+
+1. A workflow declares its requirements as data: `RegisteredWorkflow.configuration` holds dataset roles
+   (e.g. `primary`, `events`), semantic column roles (`identifier`, `timestamp`, `description`, output
+   columns) and scalar options. `GET /api/v1/workflows/:slug` serves this to the UI.
+2. The **Setup** page assigns an ingested dataset to each role and maps each semantic column role to a
+   real detected column, using `DatasetProfile.columns` (`likelyIdentifier`/`likelyDate`/type) to
+   suggest defaults. Output columns are a multi-select; leaving it empty keeps every primary column.
+3. As the user edits, the page debounces `POST /api/v1/workflow-configurations/validate`.
+   `WorkflowConfigurationService` loads the referenced datasets and calls the pure
+   `validateWorkflowConfiguration` from `@sheetpilot/core`. Errors block; ambiguous mappings (a date used
+   as an identifier, a non-date timestamp that only parses in samples) become blocking until the user
+   ticks "I checked this column". The response also previews the resolved run config.
+4. `POST /api/v1/workflow-configurations` re-validates and persists the configuration (version 1);
+   `PUT /api/v1/workflow-configurations/:id` re-validates and bumps the version.
+5. `POST /api/v1/runs` with `{ configurationId }` resolves the configuration through
+   `RegisteredWorkflow.resolveRunInput` into `{ primaryFileId, eventsFileId, config }`, where config keys
+   are the workflow's expected field names (`primaryAccountColumn`, `eventsTimestampColumn`, …) and the run
+   records the `configurationId` for traceability.
 
 ## Key abstractions (ports & contracts)
 
@@ -92,6 +115,11 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `inspectDataset` | `packages/file-processing/src/inspection.ts` | Bounded one-pass analysis producing inferred types, emptiness/uniqueness stats, samples and warnings |
 | `DatasetService` / `DatasetProfile` | `apps/api/src/services/dataset-service.ts`, `packages/core/src/domain/dataset.ts` | Normalized, persisted dataset representation consumed by later workflow stages |
 | `DatasetRepository` | `packages/core/src/ports/datasets.ts` | Persistence port for dataset profiles (in-memory and Postgres adapters) |
+| `WorkflowConfigurationDefinition` | `packages/core/src/domain/workflow-config.ts` | A workflow's declared dataset roles, semantic column roles and options (data, not UI) |
+| `WorkflowConfiguration` | `packages/core/src/domain/workflow-config.ts` | Persisted, versioned assignment + mapping for one setup; reusable across daily files |
+| `validateWorkflowConfiguration` | `packages/core/src/domain/workflow-config.ts` | Pure structural + semantic validation shared by the API and (via the endpoint) the UI |
+| `WorkflowConfigurationRepository` | `packages/core/src/ports/workflow-configurations.ts` | Persistence port for configurations (in-memory and Postgres adapters) |
+| `resolveRunInput` | `packages/workflow-engine/src/workflows/account-faults/configuration.ts` | Maps a saved configuration to the workflow's concrete run input |
 | `Rule`, `ConditionGroup`, `RuleAction` | `packages/core/src/domain/rules.ts` | Business rules are data with zod validation, versioned in `RuleSet`s |
 | `evaluateRules` | `packages/rule-engine/src/evaluate.ts` | Deterministic winner: priority ↓, specificity ↓, rule id ↑; conflicts reported |
 | `ClassificationProvider` | `packages/core/src/ports/classification.ts` | AI port; `NoopClassificationProvider` today |
@@ -115,7 +143,8 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 
 | Need | Where to plug in |
 | --- | --- |
-| New workflow (different use case) | Add a program under `packages/workflow-engine/src/workflows/*` and register it in `registry.ts` |
+| New workflow (different use case) | Add a program under `packages/workflow-engine/src/workflows/*`, declare its `configuration` definition + `resolveRunInput`, and register it in `registry.ts` |
+| Editable workflow mapping | `WorkflowConfiguration` + repository already exist; add a compare/merge UI and immutable version snapshots |
 | Real AI provider | Implement `ClassificationProvider` in `packages/ai` and wire it in `createClassificationProvider` |
 | Editable/persisted rules | `RuleSetRepository` + `rule_sets` table already exist; the API reads rules from the registry today |
 | S3/blob storage | Implement `FileStorage`; `createContainer` selects the driver |

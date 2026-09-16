@@ -3,6 +3,10 @@ import { executeWorkflow } from '../../engine.js';
 import type { WorkflowDependencies, RegisteredWorkflow, WorkflowOutputs } from '../../registry.js';
 import type { StepContext, WorkflowExecution, WorkflowProgram } from '../../types.js';
 import {
+  ACCOUNT_FAULT_CONFIGURATION_DEFINITION,
+  resolveAccountFaultRunInput,
+} from './configuration.js';
+import {
   createBuildOutputStep,
   createClassifyStep,
   createGroupEventsStep,
@@ -93,6 +97,8 @@ export function createAccountFaultWorkflow(deps: AccountFaultWorkflowDeps): Regi
     description: program.description,
     stepSummaries: program.steps.map((step) => ({ id: step.id, name: step.name })),
     configFields: ACCOUNT_FAULT_CONFIG_FIELDS,
+    configuration: ACCOUNT_FAULT_CONFIGURATION_DEFINITION,
+    resolveRunInput: resolveAccountFaultRunInput,
     ruleSet: deps.rules ?? DEFAULT_ACCOUNT_FAULT_RULE_SET,
     async execute(input: unknown, ctx: StepContext): Promise<WorkflowExecution<WorkflowOutputs>> {
       const execution = await executeWorkflow(program, input, ctx);

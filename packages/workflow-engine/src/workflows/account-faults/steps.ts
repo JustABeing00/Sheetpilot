@@ -525,13 +525,19 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
     id: 'build-output',
     name: 'Build output rows and review queue',
     run: (_ctx, state) => {
+      const selectedPrimaryColumns =
+        state.config.primaryOutputColumns.length > 0
+          ? state.primaryColumns.filter((column) =>
+              state.config.primaryOutputColumns.includes(column),
+            )
+          : state.primaryColumns;
       const businessColumns = ACCOUNT_FAULT_BUSINESS_COLUMNS.filter(
-        (column) => !state.primaryColumns.includes(column),
+        (column) => !selectedPrimaryColumns.includes(column),
       );
       const systemColumns = state.config.includeSystemColumns
         ? [...ACCOUNT_FAULT_SYSTEM_COLUMNS]
         : [];
-      const outputColumns = [...state.primaryColumns, ...businessColumns, ...systemColumns];
+      const outputColumns = [...selectedPrimaryColumns, ...businessColumns, ...systemColumns];
 
       const decisionByAccount = new Map(
         state.decisions.map((decision) => [decision.account, decision]),

@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   artifactListResponseSchema,
+  configurationValidationResponseSchema,
   datasetAnalysisResponseSchema,
   datasetDtoSchema,
   datasetListResponseSchema,
@@ -14,12 +15,17 @@ import {
   reviewItemListResponseSchema,
   runDtoSchema,
   runListResponseSchema,
+  workflowConfigurationDtoSchema,
+  workflowConfigurationListResponseSchema,
   workflowDetailDtoSchema,
   workflowListResponseSchema,
   type CreateRunRequest,
+  type CreateWorkflowConfigurationRequest,
   type ResolveReviewItemRequest,
+  type UpdateWorkflowConfigurationRequest,
+  type ValidateWorkflowConfigurationRequest,
 } from '@sheetpilot/core';
-import { apiGet, apiPost, apiUpload } from './client.js';
+import { apiGet, apiPost, apiPut, apiUpload } from './client.js';
 
 export const queryKeys = {
   health: ['health'] as const,
@@ -38,6 +44,10 @@ export const queryKeys = {
   datasetAnalysis: (id: string, sheet: string) => ['datasets', id, 'analysis', sheet] as const,
   datasetRows: (id: string, sheet: string, offset: number) =>
     ['datasets', id, 'rows', sheet, offset] as const,
+  workflowConfigurations: ['workflow-configurations'] as const,
+  workflowConfigurationsBySlug: (slug: string) =>
+    ['workflow-configurations', 'slug', slug] as const,
+  workflowConfiguration: (id: string) => ['workflow-configurations', id] as const,
 };
 
 export function useHealth() {
@@ -213,6 +223,75 @@ export function useCreateRun() {
     mutationFn: (input: CreateRunRequest) => apiPost('/api/v1/runs', input, runDtoSchema),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs });
+    },
+  });
+}
+
+export function useDatasetDetails(ids: string[]) {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: queryKeys.dataset(id),
+      queryFn: () => apiGet(`/api/v1/datasets/${id}`, datasetDtoSchema),
+      enabled: Boolean(id),
+    })),
+  });
+}
+
+export function useWorkflowConfigurations(workflowSlug?: string) {
+  const query = workflowSlug
+    ? `?workflowSlug=${encodeURIComponent(workflowSlug)}&limit=100`
+    : '?limit=100';
+  return useQuery({
+    queryKey: workflowSlug
+      ? queryKeys.workflowConfigurationsBySlug(workflowSlug)
+      : queryKeys.workflowConfigurations,
+    queryFn: () =>
+      apiGet(`/api/v1/workflow-configurations${query}`, workflowConfigurationListResponseSchema),
+  });
+}
+
+export function useWorkflowConfiguration(configurationId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.workflowConfiguration(configurationId ?? ''),
+    queryFn: () =>
+      apiGet(`/api/v1/workflow-configurations/${configurationId}`, workflowConfigurationDtoSchema),
+    enabled: Boolean(configurationId),
+  });
+}
+
+export function useValidateWorkflowConfiguration() {
+  return useMutation({
+    mutationFn: (input: ValidateWorkflowConfigurationRequest) =>
+      apiPost(
+        '/api/v1/workflow-configurations/validate',
+        input,
+        configurationValidationResponseSchema,
+      ),
+  });
+}
+
+export function useCreateWorkflowConfiguration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateWorkflowConfigurationRequest) =>
+      apiPost('/api/v1/workflow-configurations', input, workflowConfigurationDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflowConfigurations });
+    },
+  });
+}
+
+export function useUpdateWorkflowConfiguration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: UpdateWorkflowConfigurationRequest }) =>
+      apiPut(
+        `/api/v1/workflow-configurations/${input.id}`,
+        input.body,
+        workflowConfigurationDtoSchema,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workflowConfigurations });
     },
   });
 }
