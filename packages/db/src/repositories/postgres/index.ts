@@ -359,13 +359,17 @@ export function createPostgresRepositories(db: Database): Repositories {
         );
       },
       async listByRun(runId, options) {
-        const rows = await db
+        // No limit means "all decisions for this run" (the in-memory driver's behaviour). The default
+        // 100-row cap here used to silently truncate the export summary and the review lookup.
+        const base = db
           .select()
           .from(runDecisions)
           .where(eq(runDecisions.runId, runId))
-          .orderBy(asc(runDecisions.entityKey))
-          .limit(options?.limit ?? 100)
-          .offset(options?.offset ?? 0);
+          .orderBy(asc(runDecisions.entityKey));
+        const rows =
+          options?.limit === undefined
+            ? await base.offset(options?.offset ?? 0)
+            : await base.limit(options.limit).offset(options?.offset ?? 0);
         return rows.map(toDecision);
       },
       async countByRun(runId) {
@@ -417,23 +421,29 @@ export function createPostgresRepositories(db: Database): Repositories {
         return toReviewItem(row!);
       },
       async listByRun(runId, options) {
-        const rows = await db
+        // No limit means "all review items for this run" (matching the in-memory driver); a default
+        // cap here truncated the derived export status and the run's review list.
+        const base = db
           .select()
           .from(reviewItems)
           .where(reviewCondition(options, runId))
-          .orderBy(desc(reviewItems.createdAt))
-          .limit(options?.limit ?? 100)
-          .offset(options?.offset ?? 0);
+          .orderBy(desc(reviewItems.createdAt));
+        const rows =
+          options?.limit === undefined
+            ? await base.offset(options?.offset ?? 0)
+            : await base.limit(options.limit).offset(options?.offset ?? 0);
         return rows.map(toReviewItem);
       },
       async list(options) {
-        const rows = await db
+        const base = db
           .select()
           .from(reviewItems)
           .where(reviewCondition(options))
-          .orderBy(desc(reviewItems.createdAt))
-          .limit(options?.limit ?? 100)
-          .offset(options?.offset ?? 0);
+          .orderBy(desc(reviewItems.createdAt));
+        const rows =
+          options?.limit === undefined
+            ? await base.offset(options?.offset ?? 0)
+            : await base.limit(options.limit).offset(options?.offset ?? 0);
         return rows.map(toReviewItem);
       },
       async countOpen() {
@@ -578,10 +588,12 @@ export function createPostgresRepositories(db: Database): Repositories {
         return row ? toRuleSet(row) : null;
       },
       async getActiveByWorkflowSlug(workflowSlug) {
+        // Deterministic winner if two rows ever coexist as active: the most recently updated set.
         const [row] = await db
           .select()
           .from(ruleSets)
           .where(and(eq(ruleSets.workflowSlug, workflowSlug), eq(ruleSets.active, true)))
+          .orderBy(desc(ruleSets.updatedAt))
           .limit(1);
         return row ? toRuleSet(row) : null;
       },

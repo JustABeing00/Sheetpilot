@@ -99,15 +99,14 @@ export function ReviewQueuePage() {
         </div>
       ) : null}
 
-      <div className="review-filters" role="tablist" aria-label="Review filters">
+      <div className="review-filters" role="group" aria-label="Review filters">
         {REVIEW_FILTER_DEFINITIONS.map((definition) => {
           const badge = badgeFor(definition.key);
           return (
             <button
               key={definition.key}
               type="button"
-              role="tab"
-              aria-selected={filter === definition.key}
+              aria-pressed={filter === definition.key}
               title={definition.description}
               className={filter === definition.key ? 'filter-chip active' : 'filter-chip'}
               onClick={() => {
@@ -208,6 +207,10 @@ function ReviewDetail({
     action: 'accepted' | 'overridden' | 'dismissed',
     values?: Record<string, string>,
   ) => {
+    // Guard the keyboard shortcuts too: pressing `a` repeatedly must not fire duplicate resolves.
+    if (resolve.isPending) {
+      return;
+    }
     resolve.mutate(
       { id: item.id, body: { action, values: values ?? {}, note } },
       {
@@ -272,7 +275,7 @@ function ReviewDetail({
     return () => window.removeEventListener('keydown', handler);
     // submit is stable enough for this scope; the handlers are re-bound on the values they read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, nextId, prevId, note, mode, confirmingDismiss, showHelp]);
+  }, [isOpen, nextId, prevId, note, mode, confirmingDismiss, showHelp, resolve.isPending]);
 
   const valueFor = (field: string): string =>
     overrides[field] ?? String(item.suggestedValues[field] ?? item.automation.values[field] ?? '');
@@ -458,6 +461,7 @@ function ReviewDetail({
               <div className="inline-add">
                 <input
                   className="input"
+                  aria-label="Add output field"
                   placeholder="Add field (e.g. RootCause)"
                   value={newField}
                   onChange={(event) => setNewField(event.target.value)}
@@ -560,6 +564,14 @@ function ReviewDetail({
       <div className="audit-trail">
         <h3>Audit trail</h3>
         {history.isLoading ? <span className="muted small">Loading history…</span> : null}
+        {history.isError ? (
+          <p className="muted small">
+            The audit history could not be loaded.{' '}
+            <button type="button" className="link" onClick={() => void history.refetch()}>
+              Retry
+            </button>
+          </p>
+        ) : null}
         {history.isSuccess && history.data.items.length === 0 ? (
           <p className="muted small">
             No human decision yet —{' '}

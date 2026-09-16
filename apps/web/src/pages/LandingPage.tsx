@@ -33,7 +33,9 @@ export function LandingPage() {
     <div className="landing">
       <header className="landing-nav">
         <div className="landing-brand">
-          <span className="brand-mark">SP</span>
+          <span className="brand-mark" aria-hidden="true">
+            SP
+          </span>
           <strong>SheetPilot</strong>
         </div>
         <nav className="landing-links" aria-label="Landing">

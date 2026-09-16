@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.js';
+import { RouteError } from '../components/RouteError.js';
 import { LoadingState } from '../components/ui.js';
 import { LandingPage } from '../pages/LandingPage.js';
 
@@ -24,9 +25,10 @@ function page(loader: () => Promise<{ default: ComponentType }>) {
 }
 
 export const router = createBrowserRouter([
-  { path: '/', element: <LandingPage /> },
+  { path: '/', element: <LandingPage />, errorElement: <RouteError /> },
   {
     element: <AppShell />,
+    errorElement: <RouteError />,
     children: [
       {
         path: 'dashboard',

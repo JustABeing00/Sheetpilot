@@ -184,8 +184,8 @@ attaches a new day's files and carries the remembered mapping (by column name) o
 column that needs re-mapping, and can optionally update the saved mapping to point at the new files. A
 saved workflow remembers its dataset roles, column mappings, matching/latest-record logic, rules and
 output/review options; creating a new one from scratch is the existing Setup flow. Scheduling,
-authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
-prioritized next steps.
+authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 and
+[`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md) for the prioritized next steps.
 
 The web app is a polished product surface rather than a data console. `/` is a landing page that explains the
 product and the five-stage journey; the working app lives under `/dashboard`. Every screen is a real route
@@ -200,6 +200,17 @@ workspace stays fast: filter chips with live counts, a keyboard cheat sheet (`?`
 shortcuts, ARIA live announcements and the full automation/evidence/audit context. Accessibility and
 performance are baseline: visible focus rings, a skip link, one `<main>` landmark, scrolling tables with
 sticky headers, and a `prefers-reduced-motion` override.
+
+## Production readiness
+
+A final pre-production audit (session 12) exercised the full journey and the edge cases and recorded an
+honest verdict in [`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md). **SheetPilot is not
+production-ready as a multi-user, internet-facing SaaS; it is ready for a controlled single-tenant pilot on
+a trusted network.** The blockers are operational rather than pipeline logic: the Postgres adapter is
+unverified and migrations are not applied automatically, there is no authentication/tenancy, runs execute
+in a single process with no durable queue, and there is no delete/erasure flow. The document covers what
+works, operational and deployment requirements, the full environment-variable list, and security and
+scaling considerations.
 
 ## Security and privacy
 

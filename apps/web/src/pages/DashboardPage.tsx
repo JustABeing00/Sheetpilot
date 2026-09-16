@@ -180,38 +180,40 @@ export function DashboardPage() {
             </p>
           ) : null}
           {recentRuns.length > 0 ? (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Workflow</th>
-                  <th>Status</th>
-                  <th>Reviewed</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentRuns.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      <Link className="link mono" to={`/runs/${run.id}`}>
-                        {run.id.slice(0, 8)}
-                      </Link>
-                    </td>
-                    <td>{run.workflowName}</td>
-                    <td>
-                      <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
-                    </td>
-                    <td>
-                      {run.reviewItemCount === 0
-                        ? '0'
-                        : `${run.openReviewItemCount} open / ${run.reviewItemCount}`}
-                    </td>
-                    <td>{formatDateTime(run.createdAt)}</td>
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Workflow</th>
+                    <th>Status</th>
+                    <th>Reviewed</th>
+                    <th>Created</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {recentRuns.map((run) => (
+                    <tr key={run.id}>
+                      <td>
+                        <Link className="link mono" to={`/runs/${run.id}`}>
+                          {run.id.slice(0, 8)}
+                        </Link>
+                      </td>
+                      <td>{run.workflowName}</td>
+                      <td>
+                        <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
+                      </td>
+                      <td>
+                        {run.reviewItemCount === 0
+                          ? '0'
+                          : `${run.openReviewItemCount} open / ${run.reviewItemCount}`}
+                      </td>
+                      <td>{formatDateTime(run.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
         </Card>
 

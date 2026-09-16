@@ -147,7 +147,9 @@ export function DatasetDetailPage() {
         }
       >
         {analysis.isLoading ? <LoadingState label="Analyzing columns…" /> : null}
-        {columns.length === 0 ? (
+        {analysis.isError ? (
+          <ErrorState error={analysis.error} onRetry={() => void analysis.refetch()} />
+        ) : columns.length === 0 ? (
           <EmptyState title="No columns detected" />
         ) : (
           <div className="table-scroll">

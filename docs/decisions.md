@@ -499,3 +499,12 @@ Blocking all review actions behind confirmation (rejected: accept/override are t
 only dismiss and rule deletion are confirmed). Adding a delete API so the Datasets screen can offer cleanup
 (rejected for this session: the task is UX-only and the backend must not be rewritten; the limitation is
 documented in the UI instead).
+
+## ADR-021 - The final pre-production audit is honest about the operating envelope
+
+**Decision.** The repository ships a `PRODUCTION_READINESS.md` that states plainly that SheetPilot is **not** production-ready as a multi-user SaaS and is ready only for a controlled single-tenant pilot on a trusted network. The four blockers are named: unverified Postgres plus migrations that are not auto-applied, no authentication/tenancy, in-process single-instance run execution with no durable queue, and no delete/erasure flow. The audit also fixed the concrete defects it found rather than only documenting them: a rule-set seeding bug that overwrote a customized active rule set on every restart (persistent-DB data loss), two Postgres-only default-limit truncations in `decisions.listByRun`/`reviewItems.listByRun` that could under-report unresolved cases in the export status, non-deterministic active-rule-set ordering, and a set of web defects (review keyboard double-submit, a silent Setup validation failure that blocked saving, a run-again prepare hang, missing focus trap/restore in `ConfirmDialog`, and a blank screen on a failed lazy chunk).
+
+**Why.** Every prior session verified its own feature; none had stepped back and asked whether the assembled system could be operated safely. Passing tests do not equal deployment readiness, and an optimistic readme would set an operator up to lose data (memory driver) or expose an unauthenticated API. The honest framing lets the product be piloted where it is actually safe while making the path to production explicit.
+
+**Consequences.** Startup seeding is now additive only: `seedRegisteredWorkflows` creates the workflow's default rule set only when the workflow has none, so operator rules can never be reset by a restart. The Postgres adapter is treated as unverified until a `DATABASE_URL`-gated parity suite exists and the remaining divergences (default limits, ordering, partial updates, `row!` assertions) are aligned. The API is documented as single-instance until a durable job queue lands. Deferred enterprise features (SSO, billing, RBAC) remain explicitly out of scope until the core workflow, review loop and Postgres durability are excellent.
+

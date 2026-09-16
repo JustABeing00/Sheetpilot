@@ -142,6 +142,9 @@ export function NewRunPage() {
           subtitle="Defaults match the sample files. Change them when the column headers differ."
         >
           {workflow.isLoading ? <LoadingState label="Loading configuration…" /> : null}
+          {workflow.isError ? (
+            <ErrorState error={workflow.error} onRetry={() => void workflow.refetch()} />
+          ) : null}
           <div className="field-grid">
             {fields.map((field) => (
               <Field key={field.key} label={field.label} hint={field.description}>

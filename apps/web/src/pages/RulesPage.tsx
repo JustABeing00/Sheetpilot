@@ -581,8 +581,13 @@ export function RulesPage() {
           {activeRuleSet ? <Badge tone="success">Active: {activeRuleSet.name}</Badge> : null}
           {selected ? <span className="muted small">{selected.rules.length} rules</span> : null}
           {dirty ? <Badge tone="warning">Unsaved changes</Badge> : null}
-          <button type="button" className="button" onClick={() => void handleValidate()}>
-            Validate
+          <button
+            type="button"
+            className="button"
+            disabled={validateRuleSet.isPending}
+            onClick={() => void handleValidate()}
+          >
+            {validateRuleSet.isPending ? 'Validating…' : 'Validate'}
           </button>
           <button
             type="button"

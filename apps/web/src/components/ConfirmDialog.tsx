@@ -30,6 +30,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(onCancel);
 
   useEffect(() => {
@@ -40,15 +41,45 @@ export function ConfirmDialog({
     if (!open) {
       return;
     }
+    // Remember what had focus so it can be restored when the dialog closes, and keep Tab inside it.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     confirmRef.current?.focus();
+
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
         cancelRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') {
+        return;
+      }
+      const dialog = dialogRef.current;
+      if (!dialog) {
+        return;
+      }
+      const focusable = dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      previouslyFocused?.focus?.();
+    };
   }, [open]);
 
   if (!open) {
@@ -64,9 +95,20 @@ export function ConfirmDialog({
         }
       }}
     >
-      <div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title">
+      <div
+        ref={dialogRef}
+        className="dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="dialog-title"
+        aria-describedby={description ? 'dialog-description' : undefined}
+      >
         <h2 id="dialog-title">{title}</h2>
-        {description ? <div className="dialog-description">{description}</div> : null}
+        {description ? (
+          <div id="dialog-description" className="dialog-description">
+            {description}
+          </div>
+        ) : null}
         {children ? <div className="dialog-body">{children}</div> : null}
         <div className="dialog-actions">
           <button type="button" className="button" onClick={onCancel} disabled={busy}>

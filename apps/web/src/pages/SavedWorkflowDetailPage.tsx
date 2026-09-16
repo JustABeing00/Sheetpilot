@@ -116,29 +116,31 @@ export function SavedWorkflowDetailPage() {
           </ul>
 
           <h3 className="subsection-title">Column mapping</h3>
-          <table className="table table-compact">
-            <thead>
-              <tr>
-                <th>Role</th>
-                <th>Column</th>
-              </tr>
-            </thead>
-            <tbody>
-              {configuration.mappings.map((mapping, index) => (
-                <tr key={`${mapping.role}-${mapping.column}-${index}`}>
-                  <td>{columnRoleLabels.get(mapping.role) ?? mapping.role}</td>
-                  <td className="mono small">{mapping.column}</td>
-                </tr>
-              ))}
-              {configuration.mappings.length === 0 ? (
+          <div className="table-scroll">
+            <table className="table table-compact">
+              <thead>
                 <tr>
-                  <td colSpan={2} className="muted">
-                    No columns mapped yet.
-                  </td>
+                  <th>Role</th>
+                  <th>Column</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {configuration.mappings.map((mapping, index) => (
+                  <tr key={`${mapping.role}-${mapping.column}-${index}`}>
+                    <td>{columnRoleLabels.get(mapping.role) ?? mapping.role}</td>
+                    <td className="mono small">{mapping.column}</td>
+                  </tr>
+                ))}
+                {configuration.mappings.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="muted">
+                      No columns mapped yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
 
           <h3 className="subsection-title">Matching &amp; latest-record logic</h3>
           <p className="muted small">

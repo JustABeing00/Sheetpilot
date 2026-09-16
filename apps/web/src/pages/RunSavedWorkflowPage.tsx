@@ -139,7 +139,7 @@ export function RunSavedWorkflowPage() {
     }
   };
 
-  if (detail.isLoading || workflow.isLoading) {
+  if (detail.isLoading) {
     return <LoadingState label="Loading saved workflow…" />;
   }
   if (detail.isError) {
@@ -147,6 +147,12 @@ export function RunSavedWorkflowPage() {
   }
   if (!detail.data) {
     return <EmptyState title="Saved workflow not found" />;
+  }
+  if (workflow.isLoading) {
+    return <LoadingState label="Loading saved workflow…" />;
+  }
+  if (workflow.isError) {
+    return <ErrorState error={workflow.error} onRetry={() => void workflow.refetch()} />;
   }
 
   const readyRoles = datasetRoles.filter((role) => assignments[role.key]);
@@ -239,6 +245,8 @@ export function RunSavedWorkflowPage() {
         actions={
           prepare.isPending ? (
             <Badge tone="info">checking…</Badge>
+          ) : prepare.isError ? (
+            <Badge tone="danger">check failed</Badge>
           ) : prepared ? (
             <Badge tone={prepared.valid ? 'success' : 'danger'}>
               {prepared.valid ? 'ready' : 'needs attention'}
@@ -246,7 +254,23 @@ export function RunSavedWorkflowPage() {
           ) : null
         }
       >
-        {missingRoles.length > 0 ? (
+        {prepare.isError ? (
+          <div className="error-state" role="alert">
+            <strong>The mapping check failed</strong>
+            <p>{describeError(prepare.error)}</p>
+            <button
+              type="button"
+              className="button small"
+              onClick={() => {
+                if (savedWorkflowId && assignmentList.length > 0) {
+                  prepare.mutate({ id: savedWorkflowId, body: { assignments: assignmentList } });
+                }
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        ) : missingRoles.length > 0 ? (
           <p className="muted">
             Attach a file for {missingRoles.map((role) => `“${role.label}”`).join(', ')} to
             continue.

@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-17 (product session 11 — UI/UX & product polish)
+**Last updated:** 2026-09-17 (product session 12 — final QA, deployment readiness & product audit)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -119,11 +119,14 @@ table headers inside `.table-scroll`, and a CSS polish/override layer (tokens, h
 toasts, landing styles, mobile top bar). Backend logic was not rewritten. **Status: achieved** (see §8,
 verified in §9).
 
-**Next (product session 12):** no queue file yet (the overnight queue ends at `11-session.md`). The deferred
-backlog remains in §15: verify Postgres, human corrections → rule suggestions, browsable version history,
-reviewer identity and reopening resolved items, per-configuration AI choice, streaming/chunked loading,
-scheduling/watched folders, identifier-normalization options, and a delete/erasure flow (the Datasets screen
-now states that deletion is not yet possible).
+**Product session 12 objective: final QA, deployment readiness & product audit.** The last session was a
+serious pre-production audit (not an assumption that prior sessions were correct). It exercised the full
+journey and the prompt's edge cases, reviewed architecture/persistence/security/accessibility/performance/
+docs, fixed the concrete defects it found, and produced `PRODUCTION_READINESS.md` with an honest verdict.
+Four blockers stop a "production-ready" claim — **unverified Postgres + migrations not auto-applied, no
+auth/tenancy, in-process single-instance runs, and no delete/erasure** — while the product is genuinely ready
+for a controlled single-tenant pilot on a trusted network. **Status: achieved** (see §8, verified in §9).
+The deferred backlog is consolidated in `PRODUCTION_READINESS.md` §9 and §15 below.
 
 ## 3. Product Vision
 
@@ -371,6 +374,7 @@ samples/field-service/     second representative fixture set (site faults) for t
 scripts/smoke.mjs          end-to-end smoke test against a running API
 docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 docs/privacy.md, docs/security-review.md  data handling + the repository-wide security review
+PRODUCTION_READINESS.md   final pre-production audit: what works, blockers, ops/deploy/security/scaling
 ```
 
 ## 7. Domain Model
@@ -414,6 +418,52 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 12 — Final QA, deployment readiness & product audit (2026-09-17)
+
+- [x] Baseline verification before any change: `npm run lint` clean, `npm run typecheck` clean,
+      `npm test` 33 files / 303 tests green, `npm run build` green.
+- [x] New audit suite `apps/api/src/audit.test.ts` (8 tests) covering the prompt's edge cases at the
+      API boundary: zero-byte file (400), header-only file (422 `empty_dataset`), duplicate columns
+      (warning + deduped), leading-zero identifiers (stay text + flagged), unicode/embedded
+      commas/quotes, duplicate primary keys + identical timestamps + a no-events account, and a
+      missing configured column (the run **fails fast** with a message naming the column and listing
+      the real ones). Total suite now **34 files / 311 tests**.
+- [x] **Fixed a real data-loss bug**: `seedRegisteredWorkflows` (`apps/api/src/container.ts`)
+      unconditionally upserted the in-code default rule set over the workflow's active set, so on a
+      persistent database every API restart silently discarded a customized/replaced active rule set.
+      It now seeds only when the workflow has **no** rule sets, and a regression test (container
+      restarted over shared repositories) proves the operator's set survives.
+- [x] **Fixed two Postgres-only correctness bugs** (`packages/db/src/repositories/postgres/index.ts`):
+      `decisions.listByRun` and `reviewItems.listByRun` applied a default `LIMIT 100` where the
+      in-memory driver is unbounded, so `ExportService.status()` and the run review-list route could
+      silently truncate a run with >100 records (undercounting unresolved cases — even reporting an
+      export `ready` while items were outstanding). Both now apply a limit only when one is provided.
+      Also added a deterministic `ORDER BY updated_at DESC` to `getActiveByWorkflowSlug`.
+- [x] **Web defect fixes** (from a focused UI/a11y audit):
+  - review queue keyboard shortcuts no longer bypass the in-flight guard (duplicate resolve risk);
+    filter chips now use a valid `role="group"`/`aria-pressed` toggle pattern instead of an
+    incomplete tablist; audit-history load failures are surfaced; the "add output field" input is
+    labelled;
+  - Setup: a failed validation request was silent and permanently disabled Save — it now shows an
+    error with a retry; an empty workflow list no longer spins forever; dataset load errors are
+    surfaced; the boolean option's nested invalid `<label>` was removed;
+  - Run again: a failed prepare no longer hangs on "Checking the mapping…"; it shows the error with a
+    retry and the workflow-detail query error is handled;
+  - `ConfirmDialog` now traps Tab and restores focus; a route-level `errorElement`
+    (`components/RouteError.tsx`) replaces the blank screen on a failed lazy chunk/render throw;
+  - smaller: last unwrapped tables moved into `.table-scroll`, dataset-analysis and workflow-detail
+    error states added, `minmax(320px, …)` overflow fixed, landing brand mark `aria-hidden`.
+- [x] **Deployment-readiness review** written to `PRODUCTION_READINESS.md`: what works, honest known
+      limitations, operational requirements, env vars, deployment requirements, security and scaling
+      considerations, and prioritized next steps. **Verdict: not production-ready as a multi-user
+      SaaS; ready for a controlled single-tenant pilot on a trusted network** (blockers: unverified
+      Postgres + no auto-migrations, no auth/tenancy, in-process single-instance runs, no
+      delete/erasure).
+- [x] Verified after all changes: `npm run lint`, `npm run typecheck`, `npm test` (311/34),
+      `npm run build` (entry 44.6 KB / 11.8 KB gzip), and `npm run smoke` against the production
+      bundle (full journey incl. configured run, snapshot, run-again, review override + regenerated
+      output, export, rule validate/save) — all green.
 
 ### Product session 11 — UI/UX & product polish (2026-09-17)
 
@@ -974,10 +1024,11 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 33 files / 303 tests passed |
-| Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
-| Web bundle | `npm run build -w @sheetpilot/web` | route-split: entry `index` 44 KB (11.7 KB gzip), vendors `react` 304 KB / `zod` 93 KB / `query` 46 KB (cacheable), 20 per-screen chunks 0.4–17 KB; no >500 KB warning |
-| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV; saved-workflow dashboard, run-again (4/4 carried, config v2) and rule-set validation/save all green (re-verified session 10) |
+| Tests | `npm test` | 34 files / 311 tests passed (session 12 added `apps/api/src/audit.test.ts`, 8 edge-case tests) |
+| Build | `npm run build` | API bundle (`apps/api/dist/index.js`, 323 KB) + web assets (`apps/web/dist`) |
+| Web bundle | `npm run build -w @sheetpilot/web` | route-split: entry `index` 44.6 KB (11.8 KB gzip), vendors `react` 304 KB / `zod` 93 KB / `query` 46 KB (cacheable), 20 per-screen chunks 0.4–18 KB; no >500 KB warning |
+| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV; saved-workflow dashboard, run-again (4/4 carried, config v2) and rule-set validation/save all green (re-verified session 12) |
+| Final audit (API E2E) | `npx vitest run apps/api/src/audit.test.ts` | 8 tests: zero-byte + header-only files, duplicate columns, leading-zero preservation, unicode/embedded commas, duplicate primary keys + identical timestamps + a no-events account (3 decisions / 4 output rows), missing configured column fails fast with a helpful message, and the rule-set seeding regression (a customized active set survives a container restart) |
 | File security (unit) | `npx vitest run packages/file-processing/src/security.test.ts` | 21 tests: filename hardening (reserved/illegal/long/path components), storage-key rejection of `../`/absolute/drive/NUL/`.`/empty keys + containment, `list` metadata, ZIP summaries, zip-bomb + entry-count rejection, cleanup-friendly memory storage |
 | API security & reliability (E2E) | `npx vitest run apps/api/src/security.test.ts` | 13 tests: API-key auth (missing/wrong/ok, health exempt), rate-limit `429` + `Retry-After`, security headers, error hygiene (no stack), idempotent `POST /runs` (same id, one run), stale-run recovery to `failed`, zip-bomb `422` with nothing stored, failed-ingest cleanup, retention sweep |
 | AI security (unit) | `npx vitest run packages/ai` | 35 tests incl. prompt-injection prose ignored, unknown/prototype keys stripped, history redaction, and a real loopback adapter contract (key only in the header, bounded payload, untrusted-data labelling) |
@@ -1257,6 +1308,24 @@ the assisted paths.
 68. **The landing page is static product copy.** It describes the implemented five-stage journey and review
     loop, but it is hand-written React rather than content-driven, so it must be updated by hand when the
     product changes.
+69. **The Postgres adapter still diverges from memory in ways that are latent, not yet active.** Beyond the
+    two fixed in session 12 (decisions/reviewItems default limits), `datasets`, `workflowConfigurations`,
+    `runs` and `reviewResolutions` list methods still apply a default limit where memory is unbounded; update
+    methods are partial writes; `row!` assertions can throw on a missing row; and ordering differs (e.g.
+    decisions by `entityKey` in Postgres vs insertion order in memory). Current callers pass explicit limits
+    and fetch-then-update, so today's behavior is correct — verify and align these with the Postgres parity
+    suite before switching drivers. Full detail in `PRODUCTION_READINESS.md` §2.1.
+70. **Migrations are a manual deploy step.** `REPOSITORY_DRIVER=postgres` on a fresh database fails until
+    `npm run db:migrate` is run; the bundled API cannot locate `packages/db/drizzle`, so auto-migration needs
+    a build/deploy change. Documented as a required operational step.
+71. **No durable job queue, so the API is single-instance.** Runs execute in-process; a second replica's
+    startup `recoverStaleRuns()` would fail the first instance's in-flight runs. Horizontal scaling requires a
+    real queue plus durable idempotency and shared rate limiting.
+72. **The web layer still has no browser tests.** Session 11/12 behaviours (lazy routes, confirm dialogs,
+    keyboard review, focus trap, the new error/empty states) are manually verified and only label-helper
+    unit-tested; Playwright remains the top test gap.
+73. **No delete/erasure flow.** There is no delete API for datasets, runs or artifacts; regulatory erasure is
+    a manual DB + filesystem operation (also `docs/privacy.md`).
 
 ## 11. Technical Decisions
 
@@ -1383,7 +1452,7 @@ Not yet implemented (risks acknowledged — see `docs/security-review.md` for th
 
 ## 13. Testing
 
-**Status: 303 tests / 33 files passing (`npm test`).** Coverage by area:
+**Status: 311 tests / 34 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -1421,6 +1490,7 @@ Not yet implemented (risks acknowledged — see `docs/security-review.md` for th
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
 | UI vocabulary | `apps/web/src/lib/status.test.ts` | plain-language run/step labels, derived review state + reason labels, reason-help fallbacks (incl. an unknown reason), decision-source/severity labels, tone mapping unchanged, `describeRunError` rewriting common failures and passing through unknown ones |
+| Final audit (API E2E) | `apps/api/src/audit.test.ts` | zero-byte/header-only files, duplicate columns, leading-zero preservation, unicode/quotes, duplicate primary keys + identical timestamps + no-events, many-to-one output row count, missing configured column fails fast with a helpful error, and the startup rule-set-seeding regression (a customized active set survives a restart) |
 
 Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
 including `datasets`, `workflow_configurations` and `run_decisions.decision_source`), rule engine
@@ -1466,26 +1536,22 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 12: pick the next highest-value item.** The overnight queue ended at `11-session.md`, so
-choose from the deferred backlog below. The strongest candidates, in order: (1) verify Postgres for real by
-running the migrations and a memory-vs-Postgres parity suite behind a `DATABASE_URL` gate; (2) add a browser
-test layer (Playwright) for the review keyboard flow, the confirmation dialogs and the lazy routes - session
-11 improved these behaviours but only unit-tested the label vocabulary; (3) turn human corrections into rule
-suggestions by mining `review_resolutions` (`changedFields`) and proposing a rule draft in the Rules UI;
-(4) browsable immutable configuration/rule-set version history plus a "diff this run against the current
-rules" view (the run snapshot already makes this possible); and (5) a delete/erasure flow with confirmation
-for uploads and runs (the Datasets screen currently states deletion is not available). Verify with
-`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, plus `npm run smoke` for anything
-API-affecting, and record real results here.
+**The overnight queue is complete (sessions 01–12).** There is no next session file; the authoritative,
+prioritized backlog for whoever continues is `PRODUCTION_READINESS.md` §9 (recommended next steps) and §2
+(known limitations). In short, the highest-value work is: (1) verify Postgres for real and add a
+`DATABASE_URL`-gated memory↔Postgres parity suite (and align the remaining default-limit/ordering/update
+divergences); (2) make migrations a deploy step (or auto-apply them at startup); (3) add authentication,
+per-user reviewer identity and tenancy; (4) add a Playwright browser test layer (review keyboard flow,
+dialogs, lazy routes, refresh-during-processing, new error/empty states); (5) introduce a durable job queue
+so runs survive restarts and the API can scale horizontally; (6) a delete/erasure flow; (7) validate the AI
+path live plus token accounting; (8) streaming loaders and a streaming XLSX writer; (9) CI hardening
+(`npm audit`, Postgres service, coverage) and metrics/alerting.
 
-**Deferred backlog (still open from earlier sessions), roughly in priority order:** verify Postgres
-(`docker compose up -d postgres`, migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated memory↔Postgres
-parity tests for `run_snapshots`/`review_resolutions`/counts/rule-set queries); turn human corrections into
-rule suggestions (mine `review_resolutions`); browsable immutable configuration/rule-set version history and a
-"diff this run against current rules" view; reviewer identity and reopening resolved items; per-configuration
-AI provider choice / token accounting / `decisionSource` filtering; streaming/chunked loading (the loader still
-reads whole files); scheduling/watched-folder ingestion; exposing identifier-normalization options through
-configuration.
+**Product backlog (unchanged, lower priority):** turn human corrections into rule suggestions (mine
+`review_resolutions`); browsable immutable configuration/rule-set version history and a "diff this run against
+current rules" view; reviewer identity and reopening resolved items; per-configuration AI provider choice /
+`decisionSource` filtering; scheduling/watched-folder ingestion; exposing identifier-normalization options
+through configuration.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -1648,3 +1714,4 @@ configuration.
 | Product 10 | 2026-09-17 | Security, reliability & production hardening: hardened filename sanitisation + containment-proof storage paths + `FileStorage.list`; XLSX ZIP central-directory zip-bomb guard; ingestion cleanup-on-failure + `RetentionService` upload sweep; optional `API_KEY`, per-IP rate limit, security headers, body/multipart limits, `TRUST_PROXY`, no 5xx detail leakage, CORS credentials off; pino credential redaction; run double-execute guard + `recoverStaleRuns()` + `IdempotencyService` on `POST /runs`; AI prompt-injection/prototype-key/history-redaction + loopback adapter contract tests; new `docs/privacy.md`, `docs/security-review.md` (21 findings), ADR-019; +38 tests (296 total). Verified: lint/typecheck/296 tests/build/smoke. |
 
 | Product 11 | 2026-09-17 | UI/UX & product polish: landing page at `/` + dashboard at `/dashboard`, route-level code splitting with vendor chunks (entry 44 KB / 11.7 KB gzip), plain-language label module (`lib/status.ts`) used across the app, explicit `ConfirmDialog` for dismiss/delete/replace + `ToastProvider` feedback, live derived run progress, keyboard-first review (a/o/d/j/k, Esc, `?` cheat sheet, ARIA live), CSS polish layer (tokens, focus rings, tables, responsive, reduced motion), +7 tests (303 total). Verified: lint/typecheck/303 tests/build. |
+| Product 12 | 2026-09-17 | Final QA, deployment readiness & product audit: new `apps/api/src/audit.test.ts` (8 edge-case tests), fixed a rule-set seeding bug that discarded customized active rule sets on restart, fixed two Postgres-only default-limit truncations (decisions/review items) + deterministic active-rule-set ordering, fixed web defects (review keyboard double-submit, silent Setup validation failure, run-again prepare hang, confirm-dialog focus trap, route error boundary, error/empty states, ARIA, table scroll), wrote `PRODUCTION_READINESS.md`. +8 tests (311 total). Verified: lint/typecheck/311 tests/build/smoke. |

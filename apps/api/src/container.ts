@@ -74,16 +74,26 @@ async function seedRegisteredWorkflows(
       }),
     );
 
-    const existingRuleSet = await repositories.ruleSets.getActiveByWorkflowSlug(workflow.slug);
-    await repositories.ruleSets.upsert(
-      storedRuleSetSchema.parse({
-        ...workflow.ruleSet,
-        id: existingRuleSet?.id ?? `rs-${workflow.ruleSet.slug}`,
-        active: true,
-        createdAt: existingRuleSet?.createdAt ?? now,
-        updatedAt: now,
-      }),
-    );
+    // Seed the workflow's default rule set only on a genuinely empty install. Rules are user-managed
+    // data: upserting the in-code default over an existing set would silently discard a customized or
+    // replaced active set on every restart (a real data-loss bug with a persistent database).
+    const existingRuleSets = await repositories.ruleSets.listByWorkflowSlug(workflow.slug);
+    if (existingRuleSets.length === 0) {
+      await repositories.ruleSets.upsert(
+        storedRuleSetSchema.parse({
+          ...workflow.ruleSet,
+          id: `rs-${workflow.ruleSet.slug}`,
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
+    } else {
+      logger.debug(
+        { workflowSlug: workflow.slug, ruleSets: existingRuleSets.length },
+        'workflow already has rule sets; leaving them untouched',
+      );
+    }
   }
 
   logger.debug({ workflows: registry.list().length }, 'workflow definitions seeded');
@@ -92,7 +102,12 @@ async function seedRegisteredWorkflows(
 export async function createContainer(
   config: AppConfig,
   logger: Logger,
-  overrides: { storage?: FileStorage; classifier?: ClassificationProvider } = {},
+  overrides: {
+    storage?: FileStorage;
+    classifier?: ClassificationProvider;
+    /** Inject an existing repository set (tests that need data to survive a container re-creation). */
+    repositories?: Repositories;
+  } = {},
 ): Promise<AppContainer> {
   const clock = systemClock;
   const storage: FileStorage =
@@ -101,7 +116,9 @@ export async function createContainer(
   let databaseHandle: DatabaseHandle | null = null;
   let repositories: Repositories;
 
-  if (config.repository.driver === 'postgres') {
+  if (overrides.repositories) {
+    repositories = overrides.repositories;
+  } else if (config.repository.driver === 'postgres') {
     if (!config.repository.databaseUrl) {
       throw new ConfigurationError('DATABASE_URL is required when REPOSITORY_DRIVER=postgres');
     }

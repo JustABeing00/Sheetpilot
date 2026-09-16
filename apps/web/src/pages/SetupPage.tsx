@@ -259,6 +259,14 @@ export function SetupPage() {
   const valid = validation?.valid ?? false;
   const isSaving = create.isPending || update.isPending;
 
+  const runValidation = () =>
+    validate.mutate({
+      workflowSlug: slug,
+      assignments: assignmentList,
+      mappings: mappingList,
+      options,
+    });
+
   const updateAssignment = (roleKey: string, datasetId: string) => {
     setAssignments((current) => ({ ...current, [roleKey]: datasetId }));
   };
@@ -330,14 +338,23 @@ export function SetupPage() {
     }
   };
 
-  if (workflows.isLoading || !slug || (!workflow.data && workflow.isLoading)) {
+  if (workflows.isLoading) {
     return <LoadingState label="Loading workflow setup…" />;
   }
   if (workflows.isError) {
     return <ErrorState error={workflows.error} onRetry={() => void workflows.refetch()} />;
   }
+  if ((workflows.data?.items.length ?? 0) === 0) {
+    return <EmptyState title="No workflow available" description="Register a workflow first." />;
+  }
   if (existing.isError) {
     return <ErrorState error={existing.error} onRetry={() => void existing.refetch()} />;
+  }
+  if (!slug || workflow.isLoading) {
+    return <LoadingState label="Loading workflow setup…" />;
+  }
+  if (workflow.isError) {
+    return <ErrorState error={workflow.error} onRetry={() => void workflow.refetch()} />;
   }
   if (!definition) {
     return <EmptyState title="No workflow available" description="Register a workflow first." />;
@@ -410,7 +427,9 @@ export function SetupPage() {
         subtitle="Tell the workflow which uploaded file plays which part."
         actions={<Link to="/datasets">Upload more files</Link>}
       >
-        {datasetItems.length === 0 ? (
+        {datasets.isError ? (
+          <ErrorState error={datasets.error} onRetry={() => void datasets.refetch()} />
+        ) : datasetItems.length === 0 ? (
           <EmptyState
             title="No datasets yet"
             description="Upload at least the two files this workflow needs."
@@ -446,6 +465,25 @@ export function SetupPage() {
         title="2 · Map the columns"
         subtitle="We suggest columns based on what we detected; adjust any that look wrong."
       >
+        {datasetDetails.some((query) => query.isError) ? (
+          <div className="error-state" role="alert">
+            <strong>Some column details could not be loaded</strong>
+            <p>The mapped columns may be incomplete. Retry the check or re-select the dataset.</p>
+            <button
+              type="button"
+              className="button small"
+              onClick={() =>
+                datasetDetails.forEach((query) => {
+                  if (query.isError) {
+                    void query.refetch();
+                  }
+                })
+              }
+            >
+              Try again
+            </button>
+          </div>
+        ) : null}
         <div className="mapping-list">
           {definition.columnRoles.map((role) => {
             const datasetId = assignments[role.datasetRole];
@@ -482,14 +520,15 @@ export function SetupPage() {
               return (
                 <Field key={option.key} label={option.label} hint={option.description}>
                   {option.kind === 'boolean' ? (
-                    <label className="checkbox-field">
+                    <span className="checkbox-field">
                       <input
                         type="checkbox"
+                        aria-label={option.label}
                         checked={value === true}
                         onChange={(event) => setOption(option.key, event.target.checked)}
                       />
                       <span>{option.description.length > 0 ? option.label : 'Enabled'}</span>
-                    </label>
+                    </span>
                   ) : option.kind === 'number' ? (
                     <input
                       className="input"
@@ -523,12 +562,22 @@ export function SetupPage() {
         actions={
           validate.isPending ? (
             <Badge tone="info">checking…</Badge>
+          ) : validate.isError ? (
+            <Badge tone="danger">check failed</Badge>
           ) : validation ? (
             <Badge tone={valid ? 'success' : 'danger'}>{valid ? 'ready' : 'needs attention'}</Badge>
           ) : null
         }
       >
-        {issues.length === 0 ? (
+        {validate.isError ? (
+          <div className="error-state" role="alert">
+            <strong>The configuration could not be checked</strong>
+            <p>{describeError(validate.error)}</p>
+            <button type="button" className="button small" onClick={runValidation}>
+              Try again
+            </button>
+          </div>
+        ) : issues.length === 0 ? (
           <EmptyState
             title={validation ? 'Everything checks out' : 'Not checked yet'}
             description={
@@ -594,7 +643,9 @@ export function SetupPage() {
         >
           {createRun.isPending ? 'Starting…' : 'Start processing'}
         </button>
-        {!valid ? (
+        {validate.isError ? (
+          <span className="muted small">Retry the configuration check above to continue.</span>
+        ) : !valid ? (
           <span className="muted small">Resolve the blocking issues above to save.</span>
         ) : valid && !saved ? (
           <span className="muted small">Save the setup to enable processing.</span>
