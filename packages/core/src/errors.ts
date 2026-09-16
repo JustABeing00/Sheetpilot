@@ -97,6 +97,12 @@ export class InvalidRuleSetError extends AppError {
   }
 }
 
+export class ExportValidationError extends AppError {
+  constructor(message: string, details?: unknown, cause?: unknown) {
+    super(message, { code: 'export_validation_failed', statusCode: 500, details, cause });
+  }
+}
+
 export class StorageError extends AppError {
   constructor(message: string, details?: unknown, cause?: unknown) {
     super(message, { code: 'storage_error', statusCode: 500, details, cause });

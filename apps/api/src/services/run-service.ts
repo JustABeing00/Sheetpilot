@@ -1,22 +1,34 @@
 import {
   artifactSchema,
   decisionRecordSchema,
+  isUnmatchedReviewReasons,
   newId,
   NotFoundError,
+  outputRecordStateForReviewState,
   reviewItemSchema,
+  reviewStateForItem,
   stepRunIds,
   stepRunSchema,
+  summariseOutputRecords,
   workflowRunSchema,
   type Artifact,
   type ArtifactKind,
   type Clock,
+  type ExportSummary,
   type FileStorage,
   type Logger,
   type Repositories,
   type TabularFormat,
   type WorkflowRun,
 } from '@sheetpilot/core';
-import { createTabularWriter, writeTableToBuffer, type Row } from '@sheetpilot/file-processing';
+import {
+  createTabularWriter,
+  validateStoredTable,
+  writeTableToStorage,
+  type Row,
+  type SummaryRow,
+  type WriteSummary,
+} from '@sheetpilot/file-processing';
 import {
   createStepContext,
   type WorkflowRegistry,
@@ -134,12 +146,12 @@ export class RunService {
         return;
       }
 
-      await this.persistResults(run, execution.state);
+      const exportStats = await this.persistResults(run, execution.state);
 
       await this.deps.repositories.runs.update({
         ...run,
         status: 'succeeded',
-        stats: execution.state.stats,
+        stats: { ...execution.state.stats, ...exportStats },
         error: null,
         startedAt,
         finishedAt: this.deps.clock.now(),
@@ -213,11 +225,47 @@ export class RunService {
     await this.deps.repositories.steps.createMany(records);
   }
 
-  private async persistResults(run: WorkflowRun, outputs: WorkflowOutputs): Promise<void> {
+  private async persistResults(
+    run: WorkflowRun,
+    outputs: WorkflowOutputs,
+  ): Promise<Record<string, number>> {
     const now = this.deps.clock.now();
 
-    await this.writeArtifact(run, 'output_csv', 'csv', `${run.id}-output.csv`, outputs);
-    await this.writeArtifact(run, 'output_xlsx', 'xlsx', `${run.id}-output.xlsx`, outputs);
+    // The export summary is embedded as a leading worksheet so the deliverable explains itself.
+    // Human decisions arrive after the run, so this is the as-run snapshot; the live export status
+    // endpoint recomputes it from the review items.
+    const reviewByEntity = new Map(outputs.reviewItems.map((item) => [item.entityKey, item]));
+    const summaryRows = exportSummarySheet(
+      summariseOutputRecords(
+        outputs.decisionRecords.map((record) => {
+          const item = reviewByEntity.get(record.entityKey);
+          return {
+            state: outputRecordStateForReviewState(
+              item ? reviewStateForItem({ status: 'open', reason: item.reason }) : 'AUTO_RESOLVED',
+            ),
+            unmatched: isUnmatchedReviewReasons(record.reviewReasons),
+          };
+        }),
+        outputs.outputRows.length,
+      ),
+    );
+
+    const { validation: csvValidation } = await this.writeArtifact(
+      run,
+      'output_csv',
+      'csv',
+      `${run.id}-output.csv`,
+      outputs,
+      summaryRows,
+    );
+    const { validation: xlsxValidation } = await this.writeArtifact(
+      run,
+      'output_xlsx',
+      'xlsx',
+      `${run.id}-output.xlsx`,
+      outputs,
+      summaryRows,
+    );
 
     const reviewRows: Row[] = outputs.reviewItems.map((item) => ({
       Entity: item.entityKey,
@@ -268,23 +316,46 @@ export class RunService {
         { outputRows: outputs.outputRows.length, reviewItems: outputs.reviewItems.length },
         'run results persisted',
       );
+
+    return {
+      exportValidated: 1,
+      exportValidatedRows: xlsxValidation.rowCount,
+      exportValidatedColumns: xlsxValidation.columns.length,
+      exportOutputRows: csvValidation.rowCount,
+    };
   }
 
+  /**
+   * Streams the table straight into storage and then re-reads it to prove the file is structurally
+   * sound. A validation failure propagates and fails the run rather than publishing a broken
+   * deliverable.
+   */
   private async writeArtifact(
     run: WorkflowRun,
     kind: ArtifactKind,
     format: TabularFormat,
     fileName: string,
     table: { outputColumns: string[]; outputRows: Row[] },
-  ): Promise<Artifact> {
+    summary?: WriteSummary,
+  ): Promise<{ artifact: Artifact; validation: { columns: string[]; rowCount: number } }> {
     const writer = createTabularWriter(format);
-    const { buffer } = await writeTableToBuffer(writer, table.outputRows, {
-      columns: table.outputColumns,
-      sheetName: 'Output',
-    });
-
     const storageKey = `runs/${run.id}/${fileName}`;
-    const stored = await this.deps.storage.put(storageKey, buffer);
+    const sheetName = 'Output';
+
+    const { stored } = await writeTableToStorage(
+      writer,
+      table.outputRows,
+      { columns: table.outputColumns, sheetName, ...(summary ? { summary } : {}) },
+      this.deps.storage,
+      storageKey,
+    );
+
+    const validation = await validateStoredTable(this.deps.storage, storageKey, {
+      format,
+      expectedColumns: table.outputColumns,
+      expectedRowCount: table.outputRows.length,
+      sheetName,
+    });
 
     const artifact = artifactSchema.parse({
       id: newId(),
@@ -297,6 +368,21 @@ export class RunService {
       createdAt: this.deps.clock.now(),
     });
 
-    return this.deps.repositories.artifacts.create(artifact);
+    return { artifact: await this.deps.repositories.artifacts.create(artifact), validation };
   }
+}
+
+function exportSummarySheet(summary: ExportSummary): WriteSummary {
+  const rows: SummaryRow[] = [
+    { label: 'Total records', value: summary.totalRecords },
+    { label: 'Output rows', value: summary.outputRows },
+    { label: 'Automatically resolved', value: summary.autoResolved },
+    { label: 'Human approved', value: summary.humanApproved },
+    { label: 'Human overridden', value: summary.overridden },
+    { label: 'Dismissed', value: summary.dismissed },
+    { label: 'Needs review', value: summary.unresolved },
+    { label: 'Processing errors', value: summary.errors },
+    { label: 'Unmatched (no events / no rule)', value: summary.unmatched },
+  ];
+  return { rows };
 }

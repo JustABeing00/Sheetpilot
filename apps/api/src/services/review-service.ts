@@ -20,12 +20,15 @@ import {
   type WorkflowRun,
 } from '@sheetpilot/core';
 import {
+  cellToString,
   createTabularReader,
   createTabularWriter,
   normalizeKey,
   readAllRows,
   writeTableToBuffer,
   type Row,
+  type SummaryRow,
+  type WriteSummary,
 } from '@sheetpilot/file-processing';
 
 export interface ReviewServiceDeps {
@@ -128,7 +131,9 @@ export class ReviewService {
       }),
     );
 
-    if (run && Object.keys(appliedValues).length > 0 && input.action !== 'dismissed') {
+    // A human decision always updates the exported `__ReviewStatus`, even when there are no values to
+    // write (an accepted no-events/no-match case becomes APPROVED, not a permanent REVIEW_REQUIRED).
+    if (run && input.action !== 'dismissed') {
       await this.applyToArtifacts(run, item.entityKey, appliedValues, reviewStateForItem(saved));
     }
 
@@ -183,8 +188,11 @@ export class ReviewService {
     values: Record<string, OutputValue>,
     stateLabel: string,
   ): Promise<void> {
+    const summary = await this.readSummarySheet(artifact);
     const stream = await this.deps.storage.getStream(artifact.storageKey);
-    const table = await readAllRows(createTabularReader(artifact.format), stream);
+    const table = await readAllRows(createTabularReader(artifact.format), stream, {
+      sheetName: 'Output',
+    });
 
     let patched = false;
     const rows: Row[] = table.rows.map((row) => {
@@ -210,11 +218,34 @@ export class ReviewService {
     const { buffer } = await writeTableToBuffer(writer, rows, {
       columns: table.columns,
       sheetName: 'Output',
+      ...(summary ? { summary } : {}),
     });
     const stored = await this.deps.storage.put(artifact.storageKey, buffer);
     await this.deps.repositories.artifacts.update({
       ...artifact,
       sizeBytes: stored.sizeBytes,
     });
+  }
+
+  /**
+   * The generated XLSX carries a leading `Summary` worksheet. Rewriting the data sheet must not drop
+   * it, so read it back and hand it to the writer (a no-op when the file has no such sheet).
+   */
+  private async readSummarySheet(artifact: Artifact): Promise<WriteSummary | undefined> {
+    if (artifact.format !== 'xlsx') {
+      return undefined;
+    }
+    const stream = await this.deps.storage.getStream(artifact.storageKey);
+    const table = await readAllRows(createTabularReader('xlsx'), stream, { sheetName: 'Summary' });
+    const rows: SummaryRow[] = [];
+    for (const row of table.rows) {
+      const label = cellToString(row['Metric']).trim();
+      if (label.length === 0) {
+        continue;
+      }
+      const value = row['Value'];
+      rows.push({ label, value: typeof value === 'number' ? value : cellToString(value) });
+    }
+    return rows.length > 0 ? { rows } : undefined;
   }
 }

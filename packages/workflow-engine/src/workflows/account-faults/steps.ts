@@ -583,6 +583,12 @@ function computeStats(state: AccountFaultState): Record<string, number> {
   const autoApproved = state.decisions.filter(
     (decision) => decision.reviewReasons.length === 0,
   ).length;
+  const unmatched = state.decisions.filter((decision) =>
+    decision.reviewReasons.some((reason) => reason === 'no_events' || reason === 'no_rule_match'),
+  ).length;
+  const processingErrors = state.decisions.filter((decision) =>
+    decision.reviewReasons.includes('ai_failed'),
+  ).length;
   const duplicatePrimaries = state.groups.filter((group) => group.primaries.length > 1).length;
   const rate = (value: number, total: number): number =>
     total === 0 ? 0 : Number((value / total).toFixed(4));
@@ -600,6 +606,8 @@ function computeStats(state: AccountFaultState): Record<string, number> {
     ruleMatchedAccounts: ruleMatched,
     autoApprovedAccounts: autoApproved,
     reviewAccounts: state.decisions.length - autoApproved,
+    unmatchedAccounts: unmatched,
+    processingErrorAccounts: processingErrors,
     aiConsultedAccounts: state.decisions.filter((decision) => decision.ai.consulted).length,
     aiAssistedAccounts: state.decisions.filter(
       (decision) => decision.decisionSource === 'ai_suggested',
@@ -632,7 +640,9 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
       const decisionByAccount = new Map(
         state.decisions.map((decision) => [decision.account, decision]),
       );
-      const outputRows: Row[] = [];
+      // Keep the source row index so the output can be emitted in the primary file's original order
+      // (deterministic regardless of how the matching engine ordered its groups).
+      const built: Array<{ order: number; row: Row }> = [];
       const reviewItems: NewReviewItem[] = [];
       const decisionRecords: NewDecisionRecord[] = [];
 
@@ -645,11 +655,13 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
         for (const primary of group.primaries) {
           const row: Row = { ...primary.row };
           for (const column of ACCOUNT_FAULT_BUSINESS_COLUMNS) {
-            row[column] = decision.outputValues[column] ?? '';
+            // Missing output values are written as true blanks (an empty cell), never as the string
+            // "undefined", an empty string or a coerced 0.
+            row[column] = decision.outputValues[column] ?? null;
           }
           if (state.config.includeSystemColumns) {
             row['__FaultCount'] = decision.faultCount;
-            row['__LatestFaultAt'] = decision.latestFault?.occurredAt ?? '';
+            row['__LatestFaultAt'] = decision.latestFault?.occurredAt ?? null;
             row['__MatchedRules'] = decision.matchedRuleIds.join(', ');
             row['__DecisionSource'] = decision.decisionSource;
             row['__DecisionConfidence'] = Number(decision.confidence.toFixed(2));
@@ -658,7 +670,7 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
             row['__ReviewReasons'] = decision.reviewReasons.join(', ');
             row['__Explanation'] = decision.explanation;
           }
-          outputRows.push(row);
+          built.push({ order: primary.rowIndex, row });
         }
 
         if (decision.reviewReasons.length > 0) {
@@ -676,6 +688,11 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
           evidence: buildEvidence(decision),
         });
       }
+
+      // Deterministic output ordering: preserve the primary dataset's original row order.
+      const outputRows: Row[] = built
+        .sort((left, right) => left.order - right.order)
+        .map((entry) => entry.row);
 
       const withRows: AccountFaultState = { ...state, outputRows };
       const stats = computeStats(withRows);

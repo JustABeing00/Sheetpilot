@@ -1,5 +1,11 @@
 import { useParams } from 'react-router-dom';
-import { useRun, useRunArtifacts, useRunDecisions, useRunReviewItems } from '../api/hooks.js';
+import {
+  useRun,
+  useRunArtifacts,
+  useRunDecisions,
+  useRunExport,
+  useRunReviewItems,
+} from '../api/hooks.js';
 import { ReviewItemCard } from '../components/ReviewItemCard.js';
 import {
   Badge,
@@ -10,7 +16,7 @@ import {
   PageHeader,
   StatCard,
 } from '../components/ui.js';
-import { statusTone } from '../lib/status.js';
+import { exportStatusTone, statusTone } from '../lib/status.js';
 import {
   formatBytes,
   formatCellValue,
@@ -27,6 +33,7 @@ export function RunDetailPage() {
   const artifacts = useRunArtifacts(runId);
   const reviewItems = useRunReviewItems(runId);
   const decisions = useRunDecisions(runId);
+  const exportStatus = useRunExport(runId);
 
   if (run.isLoading) {
     return (
@@ -87,6 +94,55 @@ export function RunDetailPage() {
         <StatCard label="Needs review" value={detail.stats['reviewAccounts'] ?? '—'} />
         <StatCard label="Orphan events" value={detail.stats['orphanEventAccounts'] ?? '—'} />
       </div>
+
+      <Card
+        title="Final report"
+        subtitle="Excel is the primary deliverable; the summary reflects automation and human decisions"
+        actions={
+          exportStatus.isSuccess ? (
+            <Badge tone={exportStatusTone(exportStatus.data.status)}>
+              {humanizeToken(exportStatus.data.status)}
+            </Badge>
+          ) : null
+        }
+      >
+        {exportStatus.isLoading ? <LoadingState label="Loading export status…" /> : null}
+        {exportStatus.isError ? (
+          <ErrorState error={exportStatus.error} onRetry={() => void exportStatus.refetch()} />
+        ) : null}
+        {exportStatus.isSuccess ? (
+          <>
+            <p className="muted">{exportStatus.data.message}</p>
+            <div className="stat-grid">
+              <StatCard label="Total records" value={exportStatus.data.summary.totalRecords} />
+              <StatCard label="Auto-resolved" value={exportStatus.data.summary.autoResolved} />
+              <StatCard label="Reviewed" value={exportStatus.data.summary.reviewed} />
+              <StatCard label="Unresolved" value={exportStatus.data.summary.unresolved} />
+              <StatCard label="Errors" value={exportStatus.data.summary.errors} />
+              <StatCard label="Unmatched" value={exportStatus.data.summary.unmatched} />
+            </div>
+            {exportStatus.data.validation ? (
+              <p className="muted small">
+                Validated on export: {exportStatus.data.validation.rowCount} rows ×{' '}
+                {exportStatus.data.validation.columnCount} columns
+              </p>
+            ) : null}
+            <div className="export-actions">
+              {exportStatus.data.artifacts.map((artifact) => (
+                <a
+                  key={artifact.id}
+                  className="button"
+                  href={apiDownloadUrl(artifact.downloadUrl)}
+                  download
+                >
+                  Download {artifact.format.toUpperCase()}
+                  <span className="muted small"> ({formatBytes(artifact.sizeBytes)})</span>
+                </a>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </Card>
 
       <Card title="Steps" subtitle="Pipeline stages executed with their metrics">
         <ol className="step-list">

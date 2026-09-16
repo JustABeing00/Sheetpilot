@@ -7,6 +7,7 @@ import {
   datasetListResponseSchema,
   datasetRowsResponseSchema,
   decisionListResponseSchema,
+  exportStatusResponseSchema,
   fileAssetDtoSchema,
   fileListResponseSchema,
   healthResponseSchema,
@@ -46,6 +47,7 @@ export const queryKeys = {
   decisions: (runId: string) => ['runs', runId, 'decisions'] as const,
   runReviewItems: (runId: string) => ['runs', runId, 'review-items'] as const,
   artifacts: (runId: string) => ['runs', runId, 'artifacts'] as const,
+  runExport: (runId: string) => ['runs', runId, 'export'] as const,
   reviewQueue: (filter: string) => ['review-items', filter] as const,
   reviewHistory: (itemId: string) => ['review-items', itemId, 'history'] as const,
   files: ['files'] as const,
@@ -133,6 +135,15 @@ export function useRunArtifacts(runId: string | undefined) {
     queryKey: queryKeys.artifacts(runId ?? ''),
     queryFn: () => apiGet(`/api/v1/runs/${runId}/artifacts`, artifactListResponseSchema),
     enabled: Boolean(runId),
+  });
+}
+
+export function useRunExport(runId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.runExport(runId ?? ''),
+    queryFn: () => apiGet(`/api/v1/runs/${runId}/export`, exportStatusResponseSchema),
+    enabled: Boolean(runId),
+    refetchInterval: 5000,
   });
 }
 

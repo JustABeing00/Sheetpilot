@@ -11,5 +11,7 @@ export * from './writers/tabular-writer.js';
 export * from './writers/csv-writer.js';
 export * from './writers/xlsx-writer.js';
 export * from './writers/collect.js';
+export * from './writers/stream.js';
+export * from './export/validate.js';
 export * from './storage/local-file-storage.js';
 export * from './storage/memory-file-storage.js';

@@ -327,3 +327,42 @@ audit trail). Re-running the whole workflow after each resolution (rejected: exp
 unrelated rows; targeted patching is deterministic and cheap). Building a separate "review entries" table for
 auto-resolved decisions (rejected as premature: the decision log already lists every account, and the queue
 should only surface exceptions).
+
+## ADR-016 - Output generation is a modular, validated, data-preserving export stage
+
+**Decision.** Turning processed results into a deliverable is its own stage, not a side effect of the
+workflow. `build-output` copies the primary source row, fills only the configured business columns, adds the
+`__`-prefixed system columns and emits rows in the primary file's original order; missing values become true
+blanks. `RunService` then streams each table into `FileStorage` (`writeTableToStorage`) instead of buffering
+the whole file, and re-reads the stored artifact (`validateStoredTable`) to prove the columns and row count
+before the run is marked successful - a mismatch throws `ExportValidationError` and fails the run. Excel
+(`.xlsx`) is the primary deliverable and carries a leading `Summary` worksheet of `Metric | Value` rows; CSV
+carries the same data sheet. The user-facing summary is derived live by `ExportService`
+(`GET /api/v1/runs/:id/export`) by aggregating the immutable decision log and the current review items into
+`ExportSummary` (`totalRecords`, `outputRows`, `autoResolved`, `humanApproved`, `overridden`, `dismissed`,
+`reviewed`, `unresolved`, `errors`, `unmatched`), so it reflects human decisions made after the run.
+Resolving an item rewrites the data sheet's `__ReviewStatus` to `APPROVED`/`OVERRIDDEN` even when the human
+changed no values (a value-less accept of a no-events case is final, not `REVIEW_REQUIRED`) while preserving
+the `Summary` sheet.
+
+**Why.** The product promise is a completed file a person can open and trust. That requires (a) the source
+data to survive untouched apart from the columns the workflow owns, (b) no accidental type corruption
+(leading-zero account numbers, long numeric identifiers, dates, blanks), (c) deterministic order so runs are
+diffable, and (d) a clear statement of what is final versus still waiting on a human. Streaming the write
+avoids holding several full copies of a large output in memory, and validating the written file closes the
+loop between "the workflow finished" and "the deliverable is sound" - a corrupt export now fails loudly
+instead of shipping.
+
+**Consequences.** `ExportSummary`/`summariseOutputRecords` live in `core` so the workflow's as-run snapshot
+and the API's live summary share one vocabulary and cannot drift; the XLSX writer gained an optional
+`WriteSummary` leading sheet and the review-resolution rewrite preserves it. Validation re-reads the artifact
+(one extra pass; XLSX re-parses the workbook - an accepted cost already documented for XLSX). The summary
+sheet is an as-run snapshot while the endpoint is live, so a fully-resolved run's endpoint says `ready` while
+the on-disk sheet still shows the original counts until the row is patched. Rows are streamed but the
+workflow still loads the source with `readAllRows`; a chunked loader remains future work.
+
+**Alternatives considered.** Buffer-and-concat (`writeTableToBuffer`) for the output file (rejected: holds
+the chunk list and the concatenated copy at once). Recomputing the whole export after every review resolution
+(rejected: expensive and can disturb unrelated rows; targeted patching plus a live summary is enough).
+Storing the summary/status (rejected: two sources of truth; it is a pure function of decisions + items).
+Putting the summary only in the UI (rejected: the deliverable should explain itself offline).

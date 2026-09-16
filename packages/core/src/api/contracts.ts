@@ -33,6 +33,7 @@ import {
 import { ruleSchema, ruleValidationIssueSchema } from '../domain/rules.js';
 import { aiAssistOutcomeSchema } from '../domain/ai.js';
 import { reviewAutomationSchema, reviewEventSchema, reviewStateSchema } from '../domain/review.js';
+import { exportSummarySchema } from '../domain/output.js';
 
 export const isoDateTimeSchema = z
   .string()
@@ -358,6 +359,29 @@ export const artifactDtoSchema = z.object({
   createdAt: isoDateTimeSchema,
 });
 export type ArtifactDto = z.infer<typeof artifactDtoSchema>;
+
+export const exportValidationDtoSchema = z.object({
+  validated: z.boolean(),
+  rowCount: z.number().int().nonnegative(),
+  columnCount: z.number().int().nonnegative(),
+  validatedAt: isoDateTimeSchema.nullable(),
+});
+export type ExportValidationDto = z.infer<typeof exportValidationDtoSchema>;
+
+/**
+ * The state of the final deliverable for a run: the live summary (including human decisions), the
+ * downloads, and whether the generated files were validated when the run completed.
+ */
+export const exportStatusResponseSchema = z.object({
+  runId: z.string(),
+  status: z.enum(['processing', 'pending_review', 'ready', 'failed', 'unavailable']),
+  ready: z.boolean(),
+  message: z.string(),
+  summary: exportSummarySchema,
+  artifacts: z.array(artifactDtoSchema),
+  validation: exportValidationDtoSchema.nullable(),
+});
+export type ExportStatusResponse = z.infer<typeof exportStatusResponseSchema>;
 
 export const ruleDtoSchema = ruleSchema;
 export type RuleDto = z.infer<typeof ruleDtoSchema>;

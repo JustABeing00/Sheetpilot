@@ -39,6 +39,21 @@ export function reviewStateTone(state: string): BadgeTone {
   }
 }
 
+export function exportStatusTone(status: string): BadgeTone {
+  switch (status) {
+    case 'ready':
+      return 'success';
+    case 'pending_review':
+      return 'warning';
+    case 'failed':
+      return 'danger';
+    case 'processing':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+}
+
 export function severityTone(severity: string): BadgeTone {
   switch (severity) {
     case 'critical':

@@ -1,6 +1,7 @@
 import {
   createRunRequestSchema,
   decisionListResponseSchema,
+  exportStatusResponseSchema,
   NotFoundError,
   reviewItemListResponseSchema,
   reviewStateForDecision,
@@ -151,5 +152,29 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
     const artifacts = await container.repositories.artifacts.listByRun(id);
     return { items: artifacts.map(toArtifactDto) };
+  });
+
+  app.get('/api/v1/runs/:id/export', async (request) => {
+    const { id } = request.params as { id: string };
+    const status = await container.exportService.status(id);
+
+    return exportStatusResponseSchema.parse({
+      runId: status.runId,
+      status: status.status,
+      ready: status.ready,
+      message: status.message,
+      summary: status.summary,
+      artifacts: status.artifacts.map(toArtifactDto),
+      validation: status.validation
+        ? {
+            validated: status.validation.validated,
+            rowCount: status.validation.rowCount,
+            columnCount: status.validation.columnCount,
+            validatedAt: status.validation.validatedAt
+              ? status.validation.validatedAt.toISOString()
+              : null,
+          }
+        : null,
+    });
   });
 }

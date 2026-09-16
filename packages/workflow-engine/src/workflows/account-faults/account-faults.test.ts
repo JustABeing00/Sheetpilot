@@ -185,6 +185,29 @@ describe('account fault triage workflow', () => {
     });
   });
 
+  it('emits output rows in the primary file order with blanks for missing values', async () => {
+    const { execution } = await runWorkflow();
+    const rows = execution.state!.outputRows;
+
+    expect(rows.map((row) => row['Account Number'])).toEqual([
+      '1001',
+      '1002',
+      '1003',
+      '1004',
+      '1005',
+      '1006',
+      '1007',
+      '1008',
+      '1008',
+      '1009',
+    ]);
+
+    const noEvents = rows.find((row) => row['Account Number'] === '1003');
+    expect(noEvents?.['RootCause']).toBeNull();
+    expect(noEvents?.['Priority']).toBeNull();
+    expect(noEvents?.['__LatestFaultAt']).toBeNull();
+  });
+
   it('selects the latest fault per account', async () => {
     const { execution } = await runWorkflow();
     const [harborPoint] = rowsFor(execution, '1002');
@@ -292,6 +315,8 @@ describe('account fault triage workflow', () => {
       ruleMatchedAccounts: 6,
       autoApprovedAccounts: 2,
       reviewAccounts: 7,
+      unmatchedAccounts: 3,
+      processingErrorAccounts: 0,
       outputRows: 10,
     });
     expect(stats.ruleMatchRate).toBeCloseTo(0.6667);

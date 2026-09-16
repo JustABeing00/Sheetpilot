@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 6 — review queue & human-in-the-loop)
+**Last updated:** 2026-09-16 (product session 7 — output generation & Excel export)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -40,7 +40,22 @@ export matches the reviewed result (`__ReviewStatus` becomes `APPROVED`/`OVERRID
 therefore tracked separately from automated ones and can later teach rule suggestions. **Status: achieved**
 (see §8, verified in §9).
 
-**Next (product session 7):** durable persistence and the wider review loop. See §15: verify Postgres
+**Product session 7 objective: output generation & Excel export.** The processed result is now a real
+deliverable. `build-output` copies each primary source row, overwrites only the configured business columns,
+adds the `__`-prefixed system columns and emits rows in the **primary file's original order**; missing values
+become true blanks. `RunService` **streams** each table straight into storage (no full-file buffer), writes
+**Excel (.xlsx, primary) + CSV** with a leading `Summary` worksheet, and re-reads every stored artifact
+(`validateStoredTable`) to prove the columns and row count **before the run is marked successful** — a
+mismatch throws `ExportValidationError` and fails the run. A live, derived export summary
+(`ExportSummary`/`summariseOutputRecords` in `core`, exposed by `ExportService` at
+`GET /api/v1/runs/:id/export`) reports total records, output rows, auto-resolved, human approved/overridden/
+dismissed, reviewed, unresolved, errors and unmatched records, plus the validation result and an export
+status (`ready`/`pending_review`/`processing`/`failed`/`unavailable`). Type preservation is explicit:
+leading-zero account numbers and identifiers longer than `Number.MAX_SAFE_INTEGER` stay text, dates stay
+dates, blanks stay blank. The run page shows the summary, status and download buttons. **Status: achieved**
+(see §8, verified in §9).
+
+**Next (product session 8):** durable persistence and the wider review loop. See §15: verify Postgres
 (migrations `0000`–`0004`, `REPOSITORY_DRIVER=postgres`, gated repository integration tests), immutable
 rule/configuration version snapshots, and the first pass at turning human corrections into rule
 suggestions. Scheduling/watched-folder ingestion and streaming the loader remain on the roadmap.
@@ -82,7 +97,8 @@ core workflow is excellent.
 | AI | `@sheetpilot/ai` — provider port + orchestration | `ClassificationProvider` port; `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized outcomes); `resolveAssistedDecision` (deterministic-first merge); `OpenAiClassificationProvider` (configurable base URL/model, injectable `fetch`); `NoopClassificationProvider` is the safe default (sends nothing) |
 | AI safety | Policy, redaction and provenance | Only consulted per `AiPolicy`; never overrides a matched rule; a bounded structured request (no raw rows); `AI_EXCLUDED_FIELDS` redaction; failures become review reasons (`ai_failed`/`ai_low_confidence`/`ai_ambiguous`/`ai_proposed_alternative`); `decisionSource` + full AI outcome persisted and exposed via DTOs; `__DecisionSource` output column |
 | Review / human-in-the-loop | Derived `ReviewState` + append-only `review_resolutions` audit + `ReviewService` | Filter presets + per-filter counts; rich item DTO (automation, latest event, history, AI outcome, applicable rules); resolve/override/dismiss records the audit trail and regenerates the output; human decisions tracked separately from automation |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 222 tests, 23 files, all green |
+| Output / export | `ExportSummary` (core) + streaming writers + `ExportService` | Data-preserving, deterministic, type-safe Excel (primary) + CSV export with a `Summary` worksheet; generated files re-read and validated before the run succeeds; live derived export summary + status endpoint and run-page panel |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 235 tests, 26 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -106,6 +122,8 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                           │      AiClassificationService + deterministic-first resolve)
                                           ├──▶ review (derived ReviewState + append-only resolution
                                           │      audit + ReviewService output regeneration)
+                                          ├──▶ output/export (ExportSummary + streaming, validated
+                                          │      Excel/CSV writers + ExportService status)
                                           ▼
                                   core (domain, schemas, ports)  ◀── db (Drizzle schema + repos)
 ```
@@ -151,6 +169,14 @@ the human values (an accept with no values keeps the automation result), updates
 the export matches the decision and `__ReviewStatus` becomes `APPROVED`/`OVERRIDDEN` → `GET
 /api/v1/review-items/:id/history` exposes the append-only audit and the decision log shows `AUTO_RESOLVED`
 for accounts automation handled alone.
+Output lifecycle: `build-output` copies each primary row, fills only the configured business columns, adds
+the `__` system columns and emits rows in primary-file order (missing values → true blanks) → `RunService`
+streams the output_csv/output_xlsx (and review-queue CSV) straight into storage and adds an XLSX `Summary`
+worksheet → `validateStoredTable` re-reads each artifact and proves columns + row count before the run is
+marked succeeded (mismatch → `ExportValidationError` → failed run) → `ExportService.status` derives a live
+`ExportSummary` (auto-resolved / approved / overridden / dismissed / unresolved / errors / unmatched) plus the
+validation result and an export status from the decision log + review items; the run page renders it with the
+download buttons.
 
 ## 6. Repository Structure
 
@@ -167,6 +193,7 @@ apps/
     services/rule-set-service.ts  validate + version + activate rule sets; one active set per workflow
     services/run-service.ts    run creation/execution, step persistence, artifacts; injects the active rule set
     services/review-service.ts human review resolution, append-only audit trail, output-artifact regeneration
+    services/export-service.ts derives the live export summary + status and lists the validated deliverables
     server.test.ts / review.test.ts  API integration + E2E, including the review queue, audit trail and regeneration
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
@@ -195,6 +222,8 @@ packages/
                            kinds, structured request/result/outcome schemas, target + event + rule summaries
     domain/review.ts       Review domain: derived ReviewState (+ labels), queue filter presets, automation and
                            event schemas, append-only ReviewResolutionLog, changedFields + evidence parsers
+    domain/output.ts       Export domain: OutputRecordState (+ labels) derived from ReviewState, the
+                           ExportSummary schema, summariseOutputRecords, unmatched-reason helper
     api/contracts.ts       HTTP request/response schemas shared with the web app
     ports/                 repositories, datasets, workflow-configurations, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
@@ -204,7 +233,8 @@ packages/
     inspection.ts          bounded one-pass dataset analysis (types, emptiness, uniqueness, samples, warnings)
     upload.ts              untrusted-filename sanitisation + extension/mime/size/magic validation
     readers/               csv (streaming), xlsx (buffered), shared TabularReader with describe()/sheets
-    writers/               csv, xlsx, buffer collection
+    writers/               csv, xlsx (optional leading Summary worksheet), buffer collection, stream-to-storage
+    export/validate.ts     re-reads a stored artifact and asserts columns + row count (ExportValidationError)
     storage/               local-file-storage (traversal-safe), memory-file-storage
     registry.ts            format detection + reader/writer factories
   matching-engine/src/
@@ -249,6 +279,7 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, decisionSource (`deterministic`/`ai_suggested`/`none`), confidence, reviewReasons, outputValues, evidence (rule trace + AI outcome/provenance) |
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status (`open`/`resolved_accepted`/`resolved_overridden`/`dismissed`), title, detail, suggestedValues, evidence, resolution |
 | `ReviewResolutionLog` | Append-only audit of one human decision (never overwritten) | reviewItemId, runId, entityKey, action, previousStatus, resultingState, automation (source/confidence/rules/values), suggestedValues, appliedValues, changedFields, note, resolvedBy, createdAt |
+| `ExportSummary` | Derived (never stored) summary of the final deliverable, shared by the workflow snapshot and the live API | totalRecords, outputRows, autoResolved, humanApproved, overridden, dismissed, reviewed, unresolved, errors, unmatched, byState |
 | `Artifact` | Generated output file | kind (output_csv/output_xlsx/review_queue_csv), format, fileName, storageKey, sizeBytes |
 | `RuleSet` / `Rule` | Versioned business rules | priority, when (all/any condition tree), then (set/set_if_empty), confidence, explanationTemplate |
 | `MatchedEntity<TPrimary, TEvent>` | In-memory (not persisted) result of the matching engine: one entity with its complete, latest-first event history | key, rawKeys[], primaries[], events[], latest, issues[], counts |
@@ -260,7 +291,9 @@ Important enums: `RunStatus = queued|running|succeeded|failed|canceled`;
 `AiFailureKind = timeout|rate_limited|invalid_credentials|unavailable|provider_error|malformed_response|unexpected_classification`;
 `MatchIssueCode = no_events|duplicate_primary|ambiguous_latest_timestamp|unparsed_timestamp|no_valid_timestamp|identifier_transformed`;
 `ReviewState = AUTO_RESOLVED|NEEDS_REVIEW|APPROVED|OVERRIDDEN|DISMISSED|ERROR` (derived, never persisted);
-`ReviewFilter = needs_review|unresolved|conflicts|low_confidence|processing_errors|overridden|resolved|all`.
+`ReviewFilter = needs_review|unresolved|conflicts|low_confidence|processing_errors|overridden|resolved|all`;
+`OutputRecordState = auto_resolved|approved|overridden|dismissed|needs_review|error` (derived for the export);
+`ExportStatus = processing|pending_review|ready|failed|unavailable` (derived).
 
 Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`, `RecommendedAction`,
 `Priority`), optional `__`-prefixed system columns (fault count, latest fault time, matched rules,
@@ -269,6 +302,52 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 7 — Output generation & Excel export (2026-09-16)
+
+- [x] `@sheetpilot/core`:
+  - new `domain/output.ts` — the export vocabulary: `OutputRecordState`
+    (`auto_resolved`/`approved`/`overridden`/`dismissed`/`needs_review`/`error`) + labels and
+    `outputRecordStateForReviewState` (maps the derived `ReviewState`), `UNMATCHED_REVIEW_REASONS` +
+    `isUnmatchedReviewReasons`, the `ExportSummary` schema and the pure `summariseOutputRecords`
+    (totalRecords/outputRows/autoResolved/humanApproved/overridden/dismissed/reviewed/unresolved/errors/
+    unmatched + `byState`).
+  - `errors.ts` — `ExportValidationError` (`export_validation_failed`, 500) so a failed export validation
+    fails the run rather than publishing a broken file.
+  - `api/contracts.ts` — `exportSummarySchema`, `exportValidationDtoSchema`, `exportStatusResponseSchema`.
+- [x] `@sheetpilot/file-processing`:
+  - `writers/stream.ts` — `writeTableToStorage` streams a table straight into `FileStorage` through a
+    bounded `PassThrough` (no `chunks[]` + `Buffer.concat` double copy).
+  - `writers/tabular-writer.ts` — optional `summary` (`WriteSummary`) option; `writers/xlsx-writer.ts`
+    writes it as a leading `Summary` worksheet with a machine-readable `Metric | Value` header (CSV ignores
+    it).
+  - `export/validate.ts` — `validateStoredTable` re-reads a stored artifact, streaming rows, and asserts the
+    expected columns (in order) and row count, throwing `ExportValidationError` on any mismatch.
+- [x] `@sheetpilot/workflow-engine`: `build-output` now emits output rows in the **primary file's original
+      order** (sorted by source row index) and writes missing values as true blanks (`null`); `computeStats`
+      gained `unmatchedAccounts` (no_events/no_rule_match) and `processingErrorAccounts` (ai_failed).
+- [x] `apps/api`:
+  - new `ExportService.status(runId)` — derives the live `ExportSummary` from the decision log + review items,
+    the validation result from the run stats and an export status; `GET /api/v1/runs/:id/export`.
+  - `RunService.persistResults` streams each artifact into storage, embeds the as-run `ExportSummary` as the
+    XLSX `Summary` sheet, validates every written file, and persists `exportValidated*` metrics; a validation
+    error fails the run. `ReviewService.patchArtifact` reads/writes the `Output` sheet, **preserves the
+    `Summary` sheet** on regeneration and flips `__ReviewStatus` for every non-dismissed decision (a
+    value-less accept of a no-events case becomes `APPROVED`, not a permanent `REVIEW_REQUIRED`).
+  - container wiring + `exportService` exposed on `AppContainer`.
+- [x] `apps/web`: the run page gained a **Final report** panel — export status badge, the summary tiles
+      (total/auto-resolved/reviewed/unresolved/errors/unmatched), the validation line and the Excel/CSV
+      download buttons; `useRunExport` hook + `exportStatusTone`.
+- [x] Tests: +13 (235 total, 26 files) — `packages/core/src/domain/output.test.ts` (4: state mapping,
+      unmatched reasons, aggregation, defaults), `packages/file-processing/src/export.test.ts` (4: streaming
+      CSV write + validation, XLSX Summary sheet + type preservation, row-count and column mismatches) and
+      `apps/api/src/export.test.ts` (4: summary/validation/pending review, XLSX Summary + deterministic
+      order, live summary → ready after review, leading-zero preservation end to end); the workflow test
+      gained ordering/blank + stats assertions.
+- [x] `scripts/smoke.mjs` now asserts the export summary (9 records / 10 rows / reviewed ≥ 1), that the files
+      were validated, and that the `.xlsx` primary format is produced.
+- [x] Docs: ADR-016, `docs/architecture.md` (output generation & export lifecycle + abstractions), README,
+      this file.
 
 ### Product session 6 — Review queue & human-in-the-loop (2026-09-16)
 
@@ -587,7 +666,7 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 23 files / 222 tests passed |
+| Tests | `npm test` | 26 files / 235 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items); `__DecisionSource` present in the output CSV |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
@@ -599,6 +678,9 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | AI layer (API E2E) | `npx vitest run apps/api/src/ai-classification.test.ts` | an injected mock provider produces a persisted `ai_suggested` decision (provenance + values), and the auto-approved account is absent from the review queue |
 | Review (core) | `npx vitest run packages/core/src/domain/review.test.ts` | derived states, filter presets, changed-value detection, tolerant evidence parsing, audit-log schema defaults |
 | Review (API E2E) | `npx vitest run apps/api/src/review.test.ts` | filter presets + counts, rich item DTO, override → audit entry + regenerated `output_csv` + `OVERRIDDEN` decision state, accept keeps automation values, double-resolve 409, unknown 404, `AUTO_RESOLVED` in the decision log |
+| Output/export (core) | `npx vitest run packages/core/src/domain/output.test.ts` | state mapping, unmatched reasons, full aggregation, defaults |
+| Output/export (writers) | `npx vitest run packages/file-processing/src/export.test.ts` | streaming CSV write + validation, XLSX leading `Summary` sheet, type preservation (leading zeros, long identifiers, dates, blanks), row-count + column validation failures |
+| Output/export (API E2E) | `npx vitest run apps/api/src/export.test.ts` | live summary/validation/pending-review, XLSX `Summary` sheet + deterministic primary-file order, `ready` after every case is reviewed, leading-zero identifiers preserved through upload → run → xlsx |
 | Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) + `0004_lethal_agent_zero.sql` (`review_resolutions` + indexes) |
 
 Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
@@ -746,6 +828,29 @@ paths.
 43. **`__ReviewStatus` in the regenerated file becomes `APPROVED`/`OVERRIDDEN`**, while runs that were never
     reviewed keep `AUTO_APPROVED`/`REVIEW_REQUIRED`. The decision record itself is unchanged (immutable), so
     the file and the decision log intentionally differ after a human decision.
+44. **Export writing and validation stream, but the pipeline still loads whole files.** `writeTableToStorage`
+    and `validateStoredTable` stream rows, however `build-output` receives fully-loaded source arrays
+    (`readAllRows`) and the artifact is produced from an in-memory `Row[]`. Large-file export memory still
+    scales with the dataset until the loader is chunked.
+45. **The XLSX writer is buffered by ExcelJS.** `workbook.xlsx.write(sink)` avoids a `Buffer.concat`, but the
+    workbook (and therefore the whole output) is built in memory; only CSV is fully streaming. A streaming
+    ExcelJS writer is the intended replacement behind the same `TabularWriter` seam.
+46. **The XLSX `Summary` worksheet is an as-run snapshot.** It is written when the run completes and preserved
+    (not recomputed) when a review resolution rewrites the data sheet, so after human decisions the sheet's
+    numbers can lag the live `GET /api/v1/runs/:id/export` summary. The live endpoint is the authoritative
+    current view; regenerating the sheet on every resolution is deferred.
+47. **Export validation re-reads each artifact.** Columns + row count are proven by streaming a fresh read of
+    the stored object (for XLSX this re-parses the workbook), so validation costs one extra pass per artifact.
+48. **CSV is textual.** Numbers are written and (correctly) read back as strings; leading-zero identifiers are
+    preserved but a consumer needing numeric columns should use the XLSX. The CSV is offered "where
+    practical" (the same data sheet, no summary or type fidelity guarantees).
+49. **The export summary counts entities, not physical rows only.** `totalRecords` is the number of decisions
+    (one per account) while `outputRows` is the number of file rows, so they differ when the primary file
+    repeats a key (e.g. the sample's `1008`); unmatched = no events or no rule match. Orphan events (an event
+    with no primary record) never produce output rows by design and are only reported in stats.
+50. **Export status is computed by scanning a run's decisions + review items** (`ExportService.status`),
+    like the queue counts, rather than by indexed aggregates. Fine for operational runs; revisit alongside
+    the review-queue counts at scale.
 
 ## 11. Technical Decisions
 
@@ -771,6 +876,10 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-014 AI is an optional, policy-gated assistant behind a provider port; it receives a bounded structured
   request, must return a strictly validated structured result, never overrides a matched rule, records full
   provenance (`decisionSource`), and degrades every failure to a review reason rather than a wrong result.
+- ADR-015 human review is a first-class, audited state machine over immutable automation records (derived
+  `ReviewState`, append-only `ReviewResolutionLog`, targeted output regeneration).
+- ADR-016 output generation is a modular, validated, data-preserving export stage (primary-row preservation,
+  deterministic order, nullable blanks, streamed writes, re-read validation, live derived `ExportSummary`).
 
 Additional decisions made during implementation:
 
@@ -840,7 +949,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 222 tests / 23 files passing (`npm test`).** Coverage by area:
+**Status: 235 tests / 26 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -864,6 +973,9 @@ Not yet implemented (risks acknowledged):
 | AI API | `apps/api/src/ai-classification.test.ts` | injected mock provider end to end through the HTTP API: a persisted `ai_suggested` decision with `decisionSource`, values and validated AI outcome, and the auto-approved account absent from the review queue |
 | Review domain | `packages/core/src/domain/review.test.ts` | derived `ReviewState` (incl. `ERROR` for `ai_failed`), `AUTO_RESOLVED` for no item, one definition per filter preset, `changedFields` (incl. removed fields), tolerant automation/event evidence parsing with fallbacks, audit-log schema defaults |
 | Review API | `apps/api/src/review.test.ts` | filter presets + `counts`, rich item DTO (automation block, latest event, history), override → `OVERRIDDEN` state + one audit entry with automation snapshot/`changedFields` + regenerated `output_csv` containing the human value + `OVERRIDDEN` decision state, accept records the automation values with no changed fields, double-resolve `409`, unknown item/history `404`, decision log shows `AUTO_RESOLVED` |
+| Output summary (core) | `packages/core/src/domain/output.test.ts` | review-state → output-state mapping, unmatched reasons, full aggregation (reviewed/unmatched), defaults and order-independence |
+| Export writers | `packages/file-processing/src/export.test.ts` | stream-to-storage CSV, `validateStoredTable` pass + row-count/column failures, XLSX leading `Summary` sheet, type preservation (leading zeros, long identifiers, dates, nulls) |
+| Export API | `apps/api/src/export.test.ts` | live summary/validation/`pending_review`, XLSX `Summary` + deterministic primary-file row order, `ready` + `reviewed` after every case resolved, leading-zero identifiers preserved upload → run → xlsx |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
@@ -905,9 +1017,9 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 7: durable persistence & the loop back into rules** (queue `07-session.md`). The review
-loop is now complete and audited, and the next structural gap is durability plus using human decisions.
-Recommended order:
+**Product session 8: durable persistence & the loop back into rules** (queue `08-session.md`; session 7
+already shipped output generation & Excel export — see §8). The review loop and the export are complete; the
+next structural gap is durability plus using human decisions. Recommended order:
 
 1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0004`), and exercise the
    API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (memory vs Postgres
@@ -982,6 +1094,16 @@ Recommended order:
   them; new presets/reasons go there and in the `ReviewReason` enum, never inline in a route or component.
   Output regeneration requires `run.config.primaryAccountColumn` (uses the same `normalizeKey` as the
   pipeline) — do not invent a fallback column.
+- **Output generation is modular, deterministic and validated.** `build-output` (workflow) owns row assembly
+  and must copy the primary source row, overwrite only the configured output columns, write missing values as
+  `null`, and emit rows in primary-file order (sort by `rowIndex`). `RunService` owns writing: use
+  `writeTableToStorage` (stream) and `validateStoredTable` before marking the run succeeded — never buffer a
+  whole output with `writeTableToBuffer` for artifacts and never skip validation. The XLSX carries a leading
+  `Summary` sheet built from `summariseOutputRecords`; code that reads/writes output XLSX must pass
+  `sheetName: 'Output'` and preserve the `Summary` sheet (see `ReviewService.readSummarySheet`). The
+  `ExportSummary` vocabulary lives only in `packages/core/src/domain/output.ts`; the live status is derived by
+  `ExportService` (never stored). CSV is textual (leading zeros preserved, numbers read back as strings);
+  never coerce identifiers to numbers in any writer.
 - **Roadmap guardrail:** don't add enterprise features (SSO, billing, complex RBAC) before the core
   workflow, review loop and Postgres durability are excellent.
 - **Dataset ingestion is the front door.** All uploads flow through
@@ -1016,7 +1138,9 @@ Recommended order:
   `packages/matching-engine/src/{types,normalize,match}.ts` →
   `packages/ai/src/{service,resolve,redact,openai-provider}.ts` →
   `packages/core/src/domain/review.ts` →
-  `apps/api/src/services/review-service.ts` →
+  `packages/core/src/domain/output.ts` →
+  `apps/api/src/services/review-service.ts` +
+  `apps/api/src/services/export-service.ts` →
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
@@ -1033,3 +1157,4 @@ Recommended order:
 | Product 4 | 2026-09-16 | Rule engine & rule management: scoped conditions (`latest`/`any_event`/`all_events`) and full `RuleEvaluation` decision metadata, semantic `validateRuleSet` warnings/errors, `RuleSetService` + `/api/v1/rule-sets` (validated, versioned, one active set, resolved per run), Rules UI editor, +16 tests (179 total). Verified: lint/typecheck/179 tests/build/smoke. |
 | Product 5 | 2026-09-16 | AI-assisted classification layer: provider-neutral `ClassificationProvider` + structured request/result/outcome contracts, `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized failures), deterministic-first `resolveAssistedDecision` (AI never overrides a rule; auto-approval off by default), OpenAI-compatible adapter, `decisionSource` + AI provenance persisted (migration `0003`), review-card AI panel + run decision source, `__DecisionSource` output column, +30 tests (209 total). Verified: lint/typecheck/209 tests/build/smoke. |
 | Product 6 | 2026-09-16 | Review queue & human-in-the-loop: derived `ReviewState` + shared queue filter presets, append-only `review_resolutions` audit (migration `0004`) + repository, `ReviewService` (resolve/override/dismiss, automation snapshot, `changedFields`, output-artifact regeneration), enriched review DTOs (automation block, latest event, history, AI outcome, applicable rules), per-filter counts + filtered queue API, master/detail review workspace with keyboard shortcuts and audit trail, run-detail decision state, +13 tests (222 total). Verified: lint/typecheck/222 tests/build/smoke (filtered queue, override audit, regenerated output). |
+| Product 7 | 2026-09-16 | Output generation & Excel export: OutputRecordState/ExportSummary + summariseOutputRecords in core, deterministic primary-order output with null blanks, streamed writeTableToStorage, XLSX leading Summary sheet + type preservation, alidateStoredTable re-read validation that fails the run on mismatch, live ExportService/GET /runs/:id/export summary + status, run-page Final report panel, +13 tests (235 total). Verified: lint/typecheck/235 tests/build/smoke (export summary + validated xlsx/csv). |

@@ -26,6 +26,19 @@ export class XlsxTabularWriter implements TabularWriter {
   ): Promise<WriteResult> {
     const workbook = new ExcelJS.Workbook();
     workbook.created = new Date();
+
+    if (options.summary) {
+      // A machine-readable header row keeps the summary round-trippable when the file is reopened.
+      const summarySheet = workbook.addWorksheet('Summary');
+      const summaryHeader = summarySheet.addRow(['Metric', 'Value']);
+      summaryHeader.font = { bold: true };
+      for (const entry of options.summary.rows) {
+        summarySheet.addRow([entry.label, entry.value]);
+      }
+      summarySheet.getColumn(1).width = 34;
+      summarySheet.getColumn(2).width = 22;
+    }
+
     const worksheet = workbook.addWorksheet(options.sheetName ?? 'Output');
 
     const header = worksheet.addRow(options.columns);

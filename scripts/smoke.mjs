@@ -278,6 +278,37 @@ async function main() {
     `review        : ${reviewFilter.items.length} needs-review, ${overrideTarget.entityKey} -> OVERRIDDEN, output regenerated, ${history.items.length} audit entry`,
   );
 
+  // Output generation: a live export summary in front of validated Excel/CSV deliverables.
+  const exportStatus = await request(`/api/v1/runs/${configuredFinished.id}/export`);
+  assert(exportStatus.summary, 'export status must include a summary');
+  assert(
+    exportStatus.summary.totalRecords === 9,
+    `export summary must count 9 records, got ${exportStatus.summary.totalRecords}`,
+  );
+  assert(
+    exportStatus.summary.outputRows === 10,
+    `export summary must count 10 output rows, got ${exportStatus.summary.outputRows}`,
+  );
+  assert(
+    exportStatus.summary.reviewed >= 1,
+    'a resolved review item must be counted as reviewed in the export summary',
+  );
+  assert(
+    exportStatus.validation?.validated === true,
+    'generated files must be validated before the run is marked successful',
+  );
+  assert(
+    exportStatus.validation.rowCount === 10,
+    `validated row count must match the output, got ${exportStatus.validation?.rowCount}`,
+  );
+  assert(
+    exportStatus.artifacts.some((artifact) => artifact.kind === 'output_xlsx'),
+    'Excel (.xlsx) is the primary export format and must be produced',
+  );
+  console.log(
+    `export        : ${exportStatus.status}, ${exportStatus.summary.outputRows} rows validated, reviewed=${exportStatus.summary.reviewed}, unresolved=${exportStatus.summary.unresolved}`,
+  );
+
   // Rule management: rules are data, validated before saving and versioned on save.
   const ruleSets = await request('/api/v1/rule-sets?workflowSlug=account-fault-triage');
   assert(ruleSets.items.length >= 1, 'expected at least one seeded rule set');

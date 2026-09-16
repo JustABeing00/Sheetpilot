@@ -149,5 +149,13 @@ deterministic result, applicable rules, confidence and any AI suggestion side by
 accept/override/dismiss with keyboard shortcuts and next-item navigation. Every human decision is an
 append-only audit entry (what automation proposed, what the human changed, when) and, for runs with a mapped
 account column, is written back into the generated output so the export matches the reviewed result.
-Scheduling, authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15
-for the prioritized next steps.
+
+Output generation is a modular, validated stage: the generated **Excel (.xlsx)** (primary) and CSV preserve
+the primary file's structure and original row order, overwrite only the configured output columns, keep
+leading-zero account numbers and long numeric identifiers as text, and never turn blanks into `0`. Each run
+carries a live **export summary** (`GET /api/v1/runs/:id/export`) — total records, auto-resolved, reviewed,
+unresolved, errors and unmatched — plus a `Summary` worksheet in the workbook, and the generated files are
+re-read and validated (columns + row count) before the run is marked successful. The run page shows the
+export status and the download buttons, so the flow reads UPLOAD → CONFIGURE → PROCESS → REVIEW EXCEPTIONS →
+EXPORT FINAL REPORT. Scheduling, authentication and multi-tenancy are deliberately deferred — see
+[`progress.md`](./progress.md) §15 for the prioritized next steps.

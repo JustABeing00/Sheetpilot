@@ -184,12 +184,38 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    values keeps the automation result), updates the item and appends a `ReviewResolutionLog`. The log is the
    audit trail: previous status, automation source/confidence/values, suggested values, applied values,
    `changedFields`, note and timestamp. `GET /api/v1/review-items/:id/history` returns it.
-5. When applied values exist, `ReviewService` rewrites the run's `output_csv`/`output_xlsx` rows for that
-   entity (matched by the configured `primaryAccountColumn` through `normalizeKey`), sets
-   `__ReviewStatus` to `APPROVED`/`OVERRIDDEN` and updates the artifact size, so the exported file matches
-   the reviewed decision. The review-queue CSV is left as the original snapshot. Runs started without a
-   configured `primaryAccountColumn` keep the resolution (and audit) but cannot patch the file; the service
-   logs that instead of guessing.
+5. Every non-dismissed resolution rewrites the run's `output_csv`/`output_xlsx` rows for that entity (matched
+   by the configured `primaryAccountColumn` through `normalizeKey`), applies the human values and sets
+   `__ReviewStatus` to `APPROVED`/`OVERRIDDEN`, updating the artifact size so the exported file matches the
+   reviewed decision. A value-less accept still flips the status (an accepted no-events/no-match case is
+   `APPROVED`, not a permanent `REVIEW_REQUIRED`). The review-queue CSV is left as the original snapshot.
+   Runs started without a configured `primaryAccountColumn` keep the resolution (and audit) but cannot patch
+   the file; the service logs that instead of guessing.
+
+## Output generation & export lifecycle
+
+1. `build-output` assembles one output row per primary record: the source row is copied first, then the
+   configured business columns are filled from the decision, then the optional `__`-prefixed system columns
+   (`__DecisionSource`, `__ReviewStatus`, `__Explanation`, …). Rows are emitted in the **primary file's
+   original row order** regardless of how the matching engine ordered its groups. Missing values are written
+   as true blanks (`null`), never as the string `"undefined"`, an empty string or a coerced `0`.
+2. `RunService` writes the deliverables by **streaming** each table straight into `FileStorage`
+   (`writeTableToStorage`), so the file is never materialised as one giant `Buffer`. The XLSX is the primary
+   deliverable and carries a leading `Summary` worksheet (machine-readable `Metric | Value` rows); the CSV
+   has the same data sheet. A review-queue CSV is written alongside.
+3. Before the run is marked successful, `validateStoredTable` re-reads each stored artifact and proves the
+   expected columns (in order) and row count are present, streaming the rows instead of collecting them. A
+   mismatch throws `ExportValidationError`, which fails the run rather than publishing a broken file.
+4. Data is preserved, not coerced: the primary row is copied verbatim and only the configured output columns
+   are overwritten. The writers never turn a string identifier into a number, so leading-zero account numbers
+   and identifiers longer than `Number.MAX_SAFE_INTEGER` stay text; real dates stay dates; blanks stay blank.
+5. The human-facing **summary** is derived live, never stored: `GET /api/v1/runs/:id/export` aggregates the
+   decision log and the current review items into `ExportSummary` (`totalRecords`, `outputRows`,
+   `autoResolved`, `humanApproved`, `overridden`, `dismissed`, `reviewed`, `unresolved`, `errors`,
+   `unmatched`) and reports an export status (`ready`/`pending_review`/`processing`/`failed`/`unavailable`)
+   plus the validation result. The XLSX `Summary` sheet is the as-run snapshot; the endpoint reflects human
+   decisions made afterwards. `POST /api/v1/review-items/:id/resolve` rewrites the data sheet and preserves
+   the `Summary` sheet, so the downloaded file always matches the reviewed decisions.
 
 ## Key abstractions (ports & contracts)
 
@@ -226,6 +252,11 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `ReviewResolutionLog` | `packages/core/src/domain/review.ts` | Append-only audit of each human decision: automation snapshot, suggested vs applied values, `changedFields`, note, timestamp |
 | `ReviewResolutionRepository` | `packages/core/src/ports/repositories.ts` | Persistence port for the audit trail (in-memory and Postgres adapters) |
 | `ReviewService` | `apps/api/src/services/review-service.ts` | Resolves review items, appends the audit entry and regenerates the output artifacts to match the human decision |
+| `ExportSummary` / `summariseOutputRecords` | `packages/core/src/domain/output.ts` | Pure aggregation of per-record outcomes into the user-facing export summary; one vocabulary shared by the workflow and the API |
+| `writeTableToStorage` | `packages/file-processing/src/writers/stream.ts` | Streams a table into `FileStorage` (no full-file buffer) |
+| `validateStoredTable` | `packages/file-processing/src/export/validate.ts` | Re-reads a stored artifact and proves columns + row count before the run succeeds (`ExportValidationError`) |
+| `WriteSummary` (writer option) | `packages/file-processing/src/writers/tabular-writer.ts` | Optional leading `Summary` worksheet (XLSX only, ignored by CSV) |
+| `ExportService` | `apps/api/src/services/export-service.ts` | Derives the live export summary and status for a run from decisions + review items + artifacts |
 | API DTO schemas | `packages/core/src/api/contracts.ts` | Single source of truth for request/response shapes used by API and web |
 
 ## Determinism and traceability rules
