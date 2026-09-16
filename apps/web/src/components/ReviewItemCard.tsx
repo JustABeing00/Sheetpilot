@@ -2,9 +2,15 @@ import { useMemo, useState } from 'react';
 import type { ReviewItemDto } from '@sheetpilot/core';
 import { AI_AMBIGUITY_LABELS, AI_FAILURE_LABELS } from '@sheetpilot/core';
 import { useResolveReviewItem } from '../api/hooks.js';
-import { formatCellValue, formatDateTime, humanizeToken } from '../lib/format.js';
+import { formatCellValue, formatDateTime } from '../lib/format.js';
 import { Badge } from './ui.js';
-import { reviewStateTone, severityTone } from '../lib/status.js';
+import { useToast } from './toast-context.js';
+import {
+  reviewReasonLabel,
+  reviewStateLabel,
+  reviewStateTone,
+  severityTone,
+} from '../lib/status.js';
 
 interface EvidenceView {
   faultCount?: number;
@@ -22,6 +28,7 @@ export function ReviewItemCard({
   showRunLink?: boolean;
 }) {
   const resolve = useResolveReviewItem();
+  const toast = useToast();
   const [mode, setMode] = useState<'idle' | 'overriding'>('idle');
   const [note, setNote] = useState('');
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -35,10 +42,22 @@ export function ReviewItemCard({
     action: 'accepted' | 'overridden' | 'dismissed',
     values?: Record<string, string>,
   ) => {
-    resolve.mutate({
-      id: item.id,
-      body: { action, values: values ?? {}, note },
-    });
+    resolve.mutate(
+      { id: item.id, body: { action, values: values ?? {}, note } },
+      {
+        onSuccess: () => {
+          const verb =
+            action === 'accepted' ? 'Approved' : action === 'overridden' ? 'Overrode' : 'Dismissed';
+          toast.show(`${verb} ${item.entityKey}.`, action === 'dismissed' ? 'info' : 'success');
+        },
+        onError: (error) => {
+          toast.show(
+            error instanceof Error ? error.message : 'The decision could not be saved.',
+            'danger',
+          );
+        },
+      },
+    );
   };
 
   return (
@@ -47,8 +66,8 @@ export function ReviewItemCard({
         <div>
           <span className="entity-key">{item.entityKey}</span>
           <div className="review-card-badges">
-            <Badge tone={severityTone(item.severity)}>{humanizeToken(item.reason)}</Badge>
-            <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
+            <Badge tone={severityTone(item.severity)}>{reviewReasonLabel(item.reason)}</Badge>
+            <Badge tone={reviewStateTone(item.state)}>{reviewStateLabel(item.state)}</Badge>
             {item.workflowSlug ? <span className="muted">{item.workflowSlug}</span> : null}
           </div>
         </div>
@@ -234,7 +253,7 @@ export function ReviewItemCard({
         </div>
       ) : (
         <div className="resolution">
-          <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
+          <Badge tone={reviewStateTone(item.state)}>{reviewStateLabel(item.state)}</Badge>
           {item.resolution?.changedFields.length ? (
             <span className="muted small">Changed {item.resolution.changedFields.join(', ')}</span>
           ) : null}

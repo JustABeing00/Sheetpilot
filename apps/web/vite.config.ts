@@ -16,5 +16,26 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        // Keep the framework/runtime libraries in stable, cacheable vendor chunks and let each route
+        // ship its own small chunk (routes are lazy-loaded in `app/router.tsx`).
+        manualChunks: (id: string) => {
+          if (!id.includes('node_modules')) {
+            return null;
+          }
+          if (/node_modules[\\/](react|react-dom|react-router|react-router-dom)[\\/]/.test(id)) {
+            return 'react';
+          }
+          if (id.includes('@tanstack')) {
+            return 'query';
+          }
+          if (/node_modules[\\/]zod[\\/]/.test(id)) {
+            return 'zod';
+          }
+          return null;
+        },
+      },
+    },
   },
 });

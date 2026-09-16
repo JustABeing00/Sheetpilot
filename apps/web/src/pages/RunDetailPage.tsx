@@ -5,8 +5,10 @@ import {
   useRunDecisions,
   useRunExport,
   useRunReviewItems,
+  useWorkflow,
 } from '../api/hooks.js';
 import { ReviewItemCard } from '../components/ReviewItemCard.js';
+import { RunProgress } from '../components/RunProgress.js';
 import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import {
   Badge,
@@ -18,12 +20,15 @@ import {
   StatCard,
 } from '../components/ui.js';
 import {
+  decisionSourceLabel,
   describeRunError,
   exportStatusLabel,
   exportStatusTone,
+  reviewReasonLabel,
   runStatusDescription,
   runStatusLabel,
   statusTone,
+  stepStatusLabel,
 } from '../lib/status.js';
 import type { PipelineStageKey } from '../lib/pipeline.js';
 import {
@@ -43,6 +48,7 @@ export function RunDetailPage() {
   const reviewItems = useRunReviewItems(runId);
   const decisions = useRunDecisions(runId);
   const exportStatus = useRunExport(runId);
+  const workflow = useWorkflow(run.data?.workflowSlug);
 
   if (run.isLoading) {
     return (
@@ -82,9 +88,7 @@ export function RunDetailPage() {
       <PageHeader
         title="Run summary"
         description={`${detail.workflowName} · run ${detail.id.slice(0, 8)}`}
-        actions={
-          <Badge tone={statusTone(detail.status)}>{runStatusLabel(detail.status)}</Badge>
-        }
+        actions={<Badge tone={statusTone(detail.status)}>{runStatusLabel(detail.status)}</Badge>}
       />
 
       <div className={`run-status run-status-${detail.status}`}>
@@ -99,6 +103,13 @@ export function RunDetailPage() {
           />
         ) : null}
       </div>
+
+      <RunProgress
+        status={detail.status}
+        startedAt={detail.startedAt}
+        expectedSteps={workflow.data?.steps ?? []}
+        recordedSteps={detail.steps}
+      />
 
       {detail.error ? (
         <div className="error-state" role="alert">
@@ -197,7 +208,9 @@ export function RunDetailPage() {
             {exportStatus.data.summary.unresolved > 0 ? (
               <p className="muted small">
                 {exportStatus.data.summary.unresolved}{' '}
-                {exportStatus.data.summary.unresolved === 1 ? 'case still needs' : 'cases still need'}{' '}
+                {exportStatus.data.summary.unresolved === 1
+                  ? 'case still needs'
+                  : 'cases still need'}{' '}
                 a human decision.{' '}
                 <Link className="link" to={`/review?runId=${detail.id}`}>
                   Review now
@@ -254,32 +267,31 @@ export function RunDetailPage() {
         </div>
       </Card>
 
-      <Card
-        title="Processing steps"
-        subtitle="The pipeline stages that ran, with their metrics"
-      >
-        <ol className="step-list">
-          {detail.steps.map((step) => (
-            <li key={step.id}>
-              <div className="step-header">
-                <span className="step-name">{step.name}</span>
-                <Badge tone={statusTone(step.status)}>{step.status}</Badge>
-                <span className="muted small">{formatDuration(step.durationMs)}</span>
-              </div>
-              {Object.keys(step.metrics).length > 0 ? (
-                <div className="step-metrics">
-                  {Object.entries(step.metrics).map(([key, value]) => (
-                    <span key={key} className="metric-chip">
-                      {humanizeToken(key)}: <strong>{value}</strong>
-                    </span>
-                  ))}
+      {detail.steps.length > 0 ? (
+        <Card title="Processing steps" subtitle="The pipeline stages that ran, with their metrics">
+          <ol className="step-list">
+            {detail.steps.map((step) => (
+              <li key={step.id}>
+                <div className="step-header">
+                  <span className="step-name">{step.name}</span>
+                  <Badge tone={statusTone(step.status)}>{stepStatusLabel(step.status)}</Badge>
+                  <span className="muted small">{formatDuration(step.durationMs)}</span>
                 </div>
-              ) : null}
-              {step.error ? <p className="error-text">{step.error}</p> : null}
-            </li>
-          ))}
-        </ol>
-      </Card>
+                {Object.keys(step.metrics).length > 0 ? (
+                  <div className="step-metrics">
+                    {Object.entries(step.metrics).map(([key, value]) => (
+                      <span key={key} className="metric-chip">
+                        {humanizeToken(key)}: <strong>{value}</strong>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {step.error ? <p className="error-text">{step.error}</p> : null}
+              </li>
+            ))}
+          </ol>
+        </Card>
+      ) : null}
 
       <Card title="Generated files" subtitle="Every file produced by this run">
         {artifacts.isLoading ? <LoadingState label="Loading files…" /> : null}
@@ -318,34 +330,36 @@ export function RunDetailPage() {
           <ErrorState error={decisions.error} onRetry={() => void decisions.refetch()} />
         ) : null}
         {decisions.isSuccess ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Record</th>
-                <th>Rule</th>
-                <th>Source</th>
-                <th>Confidence</th>
-                <th>Review reasons</th>
-                <th>Root cause</th>
-              </tr>
-            </thead>
-            <tbody>
-              {decisions.data.items.map((decision) => (
-                <tr key={decision.id}>
-                  <td className="mono">{decision.entityKey}</td>
-                  <td className="mono small">{decision.matchedRuleIds.join(', ') || '—'}</td>
-                  <td className="small">{humanizeToken(decision.decisionSource)}</td>
-                  <td>{Math.round(decision.confidence * 100)}%</td>
-                  <td className="small">
-                    {decision.reviewReasons.length > 0
-                      ? decision.reviewReasons.map(humanizeToken).join(', ')
-                      : '—'}
-                  </td>
-                  <td>{formatCellValue(decision.outputValues['RootCause'])}</td>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Record</th>
+                  <th>Rule</th>
+                  <th>Source</th>
+                  <th>Confidence</th>
+                  <th>Review reasons</th>
+                  <th>Root cause</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {decisions.data.items.map((decision) => (
+                  <tr key={decision.id}>
+                    <td className="mono">{decision.entityKey}</td>
+                    <td className="mono small">{decision.matchedRuleIds.join(', ') || '—'}</td>
+                    <td className="small">{decisionSourceLabel(decision.decisionSource)}</td>
+                    <td>{Math.round(decision.confidence * 100)}%</td>
+                    <td className="small">
+                      {decision.reviewReasons.length > 0
+                        ? decision.reviewReasons.map(reviewReasonLabel).join(', ')
+                        : '—'}
+                    </td>
+                    <td>{formatCellValue(decision.outputValues['RootCause'])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
       </Card>
     </div>
@@ -372,7 +386,8 @@ function NextStep({
           {unresolved} {unresolved === 1 ? 'record needs' : 'records need'} your decision
         </strong>
         <p className="muted small">
-          The report is generated but marked “waiting for review” until a person resolves these cases.
+          The report is generated but marked “waiting for review” until a person resolves these
+          cases.
         </p>
         <Link className="button button-primary" to={`/review?runId=${runId}`}>
           Review {unresolved} {unresolved === 1 ? 'exception' : 'exceptions'}
@@ -384,7 +399,9 @@ function NextStep({
   return (
     <div className="next-step">
       <strong>Everything is resolved — your report is ready</strong>
-      <p className="muted small">Download the finished file below, or from the Final report card.</p>
+      <p className="muted small">
+        Download the finished file below, or from the Final report card.
+      </p>
       {reportReady && reportUrl ? (
         <a className="button button-primary" href={reportUrl} download>
           Download {(reportFormat ?? 'xlsx').toUpperCase()} report

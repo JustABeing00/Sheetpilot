@@ -63,15 +63,18 @@ export function DatasetsPage() {
           subtitle="Supported: .csv, .xlsx, .xlsm. Files are validated, stored under an internal id and never executed."
         >
           <div className="field-grid">
-            <Field label="File role" hint="Used later when starting a workflow run.">
+            <Field
+              label="File type (optional)"
+              hint="A label for this upload. Your files are assigned to roles later, in the setup step."
+            >
               <select
                 className="input"
                 value={kind}
                 onChange={(event) => setKind(event.target.value)}
               >
-                <option value="generic">Generic</option>
-                <option value="primary">Primary</option>
-                <option value="events">Events</option>
+                <option value="generic">General file</option>
+                <option value="primary">Primary list</option>
+                <option value="events">Events / history</option>
               </select>
             </Field>
             <Field
@@ -117,48 +120,54 @@ export function DatasetsPage() {
           />
         ) : null}
         {datasets.isSuccess && datasets.data.items.length > 0 ? (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Original file</th>
-                  <th>Dataset ID</th>
-                  <th>Format</th>
-                  <th>Rows</th>
-                  <th>Columns</th>
-                  <th>Warnings</th>
-                  <th>Inspected</th>
-                </tr>
-              </thead>
-              <tbody>
-                {datasets.data.items.map((dataset) => (
-                  <tr key={dataset.id}>
-                    <td>
-                      <Link to={`/datasets/${dataset.id}`}>{dataset.originalName}</Link>
-                      <div className="muted small">{formatBytes(dataset.sizeBytes)}</div>
-                    </td>
-                    <td className="mono small">{dataset.id}</td>
-                    <td>
-                      <Badge tone="info">{dataset.format}</Badge>
-                    </td>
-                    <td>
-                      {dataset.rowCount.toLocaleString()}
-                      {dataset.rowCountExact ? '' : '+'}
-                    </td>
-                    <td>{dataset.columnCount}</td>
-                    <td>
-                      {dataset.warningCount > 0 ? (
-                        <Badge tone="warning">{dataset.warningCount}</Badge>
-                      ) : (
-                        <span className="muted">0</span>
-                      )}
-                    </td>
-                    <td className="small">{formatDateTime(dataset.inspectedAt)}</td>
+          <>
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Original file</th>
+                    <th>Internal ID</th>
+                    <th>Format</th>
+                    <th>Rows</th>
+                    <th>Columns</th>
+                    <th>Warnings</th>
+                    <th>Inspected</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {datasets.data.items.map((dataset) => (
+                    <tr key={dataset.id}>
+                      <td>
+                        <Link to={`/datasets/${dataset.id}`}>{dataset.originalName}</Link>
+                        <div className="muted small">{formatBytes(dataset.sizeBytes)}</div>
+                      </td>
+                      <td className="mono small">{dataset.id.slice(0, 8)}</td>
+                      <td>
+                        <Badge tone="info">{dataset.format}</Badge>
+                      </td>
+                      <td>
+                        {dataset.rowCount.toLocaleString()}
+                        {dataset.rowCountExact ? '' : '+'}
+                      </td>
+                      <td>{dataset.columnCount}</td>
+                      <td>
+                        {dataset.warningCount > 0 ? (
+                          <Badge tone="warning">{dataset.warningCount}</Badge>
+                        ) : (
+                          <span className="muted">0</span>
+                        )}
+                      </td>
+                      <td className="small">{formatDateTime(dataset.inspectedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted small table-footnote">
+              Uploads are kept so runs stay auditable. There is no delete button yet — avoid
+              uploading files you would need to erase immediately.
+            </p>
+          </>
         ) : null}
       </Card>
     </div>

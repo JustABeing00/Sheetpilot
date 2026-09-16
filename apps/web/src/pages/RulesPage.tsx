@@ -18,8 +18,10 @@ import {
   useWorkflows,
 } from '../api/hooks.js';
 import { ApiError } from '../api/client.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui.js';
 import { WorkflowProgress } from '../components/WorkflowProgress.js';
+import { useToast } from '../components/toast-context.js';
 import {
   CONDITION_SCOPE_LABELS,
   OPERATORS_WITHOUT_VALUE,
@@ -391,6 +393,9 @@ export function RulesPage() {
   const [baseline, setBaseline] = useState<string>('[]');
   const [issues, setIssues] = useState<RuleValidationIssue[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
+  const [confirmingNewRuleSet, setConfirmingNewRuleSet] = useState(false);
+  const toast = useToast();
 
   const validateRuleSet = useValidateRuleSet();
   const updateRuleSet = useUpdateRuleSet();
@@ -496,11 +501,13 @@ export function RulesPage() {
       setBaseline(JSON.stringify(saved.rules));
       setIssues([]);
       setNotice(`Saved as version ${saved.version} and set active.`);
+      toast.show(`Rule set saved as version ${saved.version} and set active.`);
     } catch (error) {
       if (error instanceof ApiError && Array.isArray(error.details)) {
         setIssues(error.details as RuleValidationIssue[]);
       }
       setNotice(error instanceof ApiError ? error.message : 'Save failed.');
+      toast.show('The rule set could not be saved. Check the issues below.', 'danger');
     }
   };
 
@@ -518,8 +525,10 @@ export function RulesPage() {
       });
       setSelectedId(created.id);
       setNotice(`Created a new active rule set (version ${created.version}).`);
+      toast.show(`Created a new active rule set (version ${created.version}).`);
     } catch (error) {
       setNotice(error instanceof ApiError ? error.message : 'Create failed.');
+      toast.show('The new rule set could not be created.', 'danger');
     }
   };
 
@@ -587,7 +596,7 @@ export function RulesPage() {
             type="button"
             className="button button-ghost"
             disabled={!workflowSlug || createRuleSet.isPending}
-            onClick={() => void handleCreateRuleSet()}
+            onClick={() => setConfirmingNewRuleSet(true)}
           >
             Save as a new rule set
           </button>
@@ -633,7 +642,7 @@ export function RulesPage() {
           index={index}
           issues={issues}
           onChange={(next) => updateRule(index, next)}
-          onRemove={() => removeRule(index)}
+          onRemove={() => setPendingDelete(index)}
         />
       ))}
 
@@ -652,6 +661,34 @@ export function RulesPage() {
           </button>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Delete “${pendingDelete !== null ? (draft[pendingDelete]?.name ?? 'this rule') : ''}”?`}
+        description="The rule is removed from this draft. Nothing is saved until you choose “Save new version”, but the change cannot be recovered afterwards."
+        confirmLabel="Delete rule"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete !== null) {
+            removeRule(pendingDelete);
+          }
+          setPendingDelete(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmingNewRuleSet}
+        title="Create a new active rule set?"
+        description="This saves the current draft as a brand-new rule set and makes it the active one. The previous set is kept but no longer used by new runs."
+        confirmLabel="Create and activate"
+        tone="primary"
+        busy={createRuleSet.isPending}
+        onCancel={() => setConfirmingNewRuleSet(false)}
+        onConfirm={() => {
+          setConfirmingNewRuleSet(false);
+          void handleCreateRuleSet();
+        }}
+      />
     </div>
   );
 }

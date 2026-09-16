@@ -461,3 +461,41 @@ smoke/test workflow for no real gain in a trusted environment). Adding `@fastify
 (rejected for now: a small in-process implementation avoids new runtime dependencies in the externalized API
 bundle; can be swapped later). A full AV/malware scanner (rejected: out of scope for this build; documented as
 an open risk). Durable idempotency in Postgres (deferred: belongs with a real job queue).
+
+## ADR-020 - The web app is a product surface: landing entry, per-route code splitting, explicit actions
+
+**Decision.** The React app is treated as the product, not a debug console. Concretely: (1) `/` is a
+standalone, marketing-style **landing page** and the working app lives under `/dashboard` inside the app
+shell; (2) every non-entry screen is **lazy-loaded per route** with `React.lazy` + `Suspense`, and the
+framework/runtime libraries are split into stable vendor chunks, so a first visit only downloads the shell
+and the one screen it needs; (3) human-facing state is always expressed in **plain language** through shared
+helpers in `lib/status.ts` (no raw enum tokens such as `no_rule_match` reach the UI); (4) destructive or
+hard-to-undo actions (dismissing a review case, deleting a rule, replacing the active rule set) require an
+explicit, accessible `ConfirmDialog`, and a transient `Toast` reports the outcome; (5) uploaded files are
+still non-deletable, so the Datasets screen states that limitation rather than implying a delete action; and
+(6) accessibility is baseline behaviour: a skip link, one `<main>` landmark, visible focus rings, keyboard
+review shortcuts with an on-screen cheat sheet, ARIA live regions for async navigation, and a
+`prefers-reduced-motion` override.
+
+**Why.** The primary audience is a nontechnical business user who understands spreadsheets. A single 480 KB
+bundle that opens straight onto a data dashboard does not explain what the product is, hides the cost of
+navigating, and presents internal vocabulary. Splitting the bundle keeps each screen fast; plain-language
+labels make automation explainable; confirmation for irreversible steps prevents accidental data decisions;
+and the accessibility work is required for a tool whose central loop is keyboard review.
+
+**Consequences.** The landing page is a real route and must be kept in sync with the product's actual
+capabilities (it describes the five pipeline stages and the review loop, not aspirational features). Route
+splitting means a first navigation to a heavy screen shows a small loading fallback instead of blocking the
+whole app. Confirmation dialogs add one click to three specific actions; they are intentionally not used on
+reversible actions (accept/override remain one click, since review speed is a product goal). The label
+helpers are the single source of UI wording and are unit-tested; new review reasons/states must be added
+there as well as in `core`.
+
+**Alternatives considered.** Keeping `/` as the dashboard and adding the landing at `/welcome` (rejected:
+first-time visitors would still land inside the app). Loading pages eagerly and relying on the browser cache
+(rejected: the initial payload grows with the app). A modal library and a component kit (rejected: the app
+deliberately uses plain CSS tokens and a few hand-written primitives to avoid a UI-framework dependency).
+Blocking all review actions behind confirmation (rejected: accept/override are the fast path and are audited;
+only dismiss and rule deletion are confirmed). Adding a delete API so the Datasets screen can offer cleanup
+(rejected for this session: the task is UX-only and the backend must not be rewritten; the limitation is
+documented in the UI instead).

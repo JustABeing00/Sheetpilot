@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-17 (product session 10 — security, reliability & production hardening)
+**Last updated:** 2026-09-17 (product session 11 — UI/UX & product polish)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -99,14 +99,31 @@ synchronously), runs stranded by a restart are failed on startup, and `POST /run
 `Idempotency-Key`. Privacy is documented in `docs/privacy.md` and the whole repository is reviewed honestly
 in `docs/security-review.md` (ADR-019). **Status: achieved** (see §8, verified in §9).
 
-**Next (product session 11):** UI/UX & product polish (queue `11-session.md`) — turn the technically
-functional app into a polished SaaS product for a nontechnical business user: landing page, dashboard,
-create/upload/map/rule/process/review/export/saved-workflow screens, clear step awareness and system status,
-actionable errors, fast review, realistic-data tables, explicit destructive actions, accessibility and
-keyboard-friendly review, polished empty/loading/error/success states, and improved typography, spacing,
-hierarchy, consistency and responsiveness. The deferred backlog (Postgres verification, human corrections →
-rule suggestions, browsable version history, reviewer identity, reopening resolved items, scheduling/watched
-folders, streaming the loader) remains in §15.
+**Product session 11 objective: UI/UX & product polish.** The technically complete product is now presented
+as a polished SaaS app for a nontechnical business user. `/` is a standalone **landing page** (value
+proposition, the five journey stages, capabilities, CTA) and the working app moved to `/dashboard` inside the
+shell. Every non-entry screen is **lazy-loaded per route** with `React.lazy`/`Suspense`, and the framework
+libraries are split into stable vendor chunks (`vite.config.ts` `manualChunks`), so the entry chunk dropped
+from ~488 KB to **44 KB (11.7 KB gzip)** while each screen ships a 0.4–17 KB chunk. All human-facing wording
+now flows through `lib/status.ts` (run/step/export status, derived review state, review reason + help text,
+decision source, severity) so no internal token reaches the screen, and `describeRunError` still turns
+failures into next steps. Hard-to-undo actions are explicit: `ConfirmDialog` guards dismissing a review case,
+deleting a rule and replacing the active rule set, and a `ToastProvider` reports outcomes (accept/override
+stay one click, since review speed is a goal). The review workspace gained `k`/`↑` previous, `Escape`
+cancel, a `?` shortcut cheat sheet, a "why you are seeing this" explanation, an item position counter and an
+ARIA live region; it is keyboard-first and responsive. Runs now show **live progress**: `RunProgress` merges
+the workflow's expected steps with recorded ones, ticks an elapsed timer and renders a progress bar while
+queued/running (steps are still persisted at completion, so this is derived, not streamed). Accessibility and
+performance are baseline: skip link, single `<main>`, visible focus rings, `prefers-reduced-motion`, sticky
+table headers inside `.table-scroll`, and a CSS polish/override layer (tokens, hierarchy, spacing, dialogs,
+toasts, landing styles, mobile top bar). Backend logic was not rewritten. **Status: achieved** (see §8,
+verified in §9).
+
+**Next (product session 12):** no queue file yet (the overnight queue ends at `11-session.md`). The deferred
+backlog remains in §15: verify Postgres, human corrections → rule suggestions, browsable version history,
+reviewer identity and reopening resolved items, per-configuration AI choice, streaming/chunked loading,
+scheduling/watched folders, identifier-normalization options, and a delete/erasure flow (the Datasets screen
+now states that deletion is not yet possible).
 
 ## 3. Product Vision
 
@@ -131,7 +148,8 @@ core workflow is excellent.
 
 | Layer | Choice | Notes |
 | --- | --- | --- |
-| Frontend | React 19.3, Vite 8.3, React Router 7, TanStack Query 5, plain CSS tokens | No UI framework; typed API client parses responses with zod contracts |
+| Frontend | React 19.3, Vite 8.3, React Router 7, TanStack Query 5, plain CSS tokens | No UI framework; typed API client parses responses with zod contracts; landing page at `/`, app under `/dashboard`; every non-entry route is `React.lazy`-split with manual vendor chunks |
+| Product UX | `WorkflowProgress` stepper + `lib/pipeline.ts` + `lib/status.ts` labels + `ConfirmDialog` + `ToastProvider` + `RunProgress` | Plain-language labels everywhere, explicit confirmation for hard-to-undo actions, live in-flight run progress, keyboard-first review, accessible focus/live regions, reduced-motion support |
 | Backend | Node.js 22+ (developed on 24.6), TypeScript 5.x strict, Fastify 5.12 | `@fastify/multipart` uploads, `@fastify/cors`, pino logs |
 | Validation/contracts | zod 4.6 (`@sheetpilot/core`) | Same schemas used by API and web |
 | Database | Postgres 16 via Drizzle ORM 0.45 + drizzle-kit; in-memory repositories by default | 12 tables incl. immutable `run_snapshots`; SQL migrations `0000`–`0005` generated; no live Postgres verified yet |
@@ -153,7 +171,7 @@ core workflow is excellent.
 | API security | `http/security.ts` + `server.ts` limits | Optional shared `API_KEY`, per-IP fixed-window rate limit (`429`+`Retry-After`), security headers (+HSTS in prod), configurable body/multipart limits, `TRUST_PROXY`, 5xx details never returned, no CORS credentials |
 | Reliability | `RunService` guards + `IdempotencyService` | Run marked in-flight synchronously (no double execution), `recoverStaleRuns()` fails restart-stranded runs, `Idempotency-Key` on `POST /runs` (in-process, 24 h) |
 | Observability/privacy | pino redaction + `docs/privacy.md` + `docs/security-review.md` | Credential-shaped log fields redacted; documented data storage/retention/AI-egress and an honest remaining-risk review |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 296 tests, 32 files, all green |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 303 tests, 33 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -279,15 +297,19 @@ apps/
   web/src/
     api/client.ts          typed fetch, zod response parsing, ApiError
     api/hooks.ts           TanStack Query hooks for every endpoint
-    app/router.tsx         routes: /, /runs, /runs/new, /runs/:id, /review, /workflows, /workflows/:slug, /datasets, /datasets/:id, /setup, /setup/:configurationId
-    components/AppShell.tsx        sidebar shell, API status, open-review counter
-    components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
-    components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
+    app/router.tsx         routes: / (landing), /dashboard, /runs, /runs/new, /runs/:id, /review, /workflows, /workflows/:slug, /datasets, /datasets/:id, /setup, /setup/:configurationId, /saved-workflows, /saved-workflows/:id, /saved-workflows/:id/run — non-entry pages are lazy-loaded
+    components/AppShell.tsx        sidebar shell, skip link, `<main>` landmark, API status, open-review counter
+    components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Alert, ProgressBar, Field, KeyValue
+    components/ConfirmDialog.tsx   accessible confirmation for destructive actions (dismiss/delete/replace)
+    components/ToastProvider.tsx + toast-context.ts  app-wide transient success/error feedback + useToast
+    components/RunProgress.tsx     live in-flight run progress (expected + recorded steps, elapsed timer)
+    components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls (used on the run page)
     components/WorkflowProgress.tsx  shared end-to-end journey stepper (Set up → Rules → Process → Review → Export)
     components/SavedWorkflowsTable.tsx  the returning-user dashboard table (last run, status, records, review, report, Run again)
-    pages/*.tsx            Dashboard, SavedWorkflows, SavedWorkflowDetail, RunSavedWorkflow, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
-    lib/format.ts, lib/rules.ts, lib/status.ts, lib/pipeline.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones + plain-language run/error labels, journey stages, dataset helpers, mapping suggestions
-    styles/app.css         design tokens + component styles (light professional theme)
+    pages/*.tsx            Landing, Dashboard, SavedWorkflows, SavedWorkflowDetail, RunSavedWorkflow, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
+    lib/format.ts, lib/rules.ts, lib/status.ts, lib/pipeline.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, plain-language labels + tones, journey stages, dataset helpers, mapping suggestions
+    lib/format.test.ts, lib/status.test.ts   formatting + label/help unit tests
+    styles/app.css         design tokens + component styles + the session-11 polish layer (landing, dialogs, toasts, responsive, reduced motion)
 packages/
   core/src/
     domain/enums.ts        RunStatus, ReviewReason, AiPolicy, file/artifact formats …
@@ -392,6 +414,55 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 11 — UI/UX & product polish (2026-09-17)
+
+- [x] Landing page & navigation split (`apps/web`):
+  - new `pages/LandingPage.tsx` at `/` — value proposition, the five pipeline stages, a capability grid and a
+    clear CTA; standalone layout (no sidebar). The working app moved to `/dashboard`; `AppShell` nav, the
+    404 page and all in-app links were updated.
+  - `AppShell` gained a skip link, a single `<main id="main">` landmark, an `aria-label`ed primary nav and a
+    clickable brand; the sidebar collapses to a horizontally scrollable top bar on small screens.
+- [x] Route-level code splitting & caching:
+  - `app/router.tsx` now lazy-loads every non-entry page with `React.lazy` + a `Suspense` fallback; the
+    landing page and app shell load eagerly.
+  - `vite.config.ts` gained `manualChunks` (React/Router, TanStack Query, zod). The entry chunk fell from
+    ~488 KB to **44 KB (11.7 KB gzip)**; screens split into 0.4–17 KB chunks and vendors cache separately.
+- [x] Plain-language vocabulary (`lib/status.ts`): new `reviewStateLabel`, `reviewReasonLabel`,
+    `reviewReasonHelp`, `decisionSourceLabel`, `severityLabel`, `stepStatusLabel` — the review queue, review
+    cards, run decision log, step list and inboxes no longer show raw enum tokens. New
+    `lib/status.test.ts` (7 tests) locks the vocabulary down.
+- [x] Explicit, safe actions:
+  - new `components/ConfirmDialog.tsx` — accessible (`role="alertdialog"`, `aria-modal`, autofocus, Escape,
+    backdrop click, busy state). It guards **dismiss a review case**, **delete a rule** and **replace the
+    active rule set**.
+  - new `components/ToastProvider.tsx` + `toast-context.ts` (`useToast`, mounted in `main.tsx`) — transient
+    success/error feedback, e.g. "Approved 1004.", "Rule set saved as version 3 and set active.". Accept and
+    override stay one click (review speed is a product goal).
+  - the Datasets screen now states plainly that uploads cannot be deleted yet, instead of implying cleanup.
+- [x] Review queue UX (fast, keyboard-first, explainable):
+  - `k`/`↑` previous and `Escape` cancel added to the existing `a`/`o`/`d`/`j`/`↓` shortcuts; a `?` cheat
+    sheet toggle; an item position counter ("3 of 12"); a "Why you are seeing this" explanation per reason;
+    and an ARIA live region announcing the selected case.
+  - inbox rows and headers use plain-language reason/state labels; the action area notes that accept/override
+    cannot be undone while dismiss keeps the automated result.
+- [x] Live run progress: new `components/RunProgress.tsx` merges the workflow's declared steps with whatever
+    the server has recorded, ticks an elapsed timer each second and renders a determinate/indeterminate
+    `ProgressBar`; shown on the run page while queued/running. (Steps are still persisted at completion, so
+    this is a derived, honest view — not fake streaming.)
+- [x] New UI primitives in `components/ui.tsx`: `Alert` and `ProgressBar`; tables on every list screen are
+    wrapped in `.table-scroll` with sticky headers.
+- [x] CSS polish layer (`styles/app.css`): refined tokens (surface-sunken, accent-soft, focus, larger radii,
+    layered shadows, `color-scheme: light`), typography/hierarchy, visible `:focus-visible` rings, coherent
+    button sizes + `button-danger`/`button-large`/`button-small`, table hover/sticky headers, alert, progress,
+    dialog, toast, run-progress, review-advice/shortcut-help, the full landing page, a mobile top bar, and a
+    `prefers-reduced-motion` + print override.
+- [x] Tests: +7 (303 total, 33 files) — `apps/web/src/lib/status.test.ts` (plain-language labels, reason
+    help fallbacks, tone mapping, actionable error rewrite).
+- [x] Verified: `npm run lint`, `npm run typecheck`, `npm test` (303/33), `npm run build` (entry 44 KB /
+    11.7 KB gzip, per-route chunks, no bundle-size warning). No API/backend code changed, so the smoke
+    script is unaffected.
+- [x] Docs: ADR-020, `docs/architecture.md` (new "Web experience (product surface)" section), README.
 
 ### Product session 10 — Security, reliability & production hardening (2026-09-17)
 
@@ -903,8 +974,9 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 32 files / 296 tests passed |
+| Tests | `npm test` | 33 files / 303 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
+| Web bundle | `npm run build -w @sheetpilot/web` | route-split: entry `index` 44 KB (11.7 KB gzip), vendors `react` 304 KB / `zod` 93 KB / `query` 46 KB (cacheable), 20 per-screen chunks 0.4–17 KB; no >500 KB warning |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV; saved-workflow dashboard, run-again (4/4 carried, config v2) and rule-set validation/save all green (re-verified session 10) |
 | File security (unit) | `npx vitest run packages/file-processing/src/security.test.ts` | 21 tests: filename hardening (reserved/illegal/long/path components), storage-key rejection of `../`/absolute/drive/NUL/`.`/empty keys + containment, `list` metadata, ZIP summaries, zip-bomb + entry-count rejection, cleanup-friendly memory storage |
 | API security & reliability (E2E) | `npx vitest run apps/api/src/security.test.ts` | 13 tests: API-key auth (missing/wrong/ok, health exempt), rate-limit `429` + `Retry-After`, security headers, error hygiene (no stack), idempotent `POST /runs` (same id, one run), stale-run recovery to `failed`, zip-bomb `422` with nothing stored, failed-ingest cleanup, retention sweep |
@@ -941,6 +1013,14 @@ an audit entry (what automation proposed, what changed, when) and rewrites the o
 matches the reviewed result. Throughout, a shared progress indicator shows where the user is in the journey
 (Set up → Rules → Process → Review → Export) and every stage is a real, resumable page. The legacy path
 (upload via `/files`, start a run with explicit file ids and the config form) still works.
+
+The app is now a **polished product surface**: `/` is a landing page and the workspace lives under
+`/dashboard`; every non-entry screen is code-split (entry chunk 44 KB / 11.7 KB gzip). Human-facing wording
+comes from one label module, so the review queue, run decision log and step list read "No matching records",
+"Rule-based", "Done" rather than enum tokens. Runs show **live progress** (expected + recorded steps, elapsed
+time, progress bar) while queued/running, hard-to-undo actions are confirmed and everything else reports via
+a toast. The review workspace is keyboard-first (`a`/`o`/`d`/`j`/`k`, `Esc`, `?` for the cheat sheet) with an
+ARIA live announcement of the selected case, and the layout is responsive with scrolling tables.
 
 Every run now **freezes a snapshot** of the configuration and rule-set versions it started with; the run
 summary shows them ("Reproducibility"), links straight to the run-scoped review queue, and offers the report
@@ -985,15 +1065,18 @@ the assisted paths.
 6. **Cancellation is internal only** — `RunService.cancelRun` exists but is not exposed as an endpoint.
 7. **XLSX reading/writing is buffered in memory** — fine for operational files, not for very large
    workbooks; the reader/writer interfaces already allow a streaming implementation later.
-8. **No polling progress** — runs show step-level results only after completion; per-step progress events
-   are not emitted yet.
+8. **Run progress is derived, not streamed** — steps are still persisted only when a run finishes, so the
+   run page shows the workflow's declared pipeline as "Waiting" plus a timer/progress bar until the run
+   completes (session 11 makes this honest and non-blocking; real per-step events would need a backend
+   change).
 9. **`duplicate_primary_key` rows still produce output rows** — both duplicate primary rows are written with
    the same classification and flagged `critical` for review (intentional: never silently drop input rows).
 10. **No auth, no tenancy, no rate limiting** — the API is intended for local/trusted deployment only.
 11. **Test fixtures depend on the `samples/` directory** — moving those files breaks
     `apps/api/src/fixtures.ts` and the account-faults test.
-12. **Bundle size warnings** — the web bundle is ~480 KB (143 KB gzip) with everything included; consider
-    route-level code splitting when the UI grows.
+12. **Web bundle is code-split per route** — the entry chunk is 44 KB (11.7 KB gzip) and vendors are
+    separate cacheable chunks; the remaining ~488 KB total is dominated by React + zod and is only paid once.
+    A further reduction would require trimming the shared contract/zod surface, not more route splitting.
 13. **Dataset inspection is bounded, so counts can be approximate.** The scan stops at
     `DATASET_MAX_SCAN_ROWS` (default 200,000); past that `rowCount` is a lower bound and the profile sets
     `truncated: true` (surfaced as a `truncated_scan` warning and a `+` in the UI). `uniqueCount` is
@@ -1161,6 +1244,19 @@ the assisted paths.
     means the defaults are not production-hardened.
 64. **Trust boundaries beyond HTTP/AI files are out of scope.** No SSRF hardening of `AI_BASE_URL` (operator
     controlled), no dependency/`npm audit` gate in CI, no container/OS hardening, no TLS termination.
+65. **The UI is only unit-tested, not browser-tested.** Session 11 polished many behaviours (router
+    splitting, confirmation dialogs, keyboard shortcuts, live progress) but there is still no Playwright/jsdom
+    component test, so the coverage for those is manual. Adding Playwright for the review and setup flows
+    remains the top test gap.
+66. **Deletion is not offered anywhere.** There is no delete/erasure API, so the Datasets screen now states
+    that uploads are kept rather than offering a cleanup action; a real delete flow (with confirmation and
+    cascade rules) depends on the deferred erasure endpoint.
+67. **Toasts and the review queue position are client state.** Feedback is in-memory (lost on reload) and the
+    dashboard's "latest run" still comes from a bounded scan; neither is a durability or scale concern at the
+    current single-user size.
+68. **The landing page is static product copy.** It describes the implemented five-stage journey and review
+    loop, but it is hand-written React rather than content-driven, so it must be updated by hand when the
+    product changes.
 
 ## 11. Technical Decisions
 
@@ -1287,7 +1383,7 @@ Not yet implemented (risks acknowledged — see `docs/security-review.md` for th
 
 ## 13. Testing
 
-**Status: 296 tests / 32 files passing (`npm test`).** Coverage by area:
+**Status: 303 tests / 33 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -1324,6 +1420,7 @@ Not yet implemented (risks acknowledged — see `docs/security-review.md` for th
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
+| UI vocabulary | `apps/web/src/lib/status.test.ts` | plain-language run/step labels, derived review state + reason labels, reason-help fallbacks (incl. an unknown reason), decision-source/severity labels, tone mapping unchanged, `describeRunError` rewriting common failures and passing through unknown ones |
 
 Missing (recommended next): Postgres repository integration tests (behind a `DATABASE_URL` gate, now
 including `datasets`, `workflow_configurations` and `run_decisions.decision_source`), rule engine
@@ -1336,7 +1433,10 @@ shuffling, a golden test over the default account-faults rule set, and a Playwri
 (validate → save → run uses it). The AI adapter contract, prompt-injection and history-redaction gaps are now
 closed (session 10). New security-focused gaps: a Postgres-gated test for durable idempotency, an upload
 fuzz/property test for the archive guard (including ZIP64), a brute-force/rate-limit boundary test, and a
-`npm audit`/dependency-scanning gate in CI.
+`npm audit`/dependency-scanning gate in CI. New web/UX gaps after session 11: there is still no
+browser-level test (Playwright) for the review keyboard flow, the confirmation dialogs, the lazy routes or
+the landing page; the label vocabulary and `describeRunError` added this session are unit-tested but the
+components that consume them are not.
 
 ## 14. Environment
 
@@ -1366,20 +1466,17 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 11: UI/UX & product polish** (queue `11-session.md`). The product is functionally complete
-through session 10 (security/reliability) and session 9 (saved workflows); session 11 is **UX only** — do not
-rewrite working backend logic. Audience: a nontechnical business user who understands spreadsheets. Work
-screen by screen (Landing, Dashboard, Create workflow, Upload, Column mapping, Rule configuration,
-Processing/run status, Run summary, Review queue, Individual review item, Export, Saved workflow) and apply
-the stated principles: the user always knows which step they are on and what the system is doing; errors say
-what happened and what to do next; automation decisions are explainable; review items are extremely fast to
-process; no gratuitous animation; tables usable on realistic datasets; destructive actions explicit;
-accessible and keyboard-friendly review; polished empty/loading/error/success states and confirmations; and
-improved typography, spacing, hierarchy, consistency and responsive behaviour. Verify with the existing
-four commands plus `npm run smoke` for anything API-affecting, and record real results here. Likely concrete
-gaps to check first: a true landing page (the app currently opens on the Dashboard), route-level code
-splitting for the ~575 KB web bundle, live run progress (runs show step results only after completion), and
-an explicit "delete/cleanup" confirmation flow given there is no delete API (see §10 / `docs/privacy.md`).
+**Product session 12: pick the next highest-value item.** The overnight queue ended at `11-session.md`, so
+choose from the deferred backlog below. The strongest candidates, in order: (1) verify Postgres for real by
+running the migrations and a memory-vs-Postgres parity suite behind a `DATABASE_URL` gate; (2) add a browser
+test layer (Playwright) for the review keyboard flow, the confirmation dialogs and the lazy routes - session
+11 improved these behaviours but only unit-tested the label vocabulary; (3) turn human corrections into rule
+suggestions by mining `review_resolutions` (`changedFields`) and proposing a rule draft in the Rules UI;
+(4) browsable immutable configuration/rule-set version history plus a "diff this run against the current
+rules" view (the run snapshot already makes this possible); and (5) a delete/erasure flow with confirmation
+for uploads and runs (the Datasets screen currently states deletion is not available). Verify with
+`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, plus `npm run smoke` for anything
+API-affecting, and record real results here.
 
 **Deferred backlog (still open from earlier sessions), roughly in priority order:** verify Postgres
 (`docker compose up -d postgres`, migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated memory↔Postgres
@@ -1388,7 +1485,7 @@ rule suggestions (mine `review_resolutions`); browsable immutable configuration/
 "diff this run against current rules" view; reviewer identity and reopening resolved items; per-configuration
 AI provider choice / token accounting / `decisionSource` filtering; streaming/chunked loading (the loader still
 reads whole files); scheduling/watched-folder ingestion; exposing identifier-normalization options through
-configuration; route-level code splitting for the web bundle.
+configuration.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,
@@ -1505,6 +1602,14 @@ configuration; route-level code splitting for the web bundle.
 - **Environment note:** this working copy was moved from `D:\deepseekmodeltestingforexcelproj` to
   `D:\ExcelProjectBydeepseek`; the workspace `node_modules/@sheetpilot/*` links had to be relinked with
   `npm install`. If module resolution fails after moving the repo again, re-run `npm install`.
+- **The web surface is a product, and its wording is centralised.** `/` is a landing page; the app lives at
+  `/dashboard`; every non-entry route is lazy-loaded in `app/router.tsx` (keep new pages lazy; do not
+  statically import them into the router). All human-facing wording lives in `lib/status.ts` (labels + help
+  text) - never render a raw enum token, and add a new review reason/state there as well as in `core`.
+  Hard-to-undo actions (dismissing a review case, deleting a rule, replacing the active rule set) go through
+  `components/ConfirmDialog.tsx`; transient outcomes go through `useToast()`. `RunProgress` is a derived view
+  (steps persist only when a run completes) - do not fake per-step streaming in the client. Keep `web` free
+  of Node-only imports, preserve visible focus rings, and keep the review flow keyboard-accessible.
 - **Files a new agent should read first:** this file → `docs/architecture.md` →
   `packages/core/src/domain/entities.ts` + `packages/core/src/domain/dataset.ts` +
   `packages/core/src/domain/workflow-config.ts` + `packages/core/src/domain/ai.ts` →
@@ -1541,3 +1646,5 @@ configuration; route-level code splitting for the web bundle.
 | Product 8 | 2026-09-16 | End-to-end workflow experience & run reproducibility: immutable `RunSnapshot` (frozen configuration + rule set) + `RunSnapshotRepository` + `run_snapshots` table (migration `0005`), `RunService` captures at creation and executes the snapshot, `GET /api/v1/runs/:id/snapshot` + snapshot summary on run DTOs, shared `WorkflowProgress` journey stepper + plain-language statuses/error help, run summary dashboard linking to the run-scoped review queue and report, `samples/field-service` fixtures, +10 tests (245 total). Verified: lint/typecheck/245 tests/build/smoke (snapshot frozen; full journey incl. reproducibility). |
 | Product 9 | 2026-09-16 | Saved workflows & the daily-report experience: reusable `SavedWorkflow` aggregate + pure `rebindConfiguration` (carry mappings by column name), `SavedWorkflowService`/`/api/v1/saved-workflows` (dashboard, read-only prepare, run-again with optional version save), `RunService` `configurationOverride` so one-off re-points freeze what they used, `exportStatusSchema` in core, Saved workflows dashboard + detail + Run again pages and Dashboard/nav/home updates, +13 tests (258 total). Verified: lint/typecheck/258 tests/build/smoke (dashboard, 4/4 carried mappings, run-again saved config v2). |
 | Product 10 | 2026-09-17 | Security, reliability & production hardening: hardened filename sanitisation + containment-proof storage paths + `FileStorage.list`; XLSX ZIP central-directory zip-bomb guard; ingestion cleanup-on-failure + `RetentionService` upload sweep; optional `API_KEY`, per-IP rate limit, security headers, body/multipart limits, `TRUST_PROXY`, no 5xx detail leakage, CORS credentials off; pino credential redaction; run double-execute guard + `recoverStaleRuns()` + `IdempotencyService` on `POST /runs`; AI prompt-injection/prototype-key/history-redaction + loopback adapter contract tests; new `docs/privacy.md`, `docs/security-review.md` (21 findings), ADR-019; +38 tests (296 total). Verified: lint/typecheck/296 tests/build/smoke. |
+
+| Product 11 | 2026-09-17 | UI/UX & product polish: landing page at `/` + dashboard at `/dashboard`, route-level code splitting with vendor chunks (entry 44 KB / 11.7 KB gzip), plain-language label module (`lib/status.ts`) used across the app, explicit `ConfirmDialog` for dismiss/delete/replace + `ToastProvider` feedback, live derived run progress, keyboard-first review (a/o/d/j/k, Esc, `?` cheat sheet, ARIA live), CSS polish layer (tokens, focus rings, tables, responsive, reduced motion), +7 tests (303 total). Verified: lint/typecheck/303 tests/build. |

@@ -153,3 +153,57 @@ export function KeyValue({ items }: { items: Array<{ label: string; value: React
     </dl>
   );
 }
+
+/**
+ * A short, non-blocking message. `tone` drives the colour; `role` picks the right ARIA semantics
+ * (errors are assertive, everything else is polite).
+ */
+export function Alert({
+  tone = 'info',
+  title,
+  children,
+  actions,
+}: {
+  tone?: 'info' | 'success' | 'warning' | 'danger';
+  title?: string;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className={`alert alert-${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>
+      <div className="alert-text">
+        {title ? <strong>{title}</strong> : null}
+        <div>{children}</div>
+      </div>
+      {actions ? <div className="alert-actions">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** A slim progress bar. Omit `value` for an indeterminate "working" state. */
+export function ProgressBar({
+  value,
+  label,
+  indeterminate = false,
+}: {
+  value?: number;
+  label?: string;
+  indeterminate?: boolean;
+}) {
+  const clamped = value === undefined ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <div className="progress">
+      <div
+        className={indeterminate ? 'progress-track progress-indeterminate' : 'progress-track'}
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={indeterminate ? undefined : 0}
+        aria-valuemax={indeterminate ? undefined : 100}
+        aria-valuenow={indeterminate ? undefined : clamped}
+      >
+        {indeterminate ? null : <div className="progress-fill" style={{ width: `${clamped}%` }} />}
+      </div>
+      {label ? <span className="progress-label">{label}</span> : null}
+    </div>
+  );
+}

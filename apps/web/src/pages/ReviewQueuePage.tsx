@@ -7,10 +7,20 @@ import {
   REVIEW_FILTER_DEFINITIONS,
 } from '@sheetpilot/core';
 import { useResolveReviewItem, useReviewHistory, useReviewQueue } from '../api/hooks.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui.js';
 import { WorkflowProgress } from '../components/WorkflowProgress.js';
-import { formatCellValue, formatDateTime, humanizeToken } from '../lib/format.js';
-import { reviewStateTone, severityTone } from '../lib/status.js';
+import { useToast } from '../components/toast-context.js';
+import { formatCellValue, formatDateTime } from '../lib/format.js';
+import {
+  decisionSourceLabel,
+  reviewReasonHelp,
+  reviewReasonLabel,
+  reviewStateLabel,
+  reviewStateTone,
+  severityLabel,
+  severityTone,
+} from '../lib/status.js';
 
 function outputFieldsFor(item: ReviewItemDto): string[] {
   const fields = new Set<string>([
@@ -136,12 +146,14 @@ export function ReviewQueuePage() {
                 >
                   <span className="inbox-row-top">
                     <span className="mono inbox-entity">{item.entityKey}</span>
-                    <Badge tone={severityTone(item.severity)}>{humanizeToken(item.reason)}</Badge>
+                    <Badge tone={severityTone(item.severity)}>
+                      {reviewReasonLabel(item.reason)}
+                    </Badge>
                   </span>
                   <span className="inbox-row-sub">
                     {item.automation.confidence === null
                       ? 'No automated confidence'
-                      : `${Math.round(item.automation.confidence * 100)}% · ${humanizeToken(
+                      : `${Math.round(item.automation.confidence * 100)}% · ${decisionSourceLabel(
                           item.automation.decisionSource,
                         )}`}
                   </span>
@@ -153,6 +165,12 @@ export function ReviewQueuePage() {
           <ReviewDetail key={selected.id} item={selected} items={items} onSelect={setSelectedId} />
         </div>
       ) : null}
+
+      <p className="sr-only" aria-live="polite">
+        {selected
+          ? `Showing ${selected.entityKey}: ${reviewReasonLabel(selected.reason)}.`
+          : 'No cases match this filter.'}
+      </p>
     </div>
   );
 }
@@ -168,19 +186,23 @@ function ReviewDetail({
 }) {
   const resolve = useResolveReviewItem();
   const history = useReviewHistory(item.id);
+  const toast = useToast();
   const [mode, setMode] = useState<'idle' | 'overriding'>('idle');
   const [note, setNote] = useState('');
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [newField, setNewField] = useState('');
+  const [confirmingDismiss, setConfirmingDismiss] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const fields = useMemo(() => outputFieldsFor(item), [item]);
   const isOpen = item.status === 'open';
   const ai = item.ai;
 
-  const nextId = (() => {
-    const index = items.findIndex((entry) => entry.id === item.id);
-    return items[index + 1]?.id ?? items.find((entry) => entry.id !== item.id)?.id ?? null;
-  })();
+  const currentIndex = items.findIndex((entry) => entry.id === item.id);
+  const nextId =
+    items[currentIndex + 1]?.id ?? items.find((entry) => entry.id !== item.id)?.id ?? null;
+  const prevId =
+    currentIndex > 0 ? (items[currentIndex - 1]?.id ?? null) : (items.at(-1)?.id ?? null);
 
   const submit = (
     action: 'accepted' | 'overridden' | 'dismissed',
@@ -190,10 +212,19 @@ function ReviewDetail({
       { id: item.id, body: { action, values: values ?? {}, note } },
       {
         onSuccess: () => {
+          const verb =
+            action === 'accepted' ? 'Approved' : action === 'overridden' ? 'Overrode' : 'Dismissed';
+          toast.show(`${verb} ${item.entityKey}.`, action === 'dismissed' ? 'info' : 'success');
           setNote('');
           setOverrides({});
           setMode('idle');
           onSelect(nextId ?? item.id);
+        },
+        onError: (error) => {
+          toast.show(
+            error instanceof Error ? error.message : 'The decision could not be saved.',
+            'danger',
+          );
         },
       },
     );
@@ -204,8 +235,25 @@ function ReviewDetail({
       return;
     }
     const handler = (event: KeyboardEvent) => {
+      if (confirmingDismiss || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
       const target = event.target as HTMLElement | null;
-      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+      const typing = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+      if (event.key === 'Escape') {
+        if (mode === 'overriding') {
+          setMode('idle');
+        } else if (showHelp) {
+          setShowHelp(false);
+        }
+        return;
+      }
+      if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
+        event.preventDefault();
+        setShowHelp((current) => !current);
+        return;
+      }
+      if (typing) {
         return;
       }
       if (event.key === 'a') {
@@ -213,15 +261,18 @@ function ReviewDetail({
       } else if (event.key === 'o') {
         setMode('overriding');
       } else if (event.key === 'd') {
-        submit('dismissed');
+        setConfirmingDismiss(true);
       } else if ((event.key === 'j' || event.key === 'ArrowDown') && nextId) {
         onSelect(nextId);
+      } else if ((event.key === 'k' || event.key === 'ArrowUp') && prevId) {
+        onSelect(prevId);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+    // submit is stable enough for this scope; the handlers are re-bound on the values they read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, nextId, note]);
+  }, [isOpen, nextId, prevId, note, mode, confirmingDismiss, showHelp]);
 
   const valueFor = (field: string): string =>
     overrides[field] ?? String(item.suggestedValues[field] ?? item.automation.values[field] ?? '');
@@ -243,28 +294,51 @@ function ReviewDetail({
         <div>
           <span className="entity-key">{item.entityKey}</span>
           <div className="review-card-badges">
-            <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
-            <Badge tone={severityTone(item.severity)}>{humanizeToken(item.reason)}</Badge>
+            <Badge tone={reviewStateTone(item.state)}>{reviewStateLabel(item.state)}</Badge>
+            <Badge tone={severityTone(item.severity)}>{severityLabel(item.severity)}</Badge>
+            <Badge tone={severityTone(item.severity)}>{reviewReasonLabel(item.reason)}</Badge>
             {item.workflowSlug ? <span className="muted">{item.workflowSlug}</span> : null}
           </div>
         </div>
         <div className="review-card-meta">
+          <span className="review-position">
+            {currentIndex >= 0 ? `${currentIndex + 1} of ${items.length}` : null}
+          </span>
           <span>{formatDateTime(item.createdAt)}</span>
           <Link className="link" to={`/runs/${item.runId}`}>
             Open run
           </Link>
+          <button
+            type="button"
+            className="button button-ghost small"
+            aria-expanded={showHelp}
+            onClick={() => setShowHelp((current) => !current)}
+          >
+            Shortcuts
+          </button>
         </div>
       </header>
 
+      {showHelp ? (
+        <div className="shortcut-help" role="note">
+          <kbd>a</kbd> accept · <kbd>o</kbd> override · <kbd>d</kbd> dismiss · <kbd>j</kbd>/
+          <kbd>↓</kbd> next · <kbd>k</kbd>/<kbd>↑</kbd> previous · <kbd>Esc</kbd> cancel ·{' '}
+          <kbd>?</kbd> toggle this help
+        </div>
+      ) : null}
+
       <p className="review-card-title">{item.title}</p>
       <p className="review-card-detail">{item.detail}</p>
+      <p className="review-advice">
+        <strong>Why you are seeing this:</strong> {reviewReasonHelp(item.reason)}
+      </p>
 
       <div className="review-detail-grid">
         <div className="review-panel">
           <h3>Automation result</h3>
           <KeyValueList
             items={[
-              ['Source', humanizeToken(item.automation.decisionSource)],
+              ['Source', decisionSourceLabel(item.automation.decisionSource)],
               [
                 'Confidence',
                 item.automation.confidence === null
@@ -458,7 +532,7 @@ function ReviewDetail({
                   type="button"
                   className="button button-ghost"
                   disabled={resolve.isPending}
-                  onClick={() => submit('dismissed')}
+                  onClick={() => setConfirmingDismiss(true)}
                 >
                   Dismiss
                 </button>
@@ -469,15 +543,15 @@ function ReviewDetail({
                 ) : null}
               </div>
               <p className="muted small">
-                Shortcuts: <kbd>a</kbd> accept · <kbd>o</kbd> override · <kbd>d</kbd> dismiss ·{' '}
-                <kbd>j</kbd> next
+                Accepting or overriding updates the report and cannot be undone. Dismiss leaves the
+                automated result in place.
               </p>
             </>
           )}
         </div>
       ) : (
         <div className="resolution">
-          <Badge tone={reviewStateTone(item.state)}>{humanizeToken(item.state)}</Badge>
+          <Badge tone={reviewStateTone(item.state)}>{reviewStateLabel(item.state)}</Badge>
           {item.resolution?.note ? <span className="muted">{item.resolution.note}</span> : null}
           <span className="muted">{formatDateTime(item.resolvedAt)}</span>
         </div>
@@ -488,7 +562,8 @@ function ReviewDetail({
         {history.isLoading ? <span className="muted small">Loading history…</span> : null}
         {history.isSuccess && history.data.items.length === 0 ? (
           <p className="muted small">
-            No human decision yet. {humanizeToken(item.automation.decisionSource)} decided this case
+            No human decision yet —{' '}
+            {decisionSourceLabel(item.automation.decisionSource).toLowerCase()} decided this case
             automatically.
           </p>
         ) : null}
@@ -496,7 +571,7 @@ function ReviewDetail({
           <div key={entry.id} className="audit-entry">
             <div>
               <Badge tone={reviewStateTone(entry.resultingState)}>
-                {humanizeToken(entry.action)}
+                {reviewStateLabel(entry.resultingState)}
               </Badge>
               <span className="muted small">{formatDateTime(entry.createdAt)}</span>
             </div>
@@ -522,6 +597,19 @@ function ReviewDetail({
           </div>
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmingDismiss}
+        title={`Dismiss ${item.entityKey}?`}
+        description="The automated result stays in the report, but this case will no longer ask for a human decision. Dismissing cannot be undone from the app."
+        confirmLabel="Dismiss case"
+        busy={resolve.isPending}
+        onCancel={() => setConfirmingDismiss(false)}
+        onConfirm={() => {
+          setConfirmingDismiss(false);
+          submit('dismissed');
+        }}
+      />
     </section>
   );
 }

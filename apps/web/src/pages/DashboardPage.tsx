@@ -1,7 +1,23 @@
 import { Link } from 'react-router-dom';
-import { useDatasets, useHealth, useMeta, useReviewQueue, useRuns, useSavedWorkflows, useWorkflows } from '../api/hooks.js';
+import {
+  useDatasets,
+  useHealth,
+  useMeta,
+  useReviewQueue,
+  useRuns,
+  useSavedWorkflows,
+  useWorkflows,
+} from '../api/hooks.js';
 import { SavedWorkflowsTable } from '../components/SavedWorkflowsTable.js';
-import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader, StatCard } from '../components/ui.js';
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  StatCard,
+} from '../components/ui.js';
 import { runStatusLabel, statusTone } from '../lib/status.js';
 import { PIPELINE_STAGES } from '../lib/pipeline.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
@@ -79,7 +95,7 @@ export function DashboardPage() {
                 View all
               </Link>
             ) : null}
-            <Link className="button button-small" to="/setup">
+            <Link className="button small" to="/setup">
               New
             </Link>
           </>

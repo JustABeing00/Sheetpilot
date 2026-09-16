@@ -49,65 +49,70 @@ export function WorkflowDetailPage() {
       </Card>
 
       <Card title="Configuration options" subtitle="Exposed to every run of this workflow">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Key</th>
-              <th>Label</th>
-              <th>Kind</th>
-              <th>Default</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {definition.configFields.map((field) => (
-              <tr key={field.key}>
-                <td className="mono small">{field.key}</td>
-                <td>{field.label}</td>
-                <td>{field.kind}</td>
-                <td className="mono small">{formatCellValue(field.defaultValue)}</td>
-                <td className="small muted">{field.description}</td>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Label</th>
+                <th>Kind</th>
+                <th>Default</th>
+                <th>Description</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {definition.configFields.map((field) => (
+                <tr key={field.key}>
+                  <td className="mono small">{field.key}</td>
+                  <td>{field.label}</td>
+                  <td>{field.kind}</td>
+                  <td className="mono small">{formatCellValue(field.defaultValue)}</td>
+                  <td className="small muted">{field.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <Card
         title={`Rule set: ${definition.ruleSet.name}`}
         subtitle={`Version ${definition.ruleSet.version} · evaluated by priority, then specificity, then rule id`}
       >
-        <table className="table table-rules">
-          <thead>
-            <tr>
-              <th>Priority</th>
-              <th>Rule</th>
-              <th>When</th>
-              <th>Then</th>
-              <th>Confidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {definition.ruleSet.rules.map((rule) => (
-              <tr key={rule.id}>
-                <td className="mono">{rule.priority}</td>
-                <td>
-                  <strong>{rule.name}</strong>
-                  <div className="mono small muted">{rule.id}</div>
-                </td>
-                <td className="small">{describeCondition(rule.when)}</td>
-                <td className="small">
-                  {rule.then.map((action) => (
-                    <div key={`${rule.id}-${action.field}`}>
-                      <span className="mono">{action.field}</span> = {formatCellValue(action.value)}
-                    </div>
-                  ))}
-                </td>
-                <td>{Math.round(rule.confidence * 100)}%</td>
+        <div className="table-scroll">
+          <table className="table table-rules">
+            <thead>
+              <tr>
+                <th>Priority</th>
+                <th>Rule</th>
+                <th>When</th>
+                <th>Then</th>
+                <th>Confidence</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {definition.ruleSet.rules.map((rule) => (
+                <tr key={rule.id}>
+                  <td className="mono">{rule.priority}</td>
+                  <td>
+                    <strong>{rule.name}</strong>
+                    <div className="mono small muted">{rule.id}</div>
+                  </td>
+                  <td className="small">{describeCondition(rule.when)}</td>
+                  <td className="small">
+                    {rule.then.map((action) => (
+                      <div key={`${rule.id}-${action.field}`}>
+                        <span className="mono">{action.field}</span> ={' '}
+                        {formatCellValue(action.value)}
+                      </div>
+                    ))}
+                  </td>
+                  <td>{Math.round(rule.confidence * 100)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
 
       <Card title="Run configuration reference">

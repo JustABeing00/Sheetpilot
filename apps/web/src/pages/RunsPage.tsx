@@ -38,45 +38,47 @@ export function RunsPage() {
           />
         ) : null}
         {runs.isSuccess && runs.data.items.length > 0 ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Run</th>
-                <th>Workflow</th>
-                <th>Status</th>
-                <th>Records</th>
-                <th>Auto-resolved</th>
-                <th>Review</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.data.items.map((run) => (
-                <tr key={run.id}>
-                  <td>
-                    <Link className="link mono" to={`/runs/${run.id}`}>
-                      {run.id.slice(0, 8)}
-                    </Link>
-                  </td>
-                  <td>
-                    <div>{run.workflowName}</div>
-                    <div className="muted small">
-                      {run.primaryFileName ?? 'primary'} → {run.eventsFileName ?? 'events'}
-                    </div>
-                  </td>
-                  <td>
-                    <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
-                  </td>
-                  <td>{run.stats['accounts'] ?? '—'}</td>
-                  <td>{formatPercent(run.stats['autoApprovalRate'])}</td>
-                  <td>
-                    {run.openReviewItemCount} open / {run.reviewItemCount}
-                  </td>
-                  <td>{formatDateTime(run.createdAt)}</td>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Workflow</th>
+                  <th>Status</th>
+                  <th>Records</th>
+                  <th>Auto-resolved</th>
+                  <th>Review</th>
+                  <th>Created</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.data.items.map((run) => (
+                  <tr key={run.id}>
+                    <td>
+                      <Link className="link mono" to={`/runs/${run.id}`}>
+                        {run.id.slice(0, 8)}
+                      </Link>
+                    </td>
+                    <td>
+                      <div>{run.workflowName}</div>
+                      <div className="muted small">
+                        {run.primaryFileName ?? 'primary'} → {run.eventsFileName ?? 'events'}
+                      </div>
+                    </td>
+                    <td>
+                      <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
+                    </td>
+                    <td>{run.stats['accounts'] ?? '—'}</td>
+                    <td>{formatPercent(run.stats['autoApprovalRate'])}</td>
+                    <td>
+                      {run.openReviewItemCount} open / {run.reviewItemCount}
+                    </td>
+                    <td>{formatDateTime(run.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
       </Card>
     </div>

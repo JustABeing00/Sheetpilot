@@ -351,6 +351,35 @@ repeated `Idempotency-Key` (in-process). Observability: structured pino logs car
 file contents) and redact credential-shaped fields. The full review and remaining risks live in
 [`security-review.md`](./security-review.md); data handling lives in [`privacy.md`](./privacy.md).
 
+## Web experience (product surface)
+
+The SPA is the product surface for a nontechnical spreadsheet user, so the app is organized around a single,
+resumable journey rather than around API resources.
+
+- **Entry.** `/` is a standalone landing page (value proposition, the five journey stages, capabilities,
+  CTA). The working app lives under `/dashboard` inside the app shell. Every other screen is a real route.
+- **Shell.** `components/AppShell.tsx` provides one sidebar navigation, an API/health indicator, the runtime
+  configuration and a live open-review counter; it offers a skip link and a single `<main>` landmark, and
+  collapses to a horizontally scrollable top bar on small screens.
+- **Journey awareness.** `components/WorkflowProgress.tsx` + `lib/pipeline.ts` render the shared
+  Set up -> Rules -> Process -> Review -> Export stepper on every stage, and each stage is a resumable page.
+- **Plain language.** `lib/status.ts` owns every human-facing label (run/step/export status, derived review
+  state, review reason, decision source, severity) plus `describeRunError`, so no internal enum token reaches
+  the user and terminology stays consistent. It is unit-tested.
+- **In-flight feedback.** `components/RunProgress.tsx` shows expected pipeline steps (from the workflow
+  definition) merged with whatever the server has recorded, an elapsed timer and a determinate/indeterminate
+  progress bar while a run is queued or running; run pages poll and stop polling once terminal.
+- **Explicit, safe actions.** `components/ConfirmDialog.tsx` guards the hard-to-undo actions (dismiss a
+  review case, delete a rule, replace the active rule set); `components/ToastProvider.tsx` reports outcomes;
+  `components/ui.tsx` provides `Alert`, `ProgressBar`, `EmptyState`, `LoadingState`, `ErrorState` and
+  `StatCard`. Reversible, high-frequency review actions (accept/override) stay one click and are audited.
+- **Review ergonomics.** The review queue is a master/detail workspace with filter chips and counts, a
+  keyboard cheat sheet (`?`), `a`/`o`/`d`/`j`/`k` shortcuts, an ARIA live region announcing the selected
+  case, an explanation of *why* each case needs a human, and the full automation/evidence/audit context.
+- **Performance & a11y baseline.** Routes are lazy-loaded and vendor libraries are manual chunks
+  (`vite.config.ts`), real tables scroll inside `.table-scroll` with sticky headers, focus is always visible,
+  and `prefers-reduced-motion` disables animation.
+
 ## Extension points for later sessions
 
 | Need | Where to plug in |

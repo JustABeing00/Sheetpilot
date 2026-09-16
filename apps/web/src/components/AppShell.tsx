@@ -1,8 +1,8 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useHealth, useMeta, useReviewQueue } from '../api/hooks.js';
 
 const navigation = [
-  { to: '/', label: 'Dashboard', end: true },
+  { to: '/dashboard', label: 'Dashboard', end: true },
   { to: '/saved-workflows', label: 'Saved workflows' },
   { to: '/datasets', label: 'Datasets' },
   { to: '/setup', label: 'Setup' },
@@ -22,16 +22,22 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
+
       <aside className="sidebar">
-        <div className="sidebar-brand">
-          <span className="brand-mark">SP</span>
-          <div>
+        <Link className="sidebar-brand" to="/dashboard">
+          <span className="brand-mark" aria-hidden="true">
+            SP
+          </span>
+          <span>
             <strong>SheetPilot</strong>
             <span className="brand-subtitle">Recurring spreadsheet workflows</span>
-          </div>
-        </div>
+          </span>
+        </Link>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Primary">
           {navigation.map((item) => (
             <NavLink
               key={item.to}
@@ -41,15 +47,17 @@ export function AppShell() {
             >
               <span>{item.label}</span>
               {item.to === '/review' && openCount > 0 ? (
-                <span className="nav-count">{openCount}</span>
+                <span className="nav-count" aria-label={`${openCount} waiting for review`}>
+                  {openCount}
+                </span>
               ) : null}
             </NavLink>
           ))}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="status-line">
-            <span className={online ? 'dot dot-online' : 'dot dot-offline'} />
+          <div className="status-line" role="status">
+            <span className={online ? 'dot dot-online' : 'dot dot-offline'} aria-hidden="true" />
             {online ? 'API connected' : 'API unreachable'}
           </div>
           <dl className="meta-list">
@@ -75,7 +83,7 @@ export function AppShell() {
         </div>
       </aside>
 
-      <main className="content">
+      <main id="main" className="content">
         <Outlet />
       </main>
     </div>

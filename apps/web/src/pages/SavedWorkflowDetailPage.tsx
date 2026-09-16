@@ -181,47 +181,49 @@ export function SavedWorkflowDetailPage() {
               }
             />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Status</th>
-                  <th>Records</th>
-                  <th>Review</th>
-                  <th>Report</th>
-                </tr>
-              </thead>
-              <tbody>
-                {saved.recentRuns.map((run) => (
-                  <tr key={run.id}>
-                    <td>
-                      <Link className="link mono" to={`/runs/${run.id}`}>
-                        {run.id.slice(0, 8)}
-                      </Link>
-                      <div className="muted small">{formatDateTime(run.createdAt)}</div>
-                    </td>
-                    <td>
-                      <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
-                    </td>
-                    <td>{run.recordsProcessed}</td>
-                    <td>
-                      {run.reviewItemCount === 0 ? (
-                        <span className="muted">none</span>
-                      ) : (
-                        <Link className="link" to={`/review?runId=${run.id}`}>
-                          {run.openReviewItemCount} open / {run.reviewItemCount}
-                        </Link>
-                      )}
-                    </td>
-                    <td>
-                      <Badge tone={exportStatusTone(run.exportStatus)}>
-                        {exportStatusLabel(run.exportStatus)}
-                      </Badge>
-                    </td>
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Status</th>
+                    <th>Records</th>
+                    <th>Review</th>
+                    <th>Report</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {saved.recentRuns.map((run) => (
+                    <tr key={run.id}>
+                      <td>
+                        <Link className="link mono" to={`/runs/${run.id}`}>
+                          {run.id.slice(0, 8)}
+                        </Link>
+                        <div className="muted small">{formatDateTime(run.createdAt)}</div>
+                      </td>
+                      <td>
+                        <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
+                      </td>
+                      <td>{run.recordsProcessed}</td>
+                      <td>
+                        {run.reviewItemCount === 0 ? (
+                          <span className="muted">none</span>
+                        ) : (
+                          <Link className="link" to={`/review?runId=${run.id}`}>
+                            {run.openReviewItemCount} open / {run.reviewItemCount}
+                          </Link>
+                        )}
+                      </td>
+                      <td>
+                        <Badge tone={exportStatusTone(run.exportStatus)}>
+                          {exportStatusLabel(run.exportStatus)}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       </div>

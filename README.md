@@ -35,7 +35,7 @@ for the architecture deep dive.
 ```
 apps/
   api/                 Fastify HTTP API (application layer, composition root, services, routes)
-  web/                 React + Vite single-page app (dashboard, saved workflows, datasets, setup, runs, review queue)
+  web/                 React + Vite single-page app (landing page + dashboard, saved workflows, datasets, setup, runs, review queue, rules)
 packages/
   core/                Domain model, zod schemas, API contracts, ports (zero runtime deps except zod)
   config/              Typed environment loading/validation (fail-fast, no secrets in code)
@@ -62,7 +62,8 @@ npm run dev:api
 npm run dev:web
 ```
 
-Open http://localhost:5173, go to **New run**, upload
+Open http://localhost:5173 for the **landing page** (an overview of the product and the five-stage
+journey), then **Open the app** to reach the dashboard. From there, go to **New run**, upload
 `samples/account-faults/primary_accounts.csv` and `samples/account-faults/fault_events.csv`, and start
 the run. You should get 10 output rows, 2 auto-approved accounts, 7 review items and 3 artifacts
 (CSV, XLSX, review queue CSV).
@@ -185,6 +186,20 @@ saved workflow remembers its dataset roles, column mappings, matching/latest-rec
 output/review options; creating a new one from scratch is the existing Setup flow. Scheduling,
 authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
 prioritized next steps.
+
+The web app is a polished product surface rather than a data console. `/` is a landing page that explains the
+product and the five-stage journey; the working app lives under `/dashboard`. Every screen is a real route
+and is **code-split per route** (the entry shell and the framework libraries are separate, cacheable
+chunks). The user always knows which step they are on — a shared Set up → Rules → Process → Review → Export
+stepper appears on every stage — and what the system is doing: an in-flight run shows its expected pipeline
+steps, an elapsed timer and a progress bar while it processes. All human-facing wording goes through one
+label module, so internal tokens never reach the screen, and errors are rewritten into "what happened and
+what to do next". Hard-to-undo actions (dismissing a review case, deleting a rule, replacing the active rule
+set) require an explicit confirmation; everything else reports success through a transient toast. The review
+workspace stays fast: filter chips with live counts, a keyboard cheat sheet (`?`), `a`/`o`/`d`/`j`/`k`
+shortcuts, ARIA live announcements and the full automation/evidence/audit context. Accessibility and
+performance are baseline: visible focus rings, a skip link, one `<main>` landmark, scrolling tables with
+sticky headers, and a `prefers-reduced-motion` override.
 
 ## Security and privacy
 
