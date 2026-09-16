@@ -14,6 +14,22 @@ async function main(): Promise<void> {
   const app = buildServer(container, { startedAt, loggerInstance: logger });
 
   try {
+    await container.retentionService.sweep();
+    container.retentionService.start();
+  } catch (error) {
+    logger.warn({ err: error }, 'initial retention sweep failed');
+  }
+
+  if (!config.security.apiKey) {
+    logger.warn(
+      'API_KEY is not set: the API has no authentication and must only be reachable from a trusted network',
+    );
+  }
+  if (config.isProduction && config.corsOrigins.includes('http://localhost:5173')) {
+    logger.warn('CORS_ORIGIN still allows the development origin in production');
+  }
+
+  try {
     await app.listen({ host: config.host, port: config.port });
     logger.info(
       { envFiles, port: config.port, host: config.host, version: APP_VERSION },

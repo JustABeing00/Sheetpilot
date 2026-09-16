@@ -6,6 +6,10 @@ export interface StoredObject {
   checksum: string;
 }
 
+export interface StoredObjectInfo extends StoredObject {
+  modifiedAt: Date;
+}
+
 export interface FileStorage {
   readonly driver: string;
   put(key: string, data: Readable | Buffer | string): Promise<StoredObject>;
@@ -13,4 +17,6 @@ export interface FileStorage {
   getBuffer(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
   remove(key: string): Promise<void>;
+  /** Lists stored objects (optionally under a key prefix). Used by retention/maintenance jobs. */
+  list(prefix?: string): Promise<StoredObjectInfo[]>;
 }

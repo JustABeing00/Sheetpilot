@@ -3,6 +3,7 @@ export * from './normalize.js';
 export * from './inference.js';
 export * from './inspection.js';
 export * from './upload.js';
+export * from './archive.js';
 export * from './registry.js';
 export * from './readers/tabular-reader.js';
 export * from './readers/csv-reader.js';

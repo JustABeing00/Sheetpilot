@@ -27,6 +27,34 @@ const TABULAR_MIME_TYPES = new Set([
 
 const ZIP_MAGIC = [0x50, 0x4b];
 
+/** Windows reserved device names cannot exist as files even with an extension. */
+const WINDOWS_RESERVED_NAMES = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  'com1',
+  'com2',
+  'com3',
+  'com4',
+  'com5',
+  'com6',
+  'com7',
+  'com8',
+  'com9',
+  'lpt1',
+  'lpt2',
+  'lpt3',
+  'lpt4',
+  'lpt5',
+  'lpt6',
+  'lpt7',
+  'lpt8',
+  'lpt9',
+]);
+
+const MAX_DISPLAY_NAME_LENGTH = 120;
+
 export interface UploadCandidate {
   fileName: string;
   mimeType: string;
@@ -52,16 +80,44 @@ function stripControlCharacters(value: string): string {
   return result;
 }
 
+function truncateName(name: string, maxLength: number): string {
+  if (name.length <= maxLength) {
+    return name;
+  }
+  const dot = name.lastIndexOf('.');
+  const extension = dot > 0 && name.length - dot <= 12 ? name.slice(dot) : '';
+  const stem = extension ? name.slice(0, dot) : name;
+  const keep = Math.max(1, maxLength - extension.length);
+  return `${stem.slice(0, keep)}${extension}`;
+}
+
 /**
  * Reduces an untrusted upload name to a safe basename: strips directory components (both separators),
- * control characters and NUL bytes. The result is used for display only; storage keys are generated
- * from internal ids and never from user input.
+ * control characters and NUL bytes, removes characters Windows forbids, bounds the length and neutralises
+ * reserved device names. The result is used for display only; storage keys are generated from internal
+ * ids and never from user input.
  */
 export function sanitizeFileName(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, '/');
+  const normalized = String(fileName ?? '').replace(/\\/g, '/');
   const base = normalized.slice(normalized.lastIndexOf('/') + 1);
-  const cleaned = stripControlCharacters(base).trim();
-  return cleaned.length > 0 ? cleaned : 'upload';
+  const cleaned = stripControlCharacters(base)
+    .replace(/[<>:"|?*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    // Windows silently strips leading/trailing dots and spaces; do it explicitly.
+    .replace(/^[.\s]+/, '')
+    .replace(/[.\s]+$/, '');
+
+  if (cleaned.length === 0) {
+    return 'upload';
+  }
+
+  const safe = truncateName(cleaned, MAX_DISPLAY_NAME_LENGTH);
+  const stem = safe.includes('.') ? safe.slice(0, safe.lastIndexOf('.')) : safe;
+  if (WINDOWS_RESERVED_NAMES.has(stem.toLowerCase())) {
+    return `_${safe}`;
+  }
+  return safe;
 }
 
 function extensionOf(fileName: string): string {

@@ -47,8 +47,20 @@ export const envSourceSchema = z.object({
   STORAGE_DRIVER: storageDriverSchema.default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/storage'),
   MAX_UPLOAD_MB: z.coerce.number().min(0.1).max(1024).default(50),
+  JSON_BODY_LIMIT_MB: z.coerce.number().min(0.1).max(100).default(2),
+  MAX_XLSX_UNCOMPRESSED_MB: z.coerce.number().min(1).max(4096).default(512),
+  MAX_XLSX_ENTRIES: z.coerce.number().int().min(100).max(200_000).default(20_000),
+  RETENTION_UPLOAD_TTL_HOURS: z.coerce.number().min(0.1).max(8760).default(168),
+  RETENTION_SWEEP_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(60),
   DATASET_SAMPLE_ROWS: z.coerce.number().int().min(1).max(500).default(10),
   DATASET_MAX_SCAN_ROWS: z.coerce.number().int().min(100).max(5_000_000).default(200_000),
+  API_KEY: z.string().default(''),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(0).max(1_000_000).default(600),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
+  TRUST_PROXY: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   AI_PROVIDER: aiProviderIdSchema.default('noop'),
   OPENAI_API_KEY: z.string().default(''),
   AI_MODEL: z.string().default(''),
@@ -75,6 +87,20 @@ export interface AppConfig {
     driver: StorageDriver;
     localDir: string;
     maxUploadBytes: number;
+    maxXlsxUncompressedBytes: number;
+    maxXlsxEntries: number;
+  };
+  security: {
+    /** When set, every /api/v1 route (except health) requires an `x-api-key` header. */
+    apiKey: string | null;
+    rateLimitMax: number;
+    rateLimitWindowMs: number;
+    trustProxy: boolean;
+    jsonBodyLimitBytes: number;
+  };
+  retention: {
+    uploadTtlMs: number;
+    sweepIntervalMs: number;
   };
   dataset: {
     sampleRows: number;
@@ -165,6 +191,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       driver: source.STORAGE_DRIVER,
       localDir: source.STORAGE_LOCAL_DIR,
       maxUploadBytes: Math.round(source.MAX_UPLOAD_MB * 1024 * 1024),
+      maxXlsxUncompressedBytes: Math.round(source.MAX_XLSX_UNCOMPRESSED_MB * 1024 * 1024),
+      maxXlsxEntries: source.MAX_XLSX_ENTRIES,
+    },
+    security: {
+      apiKey: source.API_KEY.trim().length > 0 ? source.API_KEY : null,
+      rateLimitMax: source.RATE_LIMIT_MAX,
+      rateLimitWindowMs: source.RATE_LIMIT_WINDOW_MS,
+      trustProxy: source.TRUST_PROXY,
+      jsonBodyLimitBytes: Math.round(source.JSON_BODY_LIMIT_MB * 1024 * 1024),
+    },
+    retention: {
+      uploadTtlMs: Math.round(source.RETENTION_UPLOAD_TTL_HOURS * 60 * 60 * 1000),
+      sweepIntervalMs: Math.round(source.RETENTION_SWEEP_INTERVAL_MINUTES * 60 * 1000),
     },
     dataset: {
       sampleRows: source.DATASET_SAMPLE_ROWS,

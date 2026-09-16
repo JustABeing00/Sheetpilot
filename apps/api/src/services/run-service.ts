@@ -69,8 +69,39 @@ function describeError(error: unknown): string {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly executing = new Set<string>();
 
   constructor(private readonly deps: RunServiceDeps) {}
+
+  /**
+   * Marks runs left `queued`/`running` by a previous process as failed. Runs execute in-process, so a
+   * restart (or crash) strands them; without this they would be reported as "processing" forever. The
+   * decisions/artifacts a partially-completed run wrote stay in place and are not deleted — recovery
+   * is honest about the interruption rather than pretending the run finished.
+   */
+  async recoverStaleRuns(): Promise<{ recovered: number }> {
+    const runs = await this.deps.repositories.runs.list({ limit: 10_000 });
+    let recovered = 0;
+
+    for (const run of runs) {
+      if (run.status !== 'queued' && run.status !== 'running') {
+        continue;
+      }
+      await this.deps.repositories.runs.update({
+        ...run,
+        status: 'failed',
+        error:
+          'The run was interrupted because the API process stopped before it finished. Start it again.',
+        finishedAt: this.deps.clock.now(),
+      });
+      recovered += 1;
+    }
+
+    if (recovered > 0) {
+      this.deps.logger.warn({ recovered }, 'recovered interrupted runs as failed');
+    }
+    return { recovered };
+  }
 
   async createRun(input: CreateRunInput): Promise<WorkflowRun> {
     const workflow = this.deps.registry.require(input.workflowSlug);
@@ -141,9 +172,29 @@ export class RunService {
   }
 
   async execute(runId: string): Promise<void> {
+    // Mark synchronously (before any await) so two concurrent submissions for the same run can
+    // never both execute it. A retry after completion is also skipped by the status check below.
+    if (this.executing.has(runId)) {
+      this.deps.logger.warn({ runId }, 'run is already executing; ignoring duplicate execution');
+      return;
+    }
+    this.executing.add(runId);
+    try {
+      await this.executeQueuedRun(runId);
+    } finally {
+      this.executing.delete(runId);
+    }
+  }
+
+  private async executeQueuedRun(runId: string): Promise<void> {
     const run = await this.deps.repositories.runs.getById(runId);
     if (!run) {
       this.deps.logger.warn({ runId }, 'run not found for execution');
+      return;
+    }
+
+    if (run.status !== 'queued') {
+      this.deps.logger.warn({ runId, status: run.status }, 'run is not queued; skipping execution');
       return;
     }
 

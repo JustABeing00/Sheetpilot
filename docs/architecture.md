@@ -330,6 +330,27 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
   append-only `review_resolutions` log, and (when the run has a mapped account column) is written back into
   the output file with `__ReviewStatus` set to `APPROVED`/`OVERRIDDEN`.
 
+## Security, reliability & observability boundaries
+
+Untrusted input enters at exactly two seams and is validated there:
+
+- **Uploads** (`packages/file-processing/src/upload.ts`, `archive.ts`, `storage/local-file-storage.ts`):
+  filename sanitisation, extension/content-type/size/magic-byte validation, a ZIP central-directory
+  decompression-bomb guard before ExcelJS buffers a workbook, and path-containment proof in local storage.
+  `DatasetService.ingest` deletes a stored object if inspection fails; `RetentionService` sweeps
+  unreferenced uploads past `RETENTION_UPLOAD_TTL_HOURS` and never touches deliverables.
+- **HTTP** (`apps/api/src/http/security.ts`, `server.ts`): zod parsing at every boundary, an optional
+  shared `API_KEY`, a per-IP fixed-window rate limit, conservative response headers, body/field/multipart
+  limits, and error responses that carry a code + safe message only (5xx details are logged, not returned).
+- **AI output** (`packages/ai/src/parse.ts`): strict schema validation, unknown keys stripped; the model is
+  labelled untrusted data in the prompt.
+
+Reliability controls: `RunService.execute` marks a run in-flight synchronously so it cannot execute twice;
+`recoverStaleRuns()` fails runs stranded by a restart; `IdempotencyService` replays `POST /runs` for a
+repeated `Idempotency-Key` (in-process). Observability: structured pino logs carry ids/sizes/counts (never
+file contents) and redact credential-shaped fields. The full review and remaining risks live in
+[`security-review.md`](./security-review.md); data handling lives in [`privacy.md`](./privacy.md).
+
 ## Extension points for later sessions
 
 | Need | Where to plug in |
@@ -349,7 +370,8 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 
 ## Deliberate non-goals in this foundation
 
-- No authentication/authorization yet (single-tenant, local deployment).
+- No per-user authentication/authorization yet (single-tenant, local deployment). A shared, optional
+  `API_KEY` gate and per-IP rate limiting exist; per-user identity, authorization and tenancy do not.
 - No scheduler/cron or watched-folder ingestion yet; a saved workflow is re-pointed at new files by hand.
 - Runs execute in-process (no worker pool); large-file parallelism and cancellation API come later.
 - Reviewers are unauthenticated (`resolvedBy` is always `null`); human corrections are audited but not yet

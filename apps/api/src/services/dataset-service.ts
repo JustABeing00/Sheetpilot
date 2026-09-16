@@ -17,6 +17,7 @@ import {
   type Repositories,
 } from '@sheetpilot/core';
 import {
+  assertWorkbookArchiveSafe,
   cellToString,
   createTabularReader,
   inspectDataset,
@@ -31,6 +32,8 @@ export interface DatasetServiceDeps {
   logger: Logger;
   limits: {
     maxUploadBytes: number;
+    maxXlsxUncompressedBytes: number;
+    maxXlsxEntries: number;
     sampleRows: number;
     maxScanRows: number;
   };
@@ -107,63 +110,93 @@ export class DatasetService {
       { maxBytes: this.deps.limits.maxUploadBytes },
     );
 
+    // Untrusted workbooks are checked for decompression-bomb shape before they reach the parser
+    // (which buffers the whole workbook). Rejecting here avoids an out-of-memory before the reader
+    // can fail cleanly.
+    if (validated.format === 'xlsx') {
+      assertWorkbookArchiveSafe(input.content, validated.fileName, {
+        maxEntries: this.deps.limits.maxXlsxEntries,
+        maxUncompressedBytes: this.deps.limits.maxXlsxUncompressedBytes,
+      });
+    }
+
     const datasetId = newId();
     const storageKey = `uploads/${validated.format}/${datasetId}.${validated.format}`;
-    const stored = await this.deps.storage.put(storageKey, input.content);
 
-    const analysis = await inspectDataset({
-      reader: createTabularReader(validated.format),
-      openStream: () => this.deps.storage.getStream(stored.key),
-      sheetName: input.sheetName,
-      sampleRows: this.deps.limits.sampleRows,
-      maxScanRows: this.deps.limits.maxScanRows,
-    });
+    // Once stored, any later failure must not leave an orphaned object behind: a rejected or corrupt
+    // upload is deleted rather than accumulating on disk.
+    try {
+      const stored = await this.deps.storage.put(storageKey, input.content);
 
-    const file = await this.deps.repositories.files.create(
-      fileAssetSchema.parse({
-        id: newId(),
-        kind: input.kind,
-        originalName: validated.fileName,
-        format: validated.format,
-        mimeType: validated.mimeType,
-        sizeBytes: stored.sizeBytes,
-        checksum: stored.checksum,
-        rowCount: analysis.rowCount,
-        columnNames: analysis.columns.map((column) => column.name),
-        storageKey: stored.key,
-        uploadedAt: this.deps.clock.now(),
-      }),
-    );
+      const analysis = await inspectDataset({
+        reader: createTabularReader(validated.format),
+        openStream: () => this.deps.storage.getStream(stored.key),
+        sheetName: input.sheetName,
+        sampleRows: this.deps.limits.sampleRows,
+        maxScanRows: this.deps.limits.maxScanRows,
+      });
 
-    const dataset = await this.deps.repositories.datasets.create(
-      datasetProfileSchema.parse({
-        id: datasetId,
-        fileId: file.id,
-        kind: input.kind,
-        originalName: validated.fileName,
-        format: validated.format,
-        mimeType: validated.mimeType,
-        sizeBytes: stored.sizeBytes,
-        checksum: stored.checksum,
-        inspectedAt: this.deps.clock.now(),
-        ...analysis,
-      }),
-    );
+      const file = await this.deps.repositories.files.create(
+        fileAssetSchema.parse({
+          id: newId(),
+          kind: input.kind,
+          originalName: validated.fileName,
+          format: validated.format,
+          mimeType: validated.mimeType,
+          sizeBytes: stored.sizeBytes,
+          checksum: stored.checksum,
+          rowCount: analysis.rowCount,
+          columnNames: analysis.columns.map((column) => column.name),
+          storageKey: stored.key,
+          uploadedAt: this.deps.clock.now(),
+        }),
+      );
 
-    this.deps.logger.info(
-      {
-        datasetId: dataset.id,
-        fileId: file.id,
-        format: dataset.format,
-        rowCount: dataset.rowCount,
-        columnCount: dataset.columns.length,
-        warnings: dataset.warnings.length,
-        truncated: dataset.truncated,
-      },
-      'dataset ingested',
-    );
+      const dataset = await this.deps.repositories.datasets.create(
+        datasetProfileSchema.parse({
+          id: datasetId,
+          fileId: file.id,
+          kind: input.kind,
+          originalName: validated.fileName,
+          format: validated.format,
+          mimeType: validated.mimeType,
+          sizeBytes: stored.sizeBytes,
+          checksum: stored.checksum,
+          inspectedAt: this.deps.clock.now(),
+          ...analysis,
+        }),
+      );
 
-    return { file, dataset };
+      this.deps.logger.info(
+        {
+          datasetId: dataset.id,
+          fileId: file.id,
+          format: dataset.format,
+          rowCount: dataset.rowCount,
+          columnCount: dataset.columns.length,
+          warnings: dataset.warnings.length,
+          truncated: dataset.truncated,
+        },
+        'dataset ingested',
+      );
+
+      return { file, dataset };
+    } catch (error) {
+      await this.cleanupStoredObject(storageKey, error);
+      throw error;
+    }
+  }
+
+  /** Best-effort removal of a stored upload after a failed ingestion; never masks the original error. */
+  private async cleanupStoredObject(storageKey: string, cause: unknown): Promise<void> {
+    try {
+      await this.deps.storage.remove(storageKey);
+    } catch (cleanupError) {
+      this.deps.logger.warn(
+        { storageKey, err: cleanupError, cause: cause instanceof Error ? cause.message : cause },
+        'failed to clean up rejected upload',
+      );
+    }
   }
 
   async getById(id: string): Promise<DatasetProfile> {

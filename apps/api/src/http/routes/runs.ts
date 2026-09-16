@@ -68,31 +68,42 @@ async function requireRun(container: AppContainer, runId: string): Promise<Workf
 export function registerRunRoutes(app: FastifyInstance, container: AppContainer): void {
   app.post('/api/v1/runs', async (request, reply) => {
     const body = parseOrThrow(createRunRequestSchema, request.body, 'create run request');
+    const header = request.headers['idempotency-key'];
+    const idempotencyKey = Array.isArray(header) ? header[0] : (header ?? null);
 
-    let run: WorkflowRun;
-    if (body.configurationId) {
-      const resolved = await container.workflowConfigurationService.buildRunInput(
-        body.configurationId,
-      );
-      run = await container.runService.createRun(resolved);
-    } else {
-      const { workflowSlug, primaryFileId, eventsFileId } = body;
-      if (!workflowSlug || !primaryFileId || !eventsFileId) {
-        throw new ValidationError(
-          'Provide configurationId, or workflowSlug together with primaryFileId and eventsFileId',
+    // A client may safely retry a timed-out POST /runs with the same key: the second request returns
+    // the original run instead of starting a duplicate execution.
+    const { replayed, result } = await container.idempotency.run(idempotencyKey, async () => {
+      let run: WorkflowRun;
+      if (body.configurationId) {
+        const resolved = await container.workflowConfigurationService.buildRunInput(
+          body.configurationId,
         );
+        run = await container.runService.createRun(resolved);
+      } else {
+        const { workflowSlug, primaryFileId, eventsFileId } = body;
+        if (!workflowSlug || !primaryFileId || !eventsFileId) {
+          throw new ValidationError(
+            'Provide configurationId, or workflowSlug together with primaryFileId and eventsFileId',
+          );
+        }
+        run = await container.runService.createRun({
+          workflowSlug,
+          primaryFileId,
+          eventsFileId,
+          configurationId: null,
+          config: body.config,
+        });
       }
-      run = await container.runService.createRun({
-        workflowSlug,
-        primaryFileId,
-        eventsFileId,
-        configurationId: null,
-        config: body.config,
-      });
-    }
 
-    reply.status(202);
-    return describeRun(container, run, true);
+      return { statusCode: 202, body: await describeRun(container, run, true) };
+    });
+
+    if (replayed) {
+      reply.header('idempotency-replayed', 'true');
+    }
+    reply.status(result.statusCode);
+    return result.body;
   });
 
   app.get('/api/v1/runs', async (request) => {

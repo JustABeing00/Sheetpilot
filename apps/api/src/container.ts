@@ -19,11 +19,15 @@ import type { AppConfig } from '@sheetpilot/config';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { ExportService } from './services/export-service.js';
+import { IdempotencyService } from './services/idempotency-service.js';
+import { RetentionService } from './services/retention-service.js';
 import { ReviewService } from './services/review-service.js';
 import { RuleSetService } from './services/rule-set-service.js';
 import { RunService } from './services/run-service.js';
 import { SavedWorkflowService } from './services/saved-workflow-service.js';
 import { WorkflowConfigurationService } from './services/workflow-configuration-service.js';
+
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface AppContainer {
   config: AppConfig;
@@ -41,6 +45,8 @@ export interface AppContainer {
   reviewService: ReviewService;
   exportService: ExportService;
   savedWorkflowService: SavedWorkflowService;
+  retentionService: RetentionService;
+  idempotency: IdempotencyService;
   close(): Promise<void>;
 }
 
@@ -140,6 +146,8 @@ export async function createContainer(
     logger,
     limits: {
       maxUploadBytes: config.storage.maxUploadBytes,
+      maxXlsxUncompressedBytes: config.storage.maxXlsxUncompressedBytes,
+      maxXlsxEntries: config.storage.maxXlsxEntries,
       sampleRows: config.dataset.sampleRows,
       maxScanRows: config.dataset.maxScanRows,
     },
@@ -155,6 +163,19 @@ export async function createContainer(
   const runService = new RunService({ repositories, storage, registry, clock, logger });
   const reviewService = new ReviewService({ repositories, storage, clock, logger });
   const exportService = new ExportService({ repositories });
+  const retentionService = new RetentionService({
+    storage,
+    repositories,
+    clock,
+    logger,
+    uploadTtlMs: config.retention.uploadTtlMs,
+    sweepIntervalMs: config.retention.sweepIntervalMs,
+  });
+  const idempotency = new IdempotencyService(IDEMPOTENCY_TTL_MS, clock);
+
+  // A restart strands in-flight runs (they execute in-process). Mark them failed now so the UI never
+  // shows a phantom "processing" run.
+  await runService.recoverStaleRuns();
   const savedWorkflowService = new SavedWorkflowService({
     repositories,
     registry,
@@ -181,7 +202,10 @@ export async function createContainer(
     reviewService,
     exportService,
     savedWorkflowService,
+    retentionService,
+    idempotency,
     async close() {
+      retentionService.stop();
       await databaseHandle?.close();
     },
   };

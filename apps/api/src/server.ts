@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import { isAppError, PayloadTooLargeError, toPublicErrorBody } from '@sheetpilot/core';
 import type { AppContainer } from './container.js';
 import { registerRoutes } from './http/routes/index.js';
+import { registerSecurityHooks } from './http/security.js';
 
 export interface ServerOptions {
   startedAt: number;
@@ -11,22 +12,44 @@ export interface ServerOptions {
 }
 
 export function buildServer(container: AppContainer, options: ServerOptions): FastifyInstance {
-  const app: FastifyInstance = options.loggerInstance
-    ? Fastify({ loggerInstance: options.loggerInstance, bodyLimit: 2 * 1024 * 1024 })
-    : Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
+  const { security, storage } = container.config;
+  const shared = {
+    bodyLimit: security.jsonBodyLimitBytes,
+    trustProxy: security.trustProxy,
+    // Bound how long a slow client may take to send a request body.
+    requestTimeout: 120_000,
+  } as const;
 
-  app.register(cors, { origin: container.config.corsOrigins });
+  const app: FastifyInstance = options.loggerInstance
+    ? Fastify({ loggerInstance: options.loggerInstance, ...shared })
+    : Fastify({ logger: false, ...shared });
+
+  registerSecurityHooks(app, {
+    apiKey: security.apiKey,
+    rateLimit: { max: security.rateLimitMax, windowMs: security.rateLimitWindowMs },
+    isProduction: container.config.isProduction,
+  });
+
+  app.register(cors, { origin: container.config.corsOrigins, credentials: false });
   app.register(multipart, {
     limits: {
-      fileSize: container.config.storage.maxUploadBytes,
+      fileSize: storage.maxUploadBytes,
       files: 1,
       fields: 10,
+      fieldSize: 1024 * 1024,
+      parts: 20,
     },
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (isAppError(error)) {
-      reply.status(error.statusCode).send(toPublicErrorBody(error));
+      const body = toPublicErrorBody(error);
+      // 5xx details can contain internal context; log them but never send them to the client.
+      if (error.statusCode >= 500) {
+        request.log.error({ err: error, code: error.code }, 'request failed');
+        delete body.error.details;
+      }
+      reply.status(error.statusCode).send(body);
       return;
     }
 

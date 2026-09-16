@@ -119,6 +119,12 @@ Never commit a real `.env` file — `.gitignore` excludes it.
 | `DATABASE_URL` | – | Required when `REPOSITORY_DRIVER=postgres` |
 | `STORAGE_DRIVER` / `STORAGE_LOCAL_DIR` | `local` / `.data/storage` | Uploaded files and generated artifacts |
 | `MAX_UPLOAD_MB` | `50` | Upload limit enforced by the API |
+| `JSON_BODY_LIMIT_MB` | `2` | JSON request-body limit for non-multipart endpoints |
+| `MAX_XLSX_UNCOMPRESSED_MB` / `MAX_XLSX_ENTRIES` | `512` / `20000` | ZIP-bomb guard: a workbook whose declared contents exceed these is rejected |
+| `RETENTION_UPLOAD_TTL_HOURS` / `RETENTION_SWEEP_INTERVAL_MINUTES` | `168` / `60` | Background deletion of unreferenced uploads (deliverables are kept) |
+| `API_KEY` | *(empty)* | When set, every `/api/v1` route requires a matching `x-api-key` header; `/healthz` stays open |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `600` / `60000` | Per-IP fixed-window rate limit; `0` disables it |
+| `TRUST_PROXY` | `false` | Set `true` only behind a trusted reverse proxy |
 | `DATASET_SAMPLE_ROWS` | `10` | Sample rows persisted/returned in a dataset preview |
 | `DATASET_MAX_SCAN_ROWS` | `200000` | Hard cap on rows read during dataset inspection |
 | `AI_PROVIDER` | `noop` | `noop` (sends nothing) or `openai` (requires `OPENAI_API_KEY` and `AI_MODEL`) |
@@ -179,3 +185,20 @@ saved workflow remembers its dataset roles, column mappings, matching/latest-rec
 output/review options; creating a new one from scratch is the existing Setup flow. Scheduling,
 authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
 prioritized next steps.
+
+## Security and privacy
+
+Uploaded files are treated as untrusted input: filenames are sanitised (basename, illegal/reserved
+characters, length), storage paths are proven to stay inside the storage root, uploads are validated
+(extension, declared type, size, magic bytes), XLSX ZIP archives are checked for decompression-bomb shape
+before parsing, and a rejected upload is deleted rather than left on disk. The API validates every body
+with zod, returns only safe error codes/messages (5xx details are logged, never returned), can require a
+shared `API_KEY`, applies a per-IP rate limit, sets conservative security headers, and redacts
+credential-shaped fields from logs. Run creation supports an `Idempotency-Key`, runs execute at most once,
+and runs interrupted by a restart are marked failed rather than left "processing".
+
+This is a **local/trusted-deployment** build: without `API_KEY` it is unauthenticated, there is no
+per-user authorization, tenant isolation or reviewer identity, and files are unencrypted on disk. See
+[`docs/security-review.md`](./docs/security-review.md) for the repository-wide review and remaining risks,
+and [`docs/privacy.md`](./docs/privacy.md) for exactly what is stored, what is sent to an AI provider, and
+how long data lives.

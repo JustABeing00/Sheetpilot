@@ -429,3 +429,35 @@ per-run snapshot (ADR-017) is still the audit record.
 two sources of truth for the same setup). Retrieving the mapping by dataset id (rejected: new files have new
 ids; it would force re-mapping). Requiring the re-point to be saved before running (rejected: a user may want
 a one-off run without changing the saved setup; the run snapshot already makes the run reproducible).
+
+## ADR-019 - Security and reliability controls are layered boundaries, not a security guarantee
+
+**Decision.** Uploaded files, HTTP requests and AI model output are treated as untrusted at explicit
+boundaries. Concretely: (1) filenames are reduced to a safe, bounded basename; storage keys are internal UUIDs
+and `LocalFileStorage` proves every resolved path stays inside its root; (2) XLSX ZIP archives are inspected
+(central directory only, no inflation) against a declared-expansion/entry-count ceiling before ExcelJS buffers
+the workbook; (3) a stored object is deleted if ingestion fails after storage, and a retention sweep removes
+unreferenced uploads past a TTL while never touching deliverables; (4) the API gains an **optional** shared
+API key, a per-IP rate limit, conservative security headers and a configurable body/request limit, and 5xx
+error details are logged rather than returned; (5) logs redact credential-shaped fields; (6) runs execute at
+most once, interrupted runs are failed on startup, and `POST /runs` supports an in-process `Idempotency-Key`.
+The controls are deliberately non-fatal when unconfigured, so local/trusted workflows and tests are unaffected.
+
+**Why.** The product handles uploaded business files, and the previous build's guarantees were partly
+conventional (a `..` substring check, "no auth needed because it runs locally"). Boundaries should be provable
+and testable. Making the hardening explicit also produces an honest written boundary (see
+`docs/security-review.md`) instead of an implicit claim of security.
+
+**Consequences.** The deployment remains a **single trust boundary**: unless `API_KEY` is set the API is
+unauthenticated, there is no per-user authorization or tenant isolation, and there is no `resolvedBy` audit
+identity. Idempotency and rate-limit state are process-local, so they do not survive a restart or span
+instances. The ZIP guard is heuristic and skips ZIP64 size accounting when sizes are unresolvable. Files stay
+unencrypted on disk and deletion is manual. These limits are documented, not hidden; the mitigations reduce
+accidental exposure and resource exhaustion, they do not make the system "secure" against a determined
+attacker.
+
+**Alternatives considered.** Requiring an API key always (rejected: breaks local development and the existing
+smoke/test workflow for no real gain in a trusted environment). Adding `@fastify/rate-limit`/`@fastify/helmet`
+(rejected for now: a small in-process implementation avoids new runtime dependencies in the externalized API
+bundle; can be swapped later). A full AV/malware scanner (rejected: out of scope for this build; documented as
+an open risk). Durable idempotency in Postgres (deferred: belongs with a real job queue).

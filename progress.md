@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 9 — saved workflows & the daily-report experience)
+**Last updated:** 2026-09-17 (product session 10 — security, reliability & production hardening)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -84,13 +84,29 @@ gains a **Saved workflows** dashboard, a saved-workflow detail view (recipe + re
 page; the Dashboard leads with saved workflows and Setup creates them from scratch. **Status: achieved**
 (see §8, verified in §9).
 
-**Next (product session 10):** security, reliability & production hardening (queue `10-session.md`) — treat
-uploaded files as untrusted, audit file/API/data/AI security, strengthen reliability (retries, idempotency,
-failed-run recovery, job-state consistency, partial processing), add structured logging/error reporting and
-privacy documentation, add security-focused tests, and perform a repository-wide security review with an
-honest write-up of remaining risks. The deferred backlog from earlier sessions (Postgres verification, human
-corrections → rule suggestions, browsable version history, reviewer identity, reopening resolved items,
-scheduling/watched-folder ingestion, streaming the loader) remains in §15.
+**Product session 10 objective: security, reliability & production hardening.** Uploaded files are now
+treated as untrusted at provable boundaries. File security: filenames are sanitised to a bounded, safe
+basename (illegal/reserved characters, length, leading/trailing dots), `LocalFileStorage` **proves** every
+resolved key stays inside the storage root (absolute/drive-relative/`.`/`..`/NUL rejected), XLSX ZIP archives
+are inspected for decompression-bomb shape (declared expansion + entry count) **before** ExcelJS buffers the
+workbook, a failed ingestion deletes its stored object, and a new `RetentionService` sweeps unreferenced
+uploads past a TTL while never touching deliverables. API security: an optional shared `API_KEY` gate on
+`/api/v1`, a per-IP fixed-window rate limit, conservative security headers, configurable JSON-body/multipart
+limits, CORS credentials off, and 5xx error details logged rather than returned. Data security: pino redacts
+credential-shaped fields. AI security is re-confirmed and tested (prompt injection, unknown/prototype keys,
+history redaction, a real local-endpoint adapter contract). Reliability: runs execute at most once (marked
+synchronously), runs stranded by a restart are failed on startup, and `POST /runs` supports an in-process
+`Idempotency-Key`. Privacy is documented in `docs/privacy.md` and the whole repository is reviewed honestly
+in `docs/security-review.md` (ADR-019). **Status: achieved** (see §8, verified in §9).
+
+**Next (product session 11):** UI/UX & product polish (queue `11-session.md`) — turn the technically
+functional app into a polished SaaS product for a nontechnical business user: landing page, dashboard,
+create/upload/map/rule/process/review/export/saved-workflow screens, clear step awareness and system status,
+actionable errors, fast review, realistic-data tables, explicit destructive actions, accessibility and
+keyboard-friendly review, polished empty/loading/error/success states, and improved typography, spacing,
+hierarchy, consistency and responsiveness. The deferred backlog (Postgres verification, human corrections →
+rule suggestions, browsable version history, reviewer identity, reopening resolved items, scheduling/watched
+folders, streaming the loader) remains in §15.
 
 ## 3. Product Vision
 
@@ -123,7 +139,7 @@ core workflow is excellent.
 | Dataset inspection | `inspectDataset` in `@sheetpilot/file-processing` | Bounded one-pass scan → `DatasetProfile` (types, emptiness, uniqueness, samples, warnings); persisted via `DatasetRepository` |
 | Workflow configuration | `@sheetpilot/core` domain + `WorkflowConfigurationService` (API) | Roles-as-data (`WorkflowConfigurationDefinition`), pure validation, persisted/versioned `WorkflowConfiguration`, workflow-specific `resolveRunInput` |
 | Record matching | `@sheetpilot/matching-engine` (new) | Generic primary↔event join: reported identifier normalization, deterministic latest-event selection, full event history, join statistics; consumed by the account-faults workflow |
-| Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
+| Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | Keys are internal UUIDs; resolved paths are proven inside the root; `list(prefix)` supports retention; S3 later |
 | Rules | Custom DSL in `@sheetpilot/rule-engine` | Data-only rules (zod-validated); priority → specificity → id winner selection; `latest`/`any_event`/`all_events` condition scopes; decision metadata (resulting values, conditions evaluated, conflicts, no-match/low-confidence review flags); explanation templates |
 | Rule management | `RuleSetService` + `/api/v1/rule-sets` + Rules UI page | Validated before save (`validateRuleSet`), versioned on every save, one active set per workflow, resolved per run |
 | AI | `@sheetpilot/ai` — provider port + orchestration | `ClassificationProvider` port; `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized outcomes); `resolveAssistedDecision` (deterministic-first merge); `OpenAiClassificationProvider` (configurable base URL/model, injectable `fetch`); `NoopClassificationProvider` is the safe default (sends nothing) |
@@ -133,7 +149,11 @@ core workflow is excellent.
 | Reproducibility | Immutable `RunSnapshot` (core) + `RunSnapshotRepository` + `run_snapshots` table | Frozen configuration + rule-set versions captured at run creation; execution uses the snapshot; `GET /api/v1/runs/:id/snapshot`; summary on every run DTO |
 | Saved workflows | `rebindConfiguration` (core) + `SavedWorkflowService` + `/api/v1/saved-workflows` + Saved workflows / Run again UI | A named, versioned, reusable setup (roles, mappings by column name, rules, options); derived dashboard (last run, status, records, review, export); re-point onto new files with a prepare → run flow and an optional version save |
 | Product workflow UX | `WorkflowProgress` stepper + `lib/pipeline.ts` + `lib/status.ts` labels | One resumable journey (Set up → Rules → Process → Review → Export); plain-language statuses and error help; run summary → review queue → report |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 245 tests, 28 files, all green |
+| File security | `sanitizeFileName` + `assertWorkbookArchiveSafe` + containment-checked `LocalFileStorage` + `RetentionService` | Basename/illegal-char/length/reserved-name sanitisation; ZIP central-directory zip-bomb guard; cleanup on failed ingestion; unreferenced-upload sweep (deliverables kept) |
+| API security | `http/security.ts` + `server.ts` limits | Optional shared `API_KEY`, per-IP fixed-window rate limit (`429`+`Retry-After`), security headers (+HSTS in prod), configurable body/multipart limits, `TRUST_PROXY`, 5xx details never returned, no CORS credentials |
+| Reliability | `RunService` guards + `IdempotencyService` | Run marked in-flight synchronously (no double execution), `recoverStaleRuns()` fails restart-stranded runs, `Idempotency-Key` on `POST /runs` (in-process, 24 h) |
+| Observability/privacy | pino redaction + `docs/privacy.md` + `docs/security-review.md` | Credential-shaped log fields redacted; documented data storage/retention/AI-egress and an honest remaining-risk review |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 296 tests, 32 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -244,11 +264,15 @@ apps/
     services/review-service.ts human review resolution, append-only audit trail, output-artifact regeneration
     services/export-service.ts derives the live export summary + status and lists the validated deliverables
     services/saved-workflow-service.ts the reusable-workflow layer: derived dashboard, read-only run preparation (rebind + validate) and the run-again flow
+    services/retention-service.ts  sweeps unreferenced uploads past a TTL (deliverables never swept)
+    services/idempotency-service.ts in-process Idempotency-Key replay for POST /runs (failures not cached)
     server.test.ts / review.test.ts / export.test.ts  API integration + E2E, including the review queue, audit trail, regeneration and export
     workflow-journey.test.ts  full configuration-driven journey: upload → map → run → review → export, plus rule/setup-change reproducibility
     saved-workflow.test.ts  saved-workflow dashboard, re-point onto new files (prepare), one-off vs saved run-again, missing-column handling
+    security.test.ts       API auth/rate-limit/headers/error-hygiene/idempotency/stale-recovery/zip-bomb/cleanup/retention
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
+    http/security.ts       optional API-key gate, per-IP rate limit, security headers
     http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, saved-workflows, files, datasets, runs, review-items, artifacts
     fixtures.ts            reads the sample CSVs for tests
     server.test.ts         API integration + E2E test (upload → run → artifacts → review resolve)
@@ -290,10 +314,12 @@ packages/
     table.ts, normalize.ts (keys, timestamps, Excel serials), inference.ts (column type detection)
     inspection.ts          bounded one-pass dataset analysis (types, emptiness, uniqueness, samples, warnings)
     upload.ts              untrusted-filename sanitisation + extension/mime/size/magic validation
+    archive.ts             ZIP central-directory reader + XLSX decompression-bomb guard (no inflation)
     readers/               csv (streaming), xlsx (buffered), shared TabularReader with describe()/sheets
     writers/               csv, xlsx (optional leading Summary worksheet), buffer collection, stream-to-storage
     export/validate.ts     re-reads a stored artifact and asserts columns + row count (ExportValidationError)
-    storage/               local-file-storage (traversal-safe), memory-file-storage
+    storage/               local-file-storage (containment-proof paths, list), memory-file-storage
+    security.test.ts       filename/path/archive/storage hardening tests
     registry.ts            format detection + reader/writer factories
   matching-engine/src/
     types.ts               public contract: normalized identifiers, MatchedPrimary/Event/Entity, MatchStats, MatchResult
@@ -322,6 +348,7 @@ samples/account-faults/    canonical demo CSVs + README with expected outcomes (
 samples/field-service/     second representative fixture set (site faults) for the end-to-end journey test
 scripts/smoke.mjs          end-to-end smoke test against a running API
 docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
+docs/privacy.md, docs/security-review.md  data handling + the repository-wide security review
 ```
 
 ## 7. Domain Model
@@ -365,6 +392,62 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 10 — Security, reliability & production hardening (2026-09-17)
+
+- [x] File security (`@sheetpilot/file-processing`):
+  - `upload.ts` — `sanitizeFileName` hardened: basename only, strips control characters and
+    Windows-illegal characters (`<>:"|?*`), collapses whitespace, strips leading/trailing dots & spaces,
+    bounds the name to 120 chars (keeping the extension) and neutralises reserved device names
+    (`CON`, `NUL`, `COM1`…).
+  - `storage/local-file-storage.ts` — `resolvePath` now rejects NUL bytes, absolute and drive-relative
+    keys, `:` and `.`/`..`/empty segments, and **proves** with `path.resolve` + `path.relative` that the
+    resolved path stays inside the root (was a `..` substring check). New `list(prefix)` walks the root
+    (skipping symlinks) with sizes + mtimes.
+  - new `archive.ts` — `readZipArchiveSummary` reads the ZIP central directory **without inflating** and
+    `assertWorkbookArchiveSafe` rejects a workbook whose declared uncompressed size or entry count
+    exceeds the configured ceiling (a decompression-bomb guard that runs before ExcelJS buffers the file).
+  - `memory-file-storage.ts` — tracks `modifiedAt` (injectable clock) and implements `list`.
+  - `core/ports/file-storage.ts` — `FileStorage.list` + `StoredObjectInfo` added.
+- [x] API security / reliability (`apps/api`):
+  - new `http/security.ts` — optional shared-secret auth (`API_KEY`, constant-time compare, `x-api-key`,
+    `/healthz` open), a per-IP fixed-window rate limit (`429` + `Retry-After`), and conservative response
+    headers (`x-content-type-options`, `x-frame-options`, `referrer-policy`, cross-origin policies; HSTS
+    in production).
+  - `server.ts` — configurable JSON body limit, multipart `fieldSize`/`parts` caps, `requestTimeout`,
+    `trustProxy`, CORS credentials off, and 5xx AppError `details` are logged but never returned.
+  - new `services/retention-service.ts` — sweeps unreferenced `uploads/` objects older than a TTL
+    (deliverables are never swept), started at boot and on an unref'd interval.
+  - `services/dataset-service.ts` — applies the workbook archive guard before storing and deletes the
+    stored object if any later ingestion step fails.
+  - `services/run-service.ts` — `execute` marks a run in-flight **synchronously** (no double execution),
+    skips non-queued runs, and new `recoverStaleRuns()` fails runs stranded in `queued`/`running` by a
+    previous process (called during container creation).
+  - new `services/idempotency-service.ts` — `Idempotency-Key` replay for `POST /api/v1/runs` (in-process,
+    24 h, concurrent duplicates share the in-flight promise, failures are not cached).
+- [x] Data security: `logger.ts` configures pino redaction for `authorization`, `x-api-key`, `apiKey`,
+  `password`, `token` and `OPENAI_API_KEY` (incl. nested variants).
+- [x] AI security: no code change required, but the guarantees are now test-backed — prompt-injection
+  prose is ignored (only the JSON result is taken), unknown/prototype-polluting keys are stripped, excluded
+  fields are redacted from the event **history** as well as the latest event, and a real (loopback)
+  endpoint contract test proves the key travels only in the header, the payload is bounded, and user content
+  is labelled untrusted data.
+- [x] Configuration (`@sheetpilot/config`): new `JSON_BODY_LIMIT_MB`, `MAX_XLSX_UNCOMPRESSED_MB`,
+  `MAX_XLSX_ENTRIES`, `RETENTION_UPLOAD_TTL_HOURS`, `RETENTION_SWEEP_INTERVAL_MINUTES`, `API_KEY`,
+  `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`, `TRUST_PROXY`; `AppConfig` gained `security`, `retention` and
+  the new storage limits.
+- [x] Docs: new `docs/privacy.md` (what is stored, retention/deletion, what is sent to AI, operator
+  checklist) and `docs/security-review.md` (trust boundaries, 21 findings with status, covered attack
+  cases, honest remaining risk), ADR-019, `docs/architecture.md` security/reliability section, README
+  security section + env table, `.env.example`.
+- [x] Tests: +38 (296 total, 32 files) — `packages/file-processing/src/security.test.ts` (21: filename
+  hardening, path containment incl. absolute/drive/NUL keys, `list`, ZIP archive summaries, zip-bomb and
+  entry-count rejection, a genuine XLSX accepted, memory-storage listing) and `apps/api/src/security.test.ts`
+  (13: API-key auth/health exemption, rate-limit `429`, headers, error hygiene, idempotent run creation,
+  stale-run recovery, zip-bomb rejection with nothing stored, cleanup of a failed ingest, retention sweep)
+  plus 4 AI security tests in `packages/ai/src/ai.test.ts`.
+- [x] Verified: `npm run lint`, `npm run typecheck`, `npm test` (296/32), `npm run build`, and
+  `npm run smoke` against the production bundle (full journey incl. saved workflows, review, export).
 
 ### Product session 9 — Saved workflows & the "daily report" experience (2026-09-16)
 
@@ -820,9 +903,12 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 30 files / 258 tests passed |
+| Tests | `npm test` | 32 files / 296 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
-| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV |
+| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV; saved-workflow dashboard, run-again (4/4 carried, config v2) and rule-set validation/save all green (re-verified session 10) |
+| File security (unit) | `npx vitest run packages/file-processing/src/security.test.ts` | 21 tests: filename hardening (reserved/illegal/long/path components), storage-key rejection of `../`/absolute/drive/NUL/`.`/empty keys + containment, `list` metadata, ZIP summaries, zip-bomb + entry-count rejection, cleanup-friendly memory storage |
+| API security & reliability (E2E) | `npx vitest run apps/api/src/security.test.ts` | 13 tests: API-key auth (missing/wrong/ok, health exempt), rate-limit `429` + `Retry-After`, security headers, error hygiene (no stack), idempotent `POST /runs` (same id, one run), stale-run recovery to `failed`, zip-bomb `422` with nothing stored, failed-ingest cleanup, retention sweep |
+| AI security (unit) | `npx vitest run packages/ai` | 35 tests incl. prompt-injection prose ignored, unknown/prototype keys stripped, history redaction, and a real loopback adapter contract (key only in the header, bounded payload, untrusted-data labelling) |
 | End-to-end journey (API E2E) | `npx vitest run apps/api/src/workflow-journey.test.ts` | upload field-service datasets → validate mapping (resolved config preview) → save configuration v1 → run → freeze snapshot (config v1, 7 rules) → classify (2 auto / 5 review with the expected reasons) → review every exception (override no-events + accept others) → export `ready`; then edit the setup + replace the active rule set and prove the historical run's decisions and snapshot are **unchanged** while a new run picks up the new versions (`no_rule_match`) |
 | Run snapshot (core) | `npx vitest run packages/core/src/domain/run-snapshot.test.ts` | schema defaults (null configuration/rule set) and summary mapping (versions, names, rule count) |
 | Saved workflow (core) | `npx vitest run packages/core/src/domain/saved-workflow.test.ts` | `rebindConfiguration` carries mappings by column name, reports a missing column, re-points only the supplied roles and keeps confirmation on the same file |
@@ -1058,6 +1144,23 @@ the assisted paths.
     dataset pointers now reference today's datasets, so yesterday's run keeps its own snapshot but the saved
     workflow no longer resolves the old files. Browsable per-version history is still the deferred item
     (#18/#26).
+59. **The API is still unauthenticated by default.** `API_KEY` is optional and off; even when set it is a
+    single shared credential with no per-user identity, authorization, revocation or tenant isolation. The
+    API must only be reachable from a trusted network (see `docs/security-review.md`).
+60. **Idempotency and rate limiting are process-local.** `IdempotencyService` (24 h) and the rate-limit
+    buckets live in memory: they reset on restart and are not shared across multiple API instances. Durable
+    idempotency belongs with a real job queue.
+61. **The XLSX zip-bomb guard is heuristic.** It reads the ZIP central directory (no inflation) and rejects
+    declared expansion/entry counts over the limits, but skips size accounting for unresolvable ZIP64
+    entries; `MAX_UPLOAD_MB` remains the backstop. There is no antivirus/malware scanning.
+62. **The retention sweep only covers `uploads/`.** Deliverables under `runs/` are never swept and there is no
+    delete API or cascading deletion, so regulatory erasure is a manual filesystem/DB operation (documented
+    in `docs/privacy.md`).
+63. **Security hardening is non-fatal when unconfigured.** With no `API_KEY` and default rate limits the
+    server behaves as before, by design (local/trusted first). This keeps the previous workflow honest but
+    means the defaults are not production-hardened.
+64. **Trust boundaries beyond HTTP/AI files are out of scope.** No SSRF hardening of `AI_BASE_URL` (operator
+    controlled), no dependency/`npm audit` gate in CI, no container/OS hardening, no TLS termination.
 
 ## 11. Technical Decisions
 
@@ -1092,6 +1195,10 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
 - ADR-018 a saved workflow is a reusable, re-pointable aggregate (a named, versioned configuration) whose
   mapping is remembered by column name and carried onto new files by the pure `rebindConfiguration`; the
   returning-user dashboard is derived, and a one-off re-point freezes the exact configuration it used.
+- ADR-019 untrusted files, HTTP and AI output are validated at explicit boundaries (filename/path hardening,
+  ZIP-bomb guard, cleanup + retention), the API gains optional auth, rate limiting, headers, body limits and
+  clean errors, runs execute at most once with restart recovery and in-process idempotency — layered controls
+  that improve the boundary without claiming the single-tenant build is "secure".
 
 Additional decisions made during implementation:
 
@@ -1117,20 +1224,37 @@ Implemented:
 
 - **Secrets** are never in source. `.env` is git-ignored, `.env.example` documents variables without values;
   config validation fails fast on missing cross-field requirements.
-- **Path traversal protection** in `LocalFileStorage` (rejects `..`, normalizes separators) and uploaded
-  file names are reduced to their basename via `path.basename`.
-- **Upload limits** enforced by `@fastify/multipart` (`MAX_UPLOAD_MB`) and a 2 MB JSON body limit.
-  Oversized uploads return a clean `413 payload_too_large` body.
+- **Path traversal protection** in `LocalFileStorage`: keys must be relative (absolute/drive-relative
+  rejected), no NUL, no `.`/`..`/empty segments, no `:`; the resolved path is proven inside the root with
+  `path.resolve` + `path.relative`. Uploaded file names are reduced to a safe basename.
+- **Upload limits** enforced by `@fastify/multipart` (`MAX_UPLOAD_MB`, `fieldSize`, `parts`) and a
+  configurable JSON body limit (`JSON_BODY_LIMIT_MB`, default 2 MB). Oversized uploads return a clean
+  `413 payload_too_large` body.
 - **Upload validation before storage** (`validateUpload`): extension allowlist, declared content-type
-  allowlist, size limit, filename sanitisation (basename + control-character stripping), and magic-byte
-  checks (PK zip signature for XLSX, NUL-free for delimited text). Uploaded content is only ever parsed
-  by `csv-parse`/`exceljs`; it is never executed, and storage keys are generated from internal UUIDs.
+  allowlist, size limit, hardened filename sanitisation (basename + control/illegal-character removal +
+  reserved-name neutralisation + 120-char bound), and magic-byte checks (PK zip signature for XLSX,
+  NUL-free for delimited text). Uploaded content is only ever parsed by `csv-parse`/`exceljs`; it is never
+  executed, and storage keys are generated from internal UUIDs.
+- **Zip-bomb guard** (`assertWorkbookArchiveSafe`): the XLSX ZIP central directory is read without
+  inflating and the archive is rejected when its declared uncompressed size (`MAX_XLSX_UNCOMPRESSED_MB`)
+  or entry count (`MAX_XLSX_ENTRIES`) exceeds the limits — before ExcelJS buffers the workbook.
+- **Cleanup & retention**: a failed ingestion deletes its stored object; `RetentionService` deletes
+  unreferenced `uploads/` objects older than `RETENTION_UPLOAD_TTL_HOURS` (deliverables are never swept).
+- **API boundary hardening**: optional shared `API_KEY` on `/api/v1` (constant-time compare; `/healthz`
+  open), per-IP fixed-window rate limit (`429` + `Retry-After`), conservative security headers (+HSTS in
+  production), `TRUST_PROXY` for correct client IPs, and CORS credentials disabled.
+- **Log redaction**: pino redacts `authorization`, `x-api-key`, `apiKey`, `password`, `token` and
+  `OPENAI_API_KEY` (including nested forms) so credential-shaped data never reaches a log line.
+- **Reliability as a security property**: a run is marked in-flight synchronously (no double execution),
+  runs stranded by a restart are failed on startup (`recoverStaleRuns`), and `POST /runs` replays an
+  `Idempotency-Key` instead of starting a duplicate job.
 - **CSV/Excel formula injection guard** — strings starting with `= + - @` are written as plain text (rich
   text run) in XLSX.
 - **Strict validation** at every boundary: zod for HTTP bodies, workflow inputs, workflow config (strict
   object → unknown keys rejected), rule sets and file metadata.
 - **Error hygiene** — internal errors are logged, clients receive `{ error: { code, message } }` only;
-  `isAppError` distinguishes safe errors from unexpected ones.
+  `isAppError` distinguishes safe errors from unexpected ones. For 5xx AppErrors the `details` field is
+  logged but **not** returned.
 - **Logging** never includes file contents; logs carry ids, sizes, counts.
 - **AI is off by default.** `AI_PROVIDER=noop` (`isAvailable() === false`) means no record data leaves the
   process; a consultation happens only when `aiPolicy` says so *and* a configured provider is available.
@@ -1146,12 +1270,14 @@ Implemented:
   `Authorization` header of the outbound request. Bounded retries/timeouts prevent a slow provider stalling a
   run.
 
-Not yet implemented (risks acknowledged):
+Not yet implemented (risks acknowledged — see `docs/security-review.md` for the full findings table):
 
-- No authentication/authorization, no tenant isolation, no audit trail of who resolved a review item
-  (`resolvedBy` is always `null`), no rate limiting, no malware scanning of uploads, no TLS termination
-  (deploy behind a reverse proxy), CORS origins must be set explicitly in production, and files are stored
-  unencrypted on local disk.
+- No per-user authentication/authorization or tenant isolation; the optional `API_KEY` is a single shared
+  credential. No audit trail of who resolved a review item (`resolvedBy` is always `null`).
+- Idempotency and rate limiting are **process-local** (reset on restart, not shared across instances).
+- The zip-bomb guard is heuristic (ZIP64 sizes are not summed); no antivirus/malware scanning of uploads.
+- No TLS termination in-process (deploy behind a reverse proxy), CORS origins must be set explicitly in
+  production, files are stored unencrypted on local disk, and there is no delete/erasure API.
 - **AI privacy is a deployment responsibility.** With `AI_PROVIDER=openai` (or any non-`noop` base URL),
   event descriptions are sent to a third party (or an operator-chosen gateway). There is no DPA/zero-retention
   guarantee, no per-tenant or per-dataset routing, no in-repo local model, and no cost/token budget. Free-text
@@ -1161,7 +1287,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 258 tests / 30 files passing (`npm test`).** Coverage by area:
+**Status: 296 tests / 32 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -1175,12 +1301,14 @@ Not yet implemented (risks acknowledged):
 | Inference/detection | `packages/file-processing/src/inference.test.ts` | column typing, nullability, format sniffing, reader/writer factories |
 | Dataset inspection | `packages/file-processing/src/inspection.test.ts` | types, empties, dates, identifiers, leading zeros, duplicate columns, mixed types, scan truncation, empty/headerless errors, multi-sheet XLSX, corrupt workbook |
 | Upload validation | `packages/file-processing/src/upload.test.ts` | filename sanitisation, extension/content-type/size/magic-byte rejections |
+| File security | `packages/file-processing/src/security.test.ts` | reserved/illegal/over-long filenames, traversal-shaped storage keys (absolute/drive/NUL/`.`/`..`/empty) rejected + containment proof, `list` metadata by prefix, ZIP central-directory summaries, zip-bomb + entry-count rejection, tolerant handling of unreadable archives, memory-storage listing |
+| API security & reliability | `apps/api/src/security.test.ts` | API-key gate (missing/wrong/ok; `/healthz` open), per-IP rate limit `429` + `Retry-After`, security headers, error bodies without stacks, malformed JSON, idempotent `POST /runs` (same id, one run), stale-run recovery to `failed`, zip-bomb `422` storing nothing, failed-ingest cleanup, retention sweep keeps referenced uploads |
 | Dataset API | `apps/api/src/dataset.test.ts` | ingest + list + detail, row paging, re-analysis, traversal-safe names, 415/422/404/413 error states |
 | Configuration validation | `packages/core/src/domain/workflow-config.test.ts` | missing roles/columns, unknown datasets/columns, date-as-identifier and non-date-timestamp confirmation flow, empty columns, required/invalid options, duplicate assignments |
 | Configuration API | `apps/api/src/workflow-configuration.test.ts` | workflow definition exposed to UI, validate incomplete/complete + resolved preview, invalid save rejected (422), create/list/get/update version bump, run started from a configuration records `configurationId` |
 | Rules | `packages/rule-engine/src/rule-engine.test.ts` | operators (15), case/numeric/date coercions, membership/emptiness, safe regex, `latest`/`any_event`/`all_events` scopes, decision metadata (resulting values, evaluated conditions, matched rules, status), deterministic tie-breaks, same-priority conflicts + `rule_conflict`, no-match/`no_rule_match`, low-confidence threshold, `applyActions` semantics, validation (duplicates, missing values, bad regex, conflicting actions, shared priorities, unreachable duplicates) |
 | Rule management API | `apps/api/src/rule-set.test.ts` | list seeded active set, validate (valid + blocking errors), refuse invalid save (422 `invalid_rule_set`), create + deactivate previous, update version bump, run resolves and applies the active set, 404 |
-| AI layer | `packages/ai/src/ai.test.ts` | policy reasons, factory (noop default, openai requires key+model), noop result, balanced-JSON/schema parsing (prose + fences accepted; missing/malformed JSON and out-of-range confidence rejected; unknown keys stripped), redaction (excluded fields, entity key, latest-only), resolution (confident rule wins, AI never overrides, auto-approve gating, low-confidence/ambiguous flags, AI failure), service (not-consulted/disabled/skipped, suggested values, unknown class, redaction before provider, rate-limit retry then success, attempt-budget exhaustion, no retry on malformed, timeout of a hanging provider), OpenAI adapter with a mocked `fetch` (body shape/`response_format`, 401/429/malformed mapping) |
+| AI layer | `packages/ai/src/ai.test.ts` | policy reasons, factory (noop default, openai requires key+model), noop result, balanced-JSON/schema parsing (prose + fences accepted; missing/malformed JSON and out-of-range confidence rejected; unknown keys stripped), redaction (excluded fields, entity key, latest-only **and the event history**), resolution (confident rule wins, AI never overrides, auto-approve gating, low-confidence/ambiguous flags, AI failure), service (not-consulted/disabled/skipped, suggested values, unknown class, redaction before provider, rate-limit retry then success, attempt-budget exhaustion, no retry on malformed, timeout of a hanging provider), OpenAI adapter with a mocked `fetch` (body shape/`response_format`, 401/429/malformed mapping), and **AI security**: prompt-injection prose ignored, `__proto__`/unknown keys stripped, and a real loopback adapter contract (key only in the header, bounded payload, untrusted-data labelling) |
 | Workflow (AI) | `packages/workflow-engine/.../account-faults.test.ts` | +5 AI scenarios: confident AI proposal auto-approved only when no rule matched, AI can never override a confident rule (`ai_proposed_alternative`), low-confidence AI routes to review, provider failure keeps the run succeeding (`ai_failed`), and the request contains no raw row (bounded, non-identifying data) |
 | AI API | `apps/api/src/ai-classification.test.ts` | injected mock provider end to end through the HTTP API: a persisted `ai_suggested` decision with `decisionSource`, values and validated AI outcome, and the auto-approved account absent from the review queue |
 | Review domain | `packages/core/src/domain/review.test.ts` | derived `ReviewState` (incl. `ERROR` for `ai_failed`), `AUTO_RESOLVED` for no item, one definition per filter preset, `changedFields` (incl. removed fields), tolerant automation/event evidence parsing with fallbacks, audit-log schema defaults |
@@ -1205,9 +1333,10 @@ coverage reporting in CI. For the matching engine: a randomized/property test as
 selection is invariant under input shuffling, and a very-large-file (streaming) test once the loader is
 chunked. For the rule engine: a randomized/property test asserting the winner is invariant under rule
 shuffling, a golden test over the default account-faults rule set, and a Playwright test for the Rules editor
-(validate → save → run uses it). For the AI layer: an adapter contract test suite run against a local
-mock/hosted endpoint behind a gate, prompt-injection fixtures, and a test that redaction is applied for every
-request shape (including the history array).
+(validate → save → run uses it). The AI adapter contract, prompt-injection and history-redaction gaps are now
+closed (session 10). New security-focused gaps: a Postgres-gated test for durable idempotency, an upload
+fuzz/property test for the archive guard (including ZIP64), a brute-force/rate-limit boundary test, and a
+`npm audit`/dependency-scanning gate in CI.
 
 ## 14. Environment
 
@@ -1222,7 +1351,11 @@ npm run dev                 # API :4000, web :5173
 Variables (defaults in parentheses): `NODE_ENV` (development), `API_HOST`/`API_PORT` (127.0.0.1/4000),
 `LOG_LEVEL` (info), `LOG_PRETTY` (false), `CORS_ORIGIN` (http://localhost:5173),
 `REPOSITORY_DRIVER` (memory) + `DATABASE_URL` (required for postgres), `STORAGE_DRIVER` (local) +
-`STORAGE_LOCAL_DIR` (.data/storage), `MAX_UPLOAD_MB` (50), `DATASET_SAMPLE_ROWS` (10),
+`STORAGE_LOCAL_DIR` (.data/storage), `MAX_UPLOAD_MB` (50), `JSON_BODY_LIMIT_MB` (2),
+`MAX_XLSX_UNCOMPRESSED_MB` (512), `MAX_XLSX_ENTRIES` (20000),
+`RETENTION_UPLOAD_TTL_HOURS` (168), `RETENTION_SWEEP_INTERVAL_MINUTES` (60),
+`API_KEY` (empty = no auth), `RATE_LIMIT_MAX` (600), `RATE_LIMIT_WINDOW_MS` (60000),
+`TRUST_PROXY` (false), `DATASET_SAMPLE_ROWS` (10),
 `DATASET_MAX_SCAN_ROWS` (200000), `AI_PROVIDER` (noop), `OPENAI_API_KEY` (empty),
 `AI_MODEL` (empty), `AI_BASE_URL` (https://api.openai.com/v1), `AI_TIMEOUT_MS` (15000),
 `AI_MAX_ATTEMPTS` (2), `AI_EXCLUDED_FIELDS` (empty). Web: `VITE_API_BASE_URL` (empty → Vite dev proxy to the
@@ -1233,33 +1366,20 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 10: security, reliability & production hardening** (queue `10-session.md`; session 9 shipped
-saved workflows and the daily-report experience — see §8, and note that session 9's prompt was *saved
-workflows*, not the durable-persistence work this section previously predicted). This is the security pass,
-because the product handles uploaded business files. Audit and improve, in roughly this order:
-
-1. **File security.** Re-audit `packages/file-processing/src/upload.ts` and `LocalFileStorage`: filename
-   handling/basename, path-traversal protection, extension/content-type/magic-byte allowlists, size limits,
-   malicious/corrupt workbook handling (zip bombs, huge sheets), and add a temporary-file **cleanup + retention
-   strategy** (today uploads/artifacts live on disk indefinitely, and rejected uploads are not deleted).
-2. **API security.** Input validation is already strict (zod at every boundary) and error bodies are clean, but
-   there is **no authentication/authorization, no rate limiting and no tenant isolation**; document the
-   boundaries honestly, add request-size/rate limits where cheap, and keep the "local/trusted deployment only"
-   statement accurate.
-3. **Data security.** Secrets are env-only; files are unencrypted on local disk. Document what is stored, what
-   can be deleted, and how long temporary files live; ensure logs never contain file contents (they carry ids
-   and counts today).
-4. **AI security.** Re-confirm the data-minimisation guarantee (bounded request, no raw rows, `AI_EXCLUDED_FIELDS`
-   redaction), the strict output validation and the failure-to-review behaviour; add prompt-injection fixtures
-   and an adapter contract test against a local mock endpoint.
-5. **Reliability.** Add idempotency/failed-run recovery and job-state consistency analysis: what happens if the
-   process dies mid-run (docs currently say in-flight runs are lost in memory mode), partial processing, and the
-   append-only history's behaviour under retries. Consider retries where appropriate and document the rest.
-6. **Observability & privacy.** Structured pino logs already exist; add useful error reporting without leaking
-   sensitive content, and write the privacy section (what is stored, what is sent to an AI provider).
-7. **Testing.** Add security-focused tests for the most important attack/failure cases (traversal filenames,
-   spoofed content types, oversized/corrupt files, injection-shaped cell values, dead-provider paths).
-8. **Repository-wide security review** at the end, documented honestly (no absolute "secure" claim).
+**Product session 11: UI/UX & product polish** (queue `11-session.md`). The product is functionally complete
+through session 10 (security/reliability) and session 9 (saved workflows); session 11 is **UX only** — do not
+rewrite working backend logic. Audience: a nontechnical business user who understands spreadsheets. Work
+screen by screen (Landing, Dashboard, Create workflow, Upload, Column mapping, Rule configuration,
+Processing/run status, Run summary, Review queue, Individual review item, Export, Saved workflow) and apply
+the stated principles: the user always knows which step they are on and what the system is doing; errors say
+what happened and what to do next; automation decisions are explainable; review items are extremely fast to
+process; no gratuitous animation; tables usable on realistic datasets; destructive actions explicit;
+accessible and keyboard-friendly review; polished empty/loading/error/success states and confirmations; and
+improved typography, spacing, hierarchy, consistency and responsive behaviour. Verify with the existing
+four commands plus `npm run smoke` for anything API-affecting, and record real results here. Likely concrete
+gaps to check first: a true landing page (the app currently opens on the Dashboard), route-level code
+splitting for the ~575 KB web bundle, live run progress (runs show step results only after completion), and
+an explicit "delete/cleanup" confirmation flow given there is no delete API (see §10 / `docs/privacy.md`).
 
 **Deferred backlog (still open from earlier sessions), roughly in priority order:** verify Postgres
 (`docker compose up -d postgres`, migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated memory↔Postgres
@@ -1364,6 +1484,17 @@ configuration; route-level code splitting for the web bundle.
 - **Upload validation lives in `packages/file-processing/src/upload.ts`.** It sanitises filenames and
   enforces extension/content-type/size/magic-byte rules; add new formats there and in
   `TabularReader.describe`/`read`, not in route handlers.
+- **Untrusted input is validated at named seams, not ad hoc.** Filenames/limits/magic bytes →
+  `file-processing/upload.ts`; XLSX archive shape → `file-processing/archive.ts`; storage keys →
+  `LocalFileStorage.resolvePath` (must stay contained in the root; never bypass it); HTTP auth/rate
+  limits/headers → `apps/api/src/http/security.ts`; error bodies → `core/errors.ts` + `server.ts` (never
+  return 5xx `details`); AI output → `packages/ai/src/parse.ts`. Any new upload/route must go through these
+  seams rather than re-implementing a check.
+- **Reliability invariants:** a run may execute **at most once** (`RunService.execute` marks it in-flight
+  synchronously and skips non-queued runs — do not move the `executing.add` after an `await`);
+  `recoverStaleRuns()` is called during container creation and must stay; `IdempotencyService` replays
+  `POST /runs` for a repeated `Idempotency-Key` (in-process only — do not assume it survives a restart or
+  spans instances). Never claim a security guarantee stronger than `docs/security-review.md` states.
 - **Matching is the reusable join engine.** `packages/matching-engine/src/match.ts` owns
   primary↔event joining, grouping, deterministic latest-event selection and join statistics; never
   re-implement grouping/latest logic inside a workflow. Feed it raw records via accessors, then map
@@ -1390,7 +1521,10 @@ configuration; route-level code splitting for the web bundle.
   `apps/api/src/services/dataset-service.ts` →
   `apps/api/src/services/workflow-configuration-service.ts` →
   `packages/workflow-engine/src/workflows/account-faults/{types,steps,configuration}.ts` →
-  `apps/api/src/services/run-service.ts`.
+  `apps/api/src/services/run-service.ts` →
+  `packages/file-processing/src/{upload,archive}.ts` + `storage/local-file-storage.ts` +
+  `apps/api/src/http/security.ts` + `services/{retention,idempotency}-service.ts` →
+  `docs/security-review.md` + `docs/privacy.md`.
 
 ### Session log
 
@@ -1406,3 +1540,4 @@ configuration; route-level code splitting for the web bundle.
 | Product 7 | 2026-09-16 | Output generation & Excel export: OutputRecordState/ExportSummary + summariseOutputRecords in core, deterministic primary-order output with null blanks, streamed writeTableToStorage, XLSX leading Summary sheet + type preservation, validateStoredTable re-read validation that fails the run on mismatch, live ExportService/GET /runs/:id/export summary + status, run-page Final report panel, +13 tests (235 total). Verified: lint/typecheck/235 tests/build/smoke (export summary + validated xlsx/csv). |
 | Product 8 | 2026-09-16 | End-to-end workflow experience & run reproducibility: immutable `RunSnapshot` (frozen configuration + rule set) + `RunSnapshotRepository` + `run_snapshots` table (migration `0005`), `RunService` captures at creation and executes the snapshot, `GET /api/v1/runs/:id/snapshot` + snapshot summary on run DTOs, shared `WorkflowProgress` journey stepper + plain-language statuses/error help, run summary dashboard linking to the run-scoped review queue and report, `samples/field-service` fixtures, +10 tests (245 total). Verified: lint/typecheck/245 tests/build/smoke (snapshot frozen; full journey incl. reproducibility). |
 | Product 9 | 2026-09-16 | Saved workflows & the daily-report experience: reusable `SavedWorkflow` aggregate + pure `rebindConfiguration` (carry mappings by column name), `SavedWorkflowService`/`/api/v1/saved-workflows` (dashboard, read-only prepare, run-again with optional version save), `RunService` `configurationOverride` so one-off re-points freeze what they used, `exportStatusSchema` in core, Saved workflows dashboard + detail + Run again pages and Dashboard/nav/home updates, +13 tests (258 total). Verified: lint/typecheck/258 tests/build/smoke (dashboard, 4/4 carried mappings, run-again saved config v2). |
+| Product 10 | 2026-09-17 | Security, reliability & production hardening: hardened filename sanitisation + containment-proof storage paths + `FileStorage.list`; XLSX ZIP central-directory zip-bomb guard; ingestion cleanup-on-failure + `RetentionService` upload sweep; optional `API_KEY`, per-IP rate limit, security headers, body/multipart limits, `TRUST_PROXY`, no 5xx detail leakage, CORS credentials off; pino credential redaction; run double-execute guard + `recoverStaleRuns()` + `IdempotencyService` on `POST /runs`; AI prompt-injection/prototype-key/history-redaction + loopback adapter contract tests; new `docs/privacy.md`, `docs/security-review.md` (21 findings), ADR-019; +38 tests (296 total). Verified: lint/typecheck/296 tests/build/smoke. |
