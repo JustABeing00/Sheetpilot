@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useHealth, useMeta, useReviewQueue, useRuns, useWorkflows } from '../api/hooks.js';
+import { useDatasets, useHealth, useMeta, useReviewQueue, useRuns, useWorkflows } from '../api/hooks.js';
 import { Badge, Card, ErrorState, LoadingState, PageHeader, StatCard } from '../components/ui.js';
-import { statusTone } from '../lib/status.js';
+import { runStatusLabel, statusTone } from '../lib/status.js';
+import { PIPELINE_STAGES } from '../lib/pipeline.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
 
 export function DashboardPage() {
@@ -9,10 +10,42 @@ export function DashboardPage() {
   const health = useHealth();
   const workflows = useWorkflows();
   const runs = useRuns();
+  const datasets = useDatasets();
   const reviewQueue = useReviewQueue('needs_review');
 
   const recentRuns = runs.data?.items.slice(0, 6) ?? [];
   const latestRun = recentRuns[0];
+  const openReview = reviewQueue.data?.openCount ?? 0;
+
+  // The single most useful next action, based on what already exists.
+  const nextAction = (() => {
+    if ((datasets.data?.items.length ?? 0) === 0) {
+      return {
+        label: 'Step 1 · Upload your files',
+        description: 'Add the spreadsheet(s) this workflow reads, then map the columns.',
+        to: '/datasets',
+      };
+    }
+    if (!latestRun) {
+      return {
+        label: 'Step 2 · Set up and process',
+        description: 'Connect your files, confirm the columns, and start processing.',
+        to: '/setup',
+      };
+    }
+    if (openReview > 0) {
+      return {
+        label: `Step 4 · Review ${openReview} open ${openReview === 1 ? 'case' : 'cases'}`,
+        description: 'A person decides the unusual records before the report is final.',
+        to: '/review',
+      };
+    }
+    return {
+      label: 'Step 5 · Download the report',
+      description: 'Everything is resolved. Open the latest run and download the Excel file.',
+      to: `/runs/${latestRun.id}`,
+    };
+  })();
 
   return (
     <div className="page">
@@ -20,11 +53,33 @@ export function DashboardPage() {
         title="Dashboard"
         description="Recurring spreadsheet workflows, deterministic classification and human review in one place."
         actions={
-          <Link className="button button-primary" to="/runs/new">
-            New run
+          <Link className="button button-primary" to="/setup">
+            Start a workflow
           </Link>
         }
       />
+
+      <Card title="Your next step" subtitle={nextAction.description}>
+        <div className="next-step">
+          <strong>{nextAction.label}</strong>
+          <Link className="button button-primary" to={nextAction.to}>
+            Continue
+          </Link>
+        </div>
+        <ol className="journey-list">
+          {PIPELINE_STAGES.map((stage, index) => (
+            <li key={stage.key}>
+              <Link className="link" to={stage.to}>
+                <span className="journey-index">{index + 1}</span>
+                <span>
+                  <strong>{stage.label}</strong>
+                  <span className="muted small"> — {stage.description}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </Card>
 
       <div className="stat-grid">
         <StatCard
@@ -85,7 +140,7 @@ export function DashboardPage() {
                     </td>
                     <td>{run.workflowName}</td>
                     <td>
-                      <Badge tone={statusTone(run.status)}>{run.status}</Badge>
+                      <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
                     </td>
                     <td>
                       {run.reviewItemCount === 0

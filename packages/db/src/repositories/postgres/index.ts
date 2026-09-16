@@ -6,6 +6,7 @@ import {
   fileAssetSchema,
   reviewItemSchema,
   reviewResolutionLogSchema,
+  runSnapshotSchema,
   storedRuleSetSchema,
   stepRunSchema,
   workflowConfigurationSchema,
@@ -20,6 +21,7 @@ import {
   type ReviewItem,
   type ReviewListOptions,
   type ReviewResolutionLog,
+  type RunSnapshot,
   type StepRun,
   type StoredRuleSet,
   type Workflow,
@@ -37,6 +39,7 @@ import {
   ruleSets,
   runDecisions,
   runs,
+  runSnapshots,
   runSteps,
   workflowConfigurations,
   workflows,
@@ -88,6 +91,32 @@ const toReviewResolution = (row: typeof reviewResolutions.$inferSelect): ReviewR
 const toArtifact = (row: typeof artifacts.$inferSelect): Artifact => artifactSchema.parse(row);
 const toRuleSet = (row: typeof ruleSets.$inferSelect): StoredRuleSet =>
   storedRuleSetSchema.parse(row);
+
+/**
+ * The frozen configuration/rule-set payloads are stored as JSON, so their embedded `createdAt`/
+ * `updatedAt` timestamps come back as ISO strings. Revive them before the domain schema (which expects
+ * `Date`) validates the snapshot.
+ */
+function reviveEmbeddedDates(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!record) {
+    return null;
+  }
+  const { createdAt, updatedAt, ...rest } = record;
+  return {
+    ...rest,
+    ...(createdAt !== undefined ? { createdAt: new Date(createdAt as string) } : {}),
+    ...(updatedAt !== undefined ? { updatedAt: new Date(updatedAt as string) } : {}),
+  };
+}
+
+const toRunSnapshot = (row: typeof runSnapshots.$inferSelect): RunSnapshot =>
+  runSnapshotSchema.parse({
+    ...row,
+    configuration: reviveEmbeddedDates(row.configuration),
+    ruleSet: reviveEmbeddedDates(row.ruleSet),
+  });
 
 export function createPostgresRepositories(db: Database): Repositories {
   return {
@@ -231,6 +260,34 @@ export function createPostgresRepositories(db: Database): Repositories {
       async count() {
         const [row] = await db.select({ value: count() }).from(runs);
         return row?.value ?? 0;
+      },
+    },
+
+    runSnapshots: {
+      async create(snapshot) {
+        const [row] = await db
+          .insert(runSnapshots)
+          .values({
+            id: snapshot.id,
+            runId: snapshot.runId,
+            workflowSlug: snapshot.workflowSlug,
+            workflowVersion: snapshot.workflowVersion,
+            configurationId: snapshot.configurationId,
+            configuration: snapshot.configuration,
+            ruleSetId: snapshot.ruleSetId,
+            ruleSet: snapshot.ruleSet,
+            capturedAt: snapshot.capturedAt,
+          })
+          .returning();
+        return toRunSnapshot(row!);
+      },
+      async getByRunId(runId) {
+        const [row] = await db
+          .select()
+          .from(runSnapshots)
+          .where(eq(runSnapshots.runId, runId))
+          .limit(1);
+        return row ? toRunSnapshot(row) : null;
       },
     },
 

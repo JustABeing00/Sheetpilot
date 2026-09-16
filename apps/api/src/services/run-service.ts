@@ -7,6 +7,7 @@ import {
   outputRecordStateForReviewState,
   reviewItemSchema,
   reviewStateForItem,
+  runSnapshotSchema,
   stepRunIds,
   stepRunSchema,
   summariseOutputRecords,
@@ -18,6 +19,7 @@ import {
   type FileStorage,
   type Logger,
   type Repositories,
+  type RunSnapshot,
   type TabularFormat,
   type WorkflowRun,
 } from '@sheetpilot/core';
@@ -86,12 +88,44 @@ export class RunService {
     });
 
     const created = await this.deps.repositories.runs.create(run);
+    // Freeze the configuration + rule-set versions before execution so a later edit can never change
+    // what this run produced. Every run is reproducible from its own snapshot.
+    await this.captureSnapshot(created);
     this.deps.logger.info(
       { runId: created.id, workflowSlug: created.workflowSlug },
       'run queued for execution',
     );
     void this.execute(created.id);
     return created;
+  }
+
+  async getSnapshot(runId: string): Promise<RunSnapshot | null> {
+    return this.deps.repositories.runSnapshots.getByRunId(runId);
+  }
+
+  /**
+   * Writes the write-once run snapshot: the saved configuration (if the run was started from one) and
+   * the workflow's active rule set, exactly as they were when the run was created.
+   */
+  private async captureSnapshot(run: WorkflowRun): Promise<RunSnapshot> {
+    const configuration = run.configurationId
+      ? await this.deps.repositories.workflowConfigurations.getById(run.configurationId)
+      : null;
+    const ruleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(run.workflowSlug);
+
+    const snapshot = runSnapshotSchema.parse({
+      id: newId(),
+      runId: run.id,
+      workflowSlug: run.workflowSlug,
+      workflowVersion: run.workflowVersion,
+      configurationId: configuration?.id ?? null,
+      configuration: configuration ?? null,
+      ruleSetId: ruleSet?.id ?? null,
+      ruleSet: ruleSet ?? null,
+      capturedAt: this.deps.clock.now(),
+    });
+
+    return this.deps.repositories.runSnapshots.create(snapshot);
   }
 
   async execute(runId: string): Promise<void> {
@@ -125,16 +159,19 @@ export class RunService {
     const runLogger = this.deps.logger.child({ runId });
 
     try {
-      const activeRuleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(
-        run.workflowSlug,
-      );
+      // Prefer the frozen snapshot: a rule edit after the run was queued must not change its result.
+      // Only legacy runs without a snapshot fall back to whatever is active now.
+      const snapshot = await this.deps.repositories.runSnapshots.getByRunId(run.id);
+      const ruleSet = snapshot
+        ? snapshot.ruleSet
+        : await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(run.workflowSlug);
 
       const execution = await workflow.execute(
         {
           primaryFileId: run.primaryFileId,
           eventsFileId: run.eventsFileId,
           config: run.config,
-          ...(activeRuleSet ? { ruleSet: activeRuleSet } : {}),
+          ...(ruleSet ? { ruleSet } : {}),
         },
         ctx,
       );

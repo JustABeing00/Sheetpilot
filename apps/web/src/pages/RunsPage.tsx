@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useRuns } from '../api/hooks.js';
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui.js';
-import { statusTone } from '../lib/status.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
+import { runStatusLabel, statusTone } from '../lib/status.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
 
 export function RunsPage() {
@@ -9,12 +10,13 @@ export function RunsPage() {
 
   return (
     <div className="page">
+      <WorkflowProgress current="processing" />
       <PageHeader
-        title="Runs"
-        description="Each run matches the files, selects the latest record per entity, applies rules and produces artifacts."
+        title="Processing runs"
+        description="Each run matches your files, picks the latest event per record, applies the rules and produces the report."
         actions={
-          <Link className="button button-primary" to="/runs/new">
-            New run
+          <Link className="button button-primary" to="/setup">
+            Start a workflow
           </Link>
         }
       />
@@ -27,10 +29,10 @@ export function RunsPage() {
         {runs.isSuccess && runs.data.items.length === 0 ? (
           <EmptyState
             title="No runs yet"
-            description="Start a run to generate a completed output file and a review queue."
+            description="Set up a workflow to generate a completed report and a review queue."
             action={
-              <Link className="button button-primary" to="/runs/new">
-                New run
+              <Link className="button button-primary" to="/setup">
+                Set up a workflow
               </Link>
             }
           />
@@ -42,8 +44,8 @@ export function RunsPage() {
                 <th>Run</th>
                 <th>Workflow</th>
                 <th>Status</th>
-                <th>Accounts</th>
-                <th>Auto-approved</th>
+                <th>Records</th>
+                <th>Auto-resolved</th>
                 <th>Review</th>
                 <th>Created</th>
               </tr>
@@ -63,7 +65,7 @@ export function RunsPage() {
                     </div>
                   </td>
                   <td>
-                    <Badge tone={statusTone(run.status)}>{run.status}</Badge>
+                    <Badge tone={statusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
                   </td>
                   <td>{run.stats['accounts'] ?? '—'}</td>
                   <td>{formatPercent(run.stats['autoApprovalRate'])}</td>

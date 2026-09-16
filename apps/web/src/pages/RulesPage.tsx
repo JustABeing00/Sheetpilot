@@ -19,6 +19,7 @@ import {
 } from '../api/hooks.js';
 import { ApiError } from '../api/client.js';
 import { Badge, Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import {
   CONDITION_SCOPE_LABELS,
   OPERATORS_WITHOUT_VALUE,
@@ -526,9 +527,10 @@ export function RulesPage() {
 
   return (
     <div className="page">
+      <WorkflowProgress current="rules" />
       <PageHeader
         title="Rules"
-        description="Deterministic business rules. Everything here is data — no code — and is validated before it can be saved."
+        description="Deterministic business rules. Everything here is data — no code — and is validated before it can be saved. A run freezes the rules it starts with, so edits only affect future runs."
       />
 
       <Card title="Rule set" subtitle="One active rule set per workflow is used by every new run.">

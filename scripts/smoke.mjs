@@ -232,6 +232,24 @@ async function main() {
     `configured run: ${configuredFinished.status}, ${configuredFinished.stats.accounts} accounts, ${configuredFinished.reviewItemCount} review items`,
   );
 
+  // Reproducibility: a run freezes the exact setup + rule versions it used, so later edits cannot
+  // retroactively change a historical run.
+  assert(configuredFinished.snapshot, 'a run must expose a frozen snapshot of its inputs');
+  assert(
+    configuredFinished.snapshot.configurationVersion === configuration.version,
+    'the run snapshot must record the configuration version that was used',
+  );
+  assert(
+    configuredFinished.snapshot.ruleCount >= 1,
+    'the run snapshot must record the rule set that was used',
+  );
+  const snapshot = await request(`/api/v1/runs/${configuredFinished.id}/snapshot`);
+  assert(snapshot.configuration, 'the full snapshot must include the frozen configuration');
+  assert(snapshot.ruleSet, 'the full snapshot must include the frozen rule set');
+  console.log(
+    `snapshot      : config v${snapshot.configuration.version} (${snapshot.configuration.name}), rules v${snapshot.ruleSet.version} (${snapshot.ruleSet.rules.length} rules)`,
+  );
+
   // Human review loop: filter presets with counts, an append-only audit trail and output regeneration.
   const reviewFilter = await request(
     `/api/v1/review-items?filter=needs_review&runId=${configuredFinished.id}`,

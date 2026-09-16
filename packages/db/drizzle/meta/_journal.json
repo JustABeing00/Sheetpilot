@@ -36,6 +36,13 @@
       "when": 1789578815719,
       "tag": "0004_lethal_agent_zero",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789581576119,
+      "tag": "0005_clear_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

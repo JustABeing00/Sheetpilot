@@ -15,6 +15,7 @@ import type {
 } from '../domain/entities.js';
 import type { RunStatus, ReviewItemStatus, ReviewReason, ReviewSeverity } from '../domain/enums.js';
 import type { ReviewResolutionLog } from '../domain/review.js';
+import type { RunSnapshot } from '../domain/run-snapshot.js';
 import type { StoredRuleSet } from '../domain/rules.js';
 import type { DatasetRepository } from './datasets.js';
 import type { WorkflowConfigurationRepository } from './workflow-configurations.js';
@@ -44,6 +45,15 @@ export interface RunRepository {
   getById(id: RunId): Promise<WorkflowRun | null>;
   list(options?: RunListOptions): Promise<WorkflowRun[]>;
   count(): Promise<number>;
+}
+
+/**
+ * Immutable per-run snapshot of the configuration and rule-set versions that were in force when the run
+ * was created. Write-once: there is no update method by design.
+ */
+export interface RunSnapshotRepository {
+  create(snapshot: RunSnapshot): Promise<RunSnapshot>;
+  getByRunId(runId: RunId): Promise<RunSnapshot | null>;
 }
 
 export interface StepRunRepository {
@@ -134,6 +144,7 @@ export interface Repositories {
   workflowConfigurations: WorkflowConfigurationRepository;
   workflows: WorkflowRepository;
   runs: RunRepository;
+  runSnapshots: RunSnapshotRepository;
   steps: StepRunRepository;
   decisions: DecisionRepository;
   reviewItems: ReviewItemRepository;

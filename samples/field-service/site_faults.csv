@@ -1,0 +1,11 @@
+Site Ref,Reported At,Fault Notes,Reported By
+00101,2026-02-01 08:15:00,No power detected at the site,SCADA
+00102,2026-02-02 09:00:00,Sensor fault on intake probe,Engineer
+00102,2026-02-03 11:30:00,Low battery warning overnight,SCADA
+00104,2026-02-04 07:30:00,Power loss reported by monitoring,SCADA
+00104,2026-02-04 07:30:00,Battery degraded signal received,SCADA
+00105,2026-02-05 18:45:00,Power loss reported by monitoring,SCADA
+00105,2026-02-06 06:10:00,Mains failure confirmed by field team,Engineer
+00106,2026-02-06 12:00:00,General fault detected,SCADA
+00107,2026-02-07 14:00:00,Device reset completed,Engineer
+00999,2026-02-08 10:00:00,Orphan site fault with no site record,SCADA

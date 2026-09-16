@@ -30,6 +30,7 @@ import {
   LoadingState,
   PageHeader,
 } from '../components/ui.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import {
   datasetLabel,
   issueTone,
@@ -346,9 +347,15 @@ export function SetupPage() {
 
   return (
     <div className="page">
+      <WorkflowProgress current="setup" />
       <PageHeader
-        title={configurationId ? 'Edit workflow setup' : 'Workflow setup'}
-        description="Connect your uploaded files, map the columns the workflow needs, check the configuration, then start processing. Everything is saved so you can reuse it next month."
+        title={configurationId ? 'Edit workflow setup' : 'Set up a workflow'}
+        description="Setup is preparation: connect your files and confirm the columns. Processing is a separate step you start when the setup is ready. Everything is saved so you can reuse it next month."
+        actions={
+          <Link className="button" to="/rules">
+            Tune the rules
+          </Link>
+        }
       />
 
       <Card title="Workflow" subtitle="Which recurring process are you configuring?">
@@ -577,13 +584,20 @@ export function SetupPage() {
         <button
           className="button"
           type="button"
-          disabled={!saved}
+          disabled={!saved || createRun.isPending}
           onClick={() => void continueToProcessing()}
         >
-          Continue to processing
+          {createRun.isPending ? 'Starting…' : 'Start processing'}
         </button>
         {!valid ? (
           <span className="muted small">Resolve the blocking issues above to save.</span>
+        ) : valid && !saved ? (
+          <span className="muted small">Save the setup to enable processing.</span>
+        ) : saved ? (
+          <span className="muted small">
+            Processing creates a new run. The setup it uses is frozen for that run, so you can keep
+            editing without changing the results.
+          </span>
         ) : null}
       </div>
     </div>

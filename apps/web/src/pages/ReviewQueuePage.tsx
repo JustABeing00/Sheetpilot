@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { ReviewFilter, ReviewItemDto } from '@sheetpilot/core';
 import {
   AI_AMBIGUITY_LABELS,
@@ -7,6 +8,7 @@ import {
 } from '@sheetpilot/core';
 import { useResolveReviewItem, useReviewHistory, useReviewQueue } from '../api/hooks.js';
 import { Badge, EmptyState, ErrorState, LoadingState, PageHeader } from '../components/ui.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import { formatCellValue, formatDateTime, humanizeToken } from '../lib/format.js';
 import { reviewStateTone, severityTone } from '../lib/status.js';
 
@@ -19,8 +21,10 @@ function outputFieldsFor(item: ReviewItemDto): string[] {
 }
 
 export function ReviewQueuePage() {
+  const [searchParams] = useSearchParams();
+  const runId = searchParams.get('runId') ?? undefined;
   const [filter, setFilter] = useState<ReviewFilter>('needs_review');
-  const queue = useReviewQueue(filter);
+  const queue = useReviewQueue(filter, runId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const items = useMemo(() => queue.data?.items ?? [], [queue.data]);
@@ -58,8 +62,9 @@ export function ReviewQueuePage() {
 
   return (
     <div className="page">
+      <WorkflowProgress current="review" />
       <PageHeader
-        title="Review queue"
+        title={runId ? 'Review exceptions' : 'Review queue'}
         description="Only the unusual cases need a human. Accept, override or dismiss with a full audit trail."
         actions={
           <span className="muted small">
@@ -67,6 +72,22 @@ export function ReviewQueuePage() {
           </span>
         }
       />
+
+      {runId ? (
+        <div className="context-banner">
+          <span>
+            Showing review items for <span className="mono">{runId.slice(0, 8)}</span> only.
+          </span>
+          <span className="context-banner-actions">
+            <Link className="link" to={`/runs/${runId}`}>
+              Back to run summary
+            </Link>
+            <Link className="link" to={`/runs/${runId}#final-report`}>
+              Go to report
+            </Link>
+          </span>
+        </div>
+      ) : null}
 
       <div className="review-filters" role="tablist" aria-label="Review filters">
         {REVIEW_FILTER_DEFINITIONS.map((definition) => {
@@ -229,9 +250,9 @@ function ReviewDetail({
         </div>
         <div className="review-card-meta">
           <span>{formatDateTime(item.createdAt)}</span>
-          <a className="link" href={`/runs/${item.runId}`}>
+          <Link className="link" to={`/runs/${item.runId}`}>
             Open run
-          </a>
+          </Link>
         </div>
       </header>
 

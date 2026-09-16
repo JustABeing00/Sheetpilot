@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 7 — output generation & Excel export)
+**Last updated:** 2026-09-16 (product session 8 — end-to-end workflow experience & run reproducibility)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -55,10 +55,26 @@ leading-zero account numbers and identifiers longer than `Number.MAX_SAFE_INTEGE
 dates, blanks stay blank. The run page shows the summary, status and download buttons. **Status: achieved**
 (see §8, verified in §9).
 
-**Next (product session 8):** durable persistence and the wider review loop. See §15: verify Postgres
-(migrations `0000`–`0004`, `REPOSITORY_DRIVER=postgres`, gated repository integration tests), immutable
-rule/configuration version snapshots, and the first pass at turning human corrections into rule
-suggestions. Scheduling/watched-folder ingestion and streaming the loader remain on the roadmap.
+**Product session 8 objective: the end-to-end workflow experience.** The individual capabilities are now
+one coherent product journey — upload → set up → tune rules → process → review → export — with a shared
+progress indicator and plain-language statuses on every stage. The bigger structural change is
+**reproducibility**: a run no longer reads the active rule set at execution time. `RunService.createRun`
+freezes a write-once `RunSnapshot` (the full saved `WorkflowConfiguration` and the full active
+`StoredRuleSet`, plus the workflow version and capture time) in a dedicated `run_snapshots` table, and
+execution evaluates the snapshot's rules. Every run DTO carries a compact `snapshot` summary and
+`GET /api/v1/runs/:id/snapshot` returns the frozen payloads, so editing a setup or rule set tomorrow can
+never change yesterday's report — a new run picks up the new versions. The UI surfaces this on the run
+summary ("Reproducibility" card), adds a run summary dashboard that links straight to the review queue and
+the report, makes processing statuses and errors human-readable, and lets the review queue be scoped to a
+single run (`/review?runId=…`) so a reviewer can work one run end to end and jump to the report. **Status:
+achieved** (see §8, verified in §9).
+
+**Next (product session 9):** durable persistence and the loop back into rules. See §15: verify Postgres
+(migrations `0000`–`0005`, `REPOSITORY_DRIVER=postgres`, gated repository integration tests including
+`run_snapshots`), turn human corrections into rule suggestions, immutable version *history* tables (the run
+snapshot already guarantees reproducibility; this would add browsable per-version history), reviewer
+identity, and reopening a resolved item. Scheduling/watched-folder ingestion and streaming the loader remain
+on the roadmap.
 
 ## 3. Product Vision
 
@@ -86,7 +102,7 @@ core workflow is excellent.
 | Frontend | React 19.3, Vite 8.3, React Router 7, TanStack Query 5, plain CSS tokens | No UI framework; typed API client parses responses with zod contracts |
 | Backend | Node.js 22+ (developed on 24.6), TypeScript 5.x strict, Fastify 5.12 | `@fastify/multipart` uploads, `@fastify/cors`, pino logs |
 | Validation/contracts | zod 4.6 (`@sheetpilot/core`) | Same schemas used by API and web |
-| Database | Postgres 16 via Drizzle ORM 0.45 + drizzle-kit; in-memory repositories by default | SQL migrations generated; no live Postgres verified yet |
+| Database | Postgres 16 via Drizzle ORM 0.45 + drizzle-kit; in-memory repositories by default | 12 tables incl. immutable `run_snapshots`; SQL migrations `0000`–`0005` generated; no live Postgres verified yet |
 | File processing | `csv-parse` / `csv-stringify` (streaming), `exceljs` (buffered) | Behind `TabularReader`/`TabularWriter` async generator interfaces; readers also expose `describe()` for sheets+headers |
 | Dataset inspection | `inspectDataset` in `@sheetpilot/file-processing` | Bounded one-pass scan → `DatasetProfile` (types, emptiness, uniqueness, samples, warnings); persisted via `DatasetRepository` |
 | Workflow configuration | `@sheetpilot/core` domain + `WorkflowConfigurationService` (API) | Roles-as-data (`WorkflowConfigurationDefinition`), pure validation, persisted/versioned `WorkflowConfiguration`, workflow-specific `resolveRunInput` |
@@ -98,7 +114,9 @@ core workflow is excellent.
 | AI safety | Policy, redaction and provenance | Only consulted per `AiPolicy`; never overrides a matched rule; a bounded structured request (no raw rows); `AI_EXCLUDED_FIELDS` redaction; failures become review reasons (`ai_failed`/`ai_low_confidence`/`ai_ambiguous`/`ai_proposed_alternative`); `decisionSource` + full AI outcome persisted and exposed via DTOs; `__DecisionSource` output column |
 | Review / human-in-the-loop | Derived `ReviewState` + append-only `review_resolutions` audit + `ReviewService` | Filter presets + per-filter counts; rich item DTO (automation, latest event, history, AI outcome, applicable rules); resolve/override/dismiss records the audit trail and regenerates the output; human decisions tracked separately from automation |
 | Output / export | `ExportSummary` (core) + streaming writers + `ExportService` | Data-preserving, deterministic, type-safe Excel (primary) + CSV export with a `Summary` worksheet; generated files re-read and validated before the run succeeds; live derived export summary + status endpoint and run-page panel |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 235 tests, 26 files, all green |
+| Reproducibility | Immutable `RunSnapshot` (core) + `RunSnapshotRepository` + `run_snapshots` table | Frozen configuration + rule-set versions captured at run creation; execution uses the snapshot; `GET /api/v1/runs/:id/snapshot`; summary on every run DTO |
+| Product workflow UX | `WorkflowProgress` stepper + `lib/pipeline.ts` + `lib/status.ts` labels | One resumable journey (Set up → Rules → Process → Review → Export); plain-language statuses and error help; run summary → review queue → report |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 245 tests, 28 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -122,9 +140,11 @@ apps/web            React SPA  ──typed HTTP contracts──▶  apps/api (Fa
                                           │      AiClassificationService + deterministic-first resolve)
                                           ├──▶ review (derived ReviewState + append-only resolution
                                           │      audit + ReviewService output regeneration)
-                                          ├──▶ output/export (ExportSummary + streaming, validated
-                                          │      Excel/CSV writers + ExportService status)
-                                          ▼
+                                           ├──▶ output/export (ExportSummary + streaming, validated
+                                           │      Excel/CSV writers + ExportService status)
+                                           ├──▶ run snapshot (immutable frozen configuration + rules,
+                                           │      captured at run creation, evaluated on execute)
+                                           ▼
                                   core (domain, schemas, ports)  ◀── db (Drizzle schema + repos)
 ```
 
@@ -140,8 +160,11 @@ returns structural/semantic issues (from `validateWorkflowConfiguration` in `cor
 preview → saving persists a versioned `WorkflowConfiguration` →
 `POST /api/v1/runs { configurationId }` resolves it through `RegisteredWorkflow.resolveRunInput` into file
 ids + config keys.
-Run lifecycle: `POST /files` → `POST /runs` (202, queued) → background `RunService.execute` →
-step traces + artifacts + decision log + review items → run `succeeded`.
+Run lifecycle: `POST /files` → `POST /runs` (202, queued) → `RunService.createRun` freezes a write-once
+`RunSnapshot` (configuration + rule set as they are now) → background `RunService.execute` evaluates the
+snapshot's rules → step traces + artifacts + decision log + review items → run `succeeded`. Editing the
+configuration or rules afterwards affects only future runs; `GET /api/v1/runs/:id/snapshot` returns the frozen
+inputs and every run DTO carries a `snapshot` summary.
 Matching lifecycle: the workflow's load steps produce raw primary/event records → the `group-events` step
 calls `matchRecords` (`@sheetpilot/matching-engine`), which normalizes identifiers, joins events to
 entities, orders each entity's complete event history latest-first and returns the entities plus join
@@ -194,7 +217,8 @@ apps/
     services/run-service.ts    run creation/execution, step persistence, artifacts; injects the active rule set
     services/review-service.ts human review resolution, append-only audit trail, output-artifact regeneration
     services/export-service.ts derives the live export summary + status and lists the validated deliverables
-    server.test.ts / review.test.ts  API integration + E2E, including the review queue, audit trail and regeneration
+    server.test.ts / review.test.ts / export.test.ts  API integration + E2E, including the review queue, audit trail, regeneration and export
+    workflow-journey.test.ts  full configuration-driven journey: upload → map → run → review → export, plus rule/setup-change reproducibility
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
     http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, files, datasets, runs, review-items, artifacts
@@ -207,8 +231,9 @@ apps/
     components/AppShell.tsx        sidebar shell, API status, open-review counter
     components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
     components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
+    components/WorkflowProgress.tsx  shared end-to-end journey stepper (Set up → Rules → Process → Review → Export)
     pages/*.tsx            Dashboard, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
-    lib/format.ts, lib/rules.ts, lib/status.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones, dataset column/flag helpers, mapping suggestions
+    lib/format.ts, lib/rules.ts, lib/status.ts, lib/pipeline.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones + plain-language run/error labels, journey stages, dataset helpers, mapping suggestions
     styles/app.css         design tokens + component styles (light professional theme)
 packages/
   core/src/
@@ -222,6 +247,8 @@ packages/
                            kinds, structured request/result/outcome schemas, target + event + rule summaries
     domain/review.ts       Review domain: derived ReviewState (+ labels), queue filter presets, automation and
                            event schemas, append-only ReviewResolutionLog, changedFields + evidence parsers
+    domain/run-snapshot.ts Immutable per-run snapshot (frozen WorkflowConfiguration + StoredRuleSet) and the
+                           compact summary embedded on every run DTO
     domain/output.ts       Export domain: OutputRecordState (+ labels) derived from ReviewState, the
                            ExportSummary schema, summariseOutputRecords, unmatched-reason helper
     api/contracts.ts       HTTP request/response schemas shared with the web app
@@ -255,12 +282,13 @@ packages/
                                rules.ts (taxonomy + 7 rules), steps.ts (5 steps; group-events delegates to matching-engine),
                                workflow.ts (program + registered workflow)
   db/src/
-    schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_steps, run_decisions, review_items, review_resolutions, artifacts
+    schema/tables.ts       workflows, rule_sets, files, datasets, workflow_configurations, runs, run_snapshots, run_steps, run_decisions, review_items, review_resolutions, artifacts
     client.ts, migrations.ts, scripts/migrate.ts
     repositories/memory/   full in-memory implementation of every port (used by default + tests)
     repositories/postgres/ Drizzle implementation (type-checks; NOT yet run against a live database)
     drizzle/               generated migration 0000_lying_jigsaw.sql + snapshot
 samples/account-faults/    canonical demo CSVs + README with expected outcomes (used by tests + smoke)
+samples/field-service/     second representative fixture set (site faults) for the end-to-end journey test
 scripts/smoke.mjs          end-to-end smoke test against a running API
 docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 ```
@@ -275,6 +303,7 @@ docs/architecture.md, docs/decisions.md   architecture deep dive and ADR log
 | `WorkflowConfigurationDefinition` | What a workflow needs mapped (declared as data) | datasetRoles[] (key, label, required, multiple), columnRoles[] (key, datasetRole, semantic, required, multiple, configKey), options[] |
 | `WorkflowConfiguration` | A saved, versioned setup: which datasets play which roles and which real columns fill semantic roles | workflowSlug/version, name, version, assignments[] (role→datasetId), mappings[] (role→datasetId→column, confirmed), options |
 | `WorkflowRun` | One execution of a workflow | status, workflowSlug/version, file ids, configurationId, config, stats, error, timestamps |
+| `RunSnapshot` | Immutable, write-once capture of a run's inputs (never updated) | runId (unique), workflowSlug/version, configurationId + frozen `WorkflowConfiguration`, ruleSetId + frozen `StoredRuleSet`, capturedAt |
 | `StepRun` | One pipeline step of a run | stepId, order, status, durationMs, metrics, error |
 | `DecisionRecord` | Per-entity explainability record | entityKey, matchedRuleIds, aiAssisted, decisionSource (`deterministic`/`ai_suggested`/`none`), confidence, reviewReasons, outputValues, evidence (rule trace + AI outcome/provenance) |
 | `ReviewItem` | A case for human review | entityKey, reason, severity, status (`open`/`resolved_accepted`/`resolved_overridden`/`dismissed`), title, detail, suggestedValues, evidence, resolution |
@@ -302,6 +331,49 @@ taxonomy (each taxonomy target carries the output values it implies so an accept
 the same columns as a rule action).
 
 ## 8. Completed
+
+### Product session 8 — End-to-end workflow experience & run reproducibility (2026-09-16)
+
+- [x] `@sheetpilot/core`:
+  - new `domain/run-snapshot.ts` — the immutability vocabulary: `RunSnapshot` (runId, workflowSlug/version,
+    configurationId + frozen `WorkflowConfiguration`, ruleSetId + frozen `StoredRuleSet`, `capturedAt`) and
+    the compact `runSnapshotSummarySchema` + pure `toRunSnapshotSummary`.
+  - `ports/repositories.ts` — new write-only `RunSnapshotRepository` (`create`/`getByRunId`, no update by
+    design) added to `Repositories`.
+  - `api/contracts.ts` — `runSnapshotSummaryDtoSchema` embedded on every `runDtoSchema`/`runSummaryDtoSchema`
+    (nullable for pre-snapshot runs) and the full `runSnapshotDtoSchema` for the audit endpoint.
+- [x] `@sheetpilot/db`: new `run_snapshots` table (`run_id` unique, frozen configuration/rule-set JSON) +
+  generated migration `0005_clear_the_anarchist.sql`; in-memory and Postgres repositories (the Postgres
+  adapter revives the embedded ISO timestamps before the domain schema validates the payload).
+- [x] `apps/api`:
+  - `RunService.createRun` now captures the run snapshot (the saved configuration, if any, plus the active
+    rule set) before execution; `execute` evaluates the **snapshot's** rules and only legacy runs fall back
+    to the active set; `getSnapshot(runId)` exposed.
+  - `GET /api/v1/runs/:id/snapshot` returns the full frozen configuration + rule set; run list/detail DTOs
+    carry the compact snapshot summary.
+- [x] `apps/web` — the end-to-end workflow experience:
+  - new `components/WorkflowProgress.tsx` + `lib/pipeline.ts`: one shared, resumable journey stepper
+    (Set up → Rules → Process → Review → Export) shown on Datasets, Setup, Rules, Runs, Run summary and the
+    Review queue.
+  - `lib/status.ts` gained plain-language `runStatusLabel`/`runStatusDescription`, `exportStatusLabel` and
+    `describeRunError` (maps technical errors to actionable guidance).
+  - **Run summary** is now a real dashboard: a status banner with the next action, a **Reproducibility**
+    card showing the frozen configuration/rule-set versions, the Final report (summary, validation and
+    downloads), a link straight to the run-scoped review queue, and a report CTA once everything is resolved.
+  - the **Review queue** accepts `?runId=` and shows a run-context banner with back-to-run and go-to-report
+    links; Dashboard gained a "next step" card and the journey list; Setup distinguishes setup from execution
+    and starts processing explicitly.
+- [x] Samples: a second, independently created fixture set `samples/field-service/` (`service_sites.csv`,
+  `site_faults.csv`, README) exercising the configuration-driven path, zero-padded identifiers, conflicting
+  history, a duplicate primary key, a missing site and an orphan event.
+- [x] Tests: +10 (245 total, 28 files) — `apps/api/src/workflow-journey.test.ts` (8: the full journey —
+  upload → validate → save → run → freeze snapshot → classify → review every exception → export ready, then
+  **reproducibility**: editing the setup and replacing the active rule set leaves the historical run's
+  decisions and snapshot unchanged while a new run picks up the new versions) and
+  `packages/core/src/domain/run-snapshot.test.ts` (2: schema defaults, summary mapping).
+- [x] `scripts/smoke.mjs` now asserts the frozen snapshot on the configured run and reads
+  `GET /api/v1/runs/:id/snapshot`.
+- [x] Docs: ADR-017, `docs/architecture.md` (reproducibility lifecycle + abstractions), README, this file.
 
 ### Product session 7 — Output generation & Excel export (2026-09-16)
 
@@ -666,9 +738,11 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 26 files / 235 tests passed |
+| Tests | `npm test` | 28 files / 245 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
-| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items); `__DecisionSource` present in the output CSV |
+| Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; deterministic vs not-consulted vs disabled AI provenance asserted; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) with a frozen snapshot (`config v1, rules v1 (7 rules)`); `__DecisionSource` present in the output CSV |
+| End-to-end journey (API E2E) | `npx vitest run apps/api/src/workflow-journey.test.ts` | upload field-service datasets → validate mapping (resolved config preview) → save configuration v1 → run → freeze snapshot (config v1, 7 rules) → classify (2 auto / 5 review with the expected reasons) → review every exception (override no-events + accept others) → export `ready`; then edit the setup + replace the active rule set and prove the historical run's decisions and snapshot are **unchanged** while a new run picks up the new versions (`no_rule_match`) |
+| Run snapshot (core) | `npx vitest run packages/core/src/domain/run-snapshot.test.ts` | schema defaults (null configuration/rule set) and summary mapping (versions, names, rule count) |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
@@ -681,7 +755,7 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | Output/export (core) | `npx vitest run packages/core/src/domain/output.test.ts` | state mapping, unmatched reasons, full aggregation, defaults |
 | Output/export (writers) | `npx vitest run packages/file-processing/src/export.test.ts` | streaming CSV write + validation, XLSX leading `Summary` sheet, type preservation (leading zeros, long identifiers, dates, blanks), row-count + column validation failures |
 | Output/export (API E2E) | `npx vitest run apps/api/src/export.test.ts` | live summary/validation/pending-review, XLSX `Summary` sheet + deterministic primary-file order, `ready` after every case is reviewed, leading-zero identifiers preserved through upload → run → xlsx |
-| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) + `0004_lethal_agent_zero.sql` (`review_resolutions` + indexes) |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) + `0003_eager_dagger.sql` (`run_decisions.decision_source`) + `0004_lethal_agent_zero.sql` (`review_resolutions` + indexes) + `0005_clear_the_anarchist.sql` (`run_snapshots`) |
 
 Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
 in the **Datasets** UI → **Setup**: assign datasets to roles, map the account/timestamp/description/output
@@ -694,14 +768,22 @@ CSV/XLSX + review queue CSV → decision log (deterministic vs AI-suggested + AI
 full history, the deterministic result, applicable rules, confidence and any AI suggestion side by side,
 then accept/override/dismiss with a note, keyboard shortcuts and next-item navigation → each decision appends
 an audit entry (what automation proposed, what changed, when) and rewrites the output file so the export
-matches the reviewed result. The legacy path (upload via `/files`, start a run with explicit file ids and
-the config form) still works.
+matches the reviewed result. Throughout, a shared progress indicator shows where the user is in the journey
+(Set up → Rules → Process → Review → Export) and every stage is a real, resumable page. The legacy path
+(upload via `/files`, start a run with explicit file ids and the config form) still works.
+
+Every run now **freezes a snapshot** of the configuration and rule-set versions it started with; the run
+summary shows them ("Reproducibility"), links straight to the run-scoped review queue, and offers the report
+download once every exception is resolved. Editing a setup or the rules afterwards changes only future runs —
+the historical run's decisions, artifacts and snapshot are untouched (proven by the journey test).
 
 Sample run results (canonical `samples/account-faults` files with the default noop provider): 9 accounts,
 13 events, 10 output rows, 2 auto-approved, 7 review items (conflicting history, no events, no rule match,
 low confidence, duplicate primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
-No AI is consulted by the default provider; the AI tests inject a mock provider to exercise the assisted
-paths.
+Second fixture set (`samples/field-service`, configuration-driven): 7 records, 8 output rows, 2 auto-resolved,
+5 review items (conflicting history, no events, ambiguous timestamp, duplicate primary key, low confidence),
+1 orphan event. No AI is consulted by the default provider; the AI tests inject a mock provider to exercise
+the assisted paths.
 
 ## 10. Known Issues / Limitations
 
@@ -750,9 +832,10 @@ paths.
     wizard) and `POST /api/v1/datasets` returns the rich `DatasetDto`; both create a `FileAsset` and a
     `DatasetProfile`. Session 2 should build column mapping on the dataset profile and may deprecate the
     `/files` route for new UI.
-18. **Configurations are versioned, not snapshotted.** Saving (create or update) increments `version`, but
-    previous versions are overwritten — there is no immutable history yet. Update is additive: it keeps
-    the id and replaces the row.
+18. **Configurations are versioned, not snapshotted — but runs are.** Saving (create or update) increments
+   `version` and replaces the row (there is no browsable per-version history), yet every run freezes the
+   exact configuration version it used in its `RunSnapshot`, so historical runs are reproducible even
+   though the editable table is not append-only. Update is additive: it keeps the id and replaces the row.
 19. **Configurations reference dataset ids, not re-detected columns.** Reusing a setup for a new daily file
     means editing the configuration to re-point the dataset assignments; if the new file's column names
     differ, the mappings must be updated too (validation will flag the old names as `unknown_column`).
@@ -776,9 +859,11 @@ paths.
     identifiers that differ by punctuation or leading zeros.
 25. **The engine preserves duplicate events.** Identical event rows are never deduplicated (they can be
     legitimate repeated reports); callers that need deduplication must do it before calling `matchRecords`.
-26. **Rule-set versions are overwritten, not snapshotted.** Saving bumps `version` but replaces the row (the
-    same behaviour configurations have); there is no immutable rule history yet, and a run stores only the
-    resolved rules indirectly (through the active set + decision evidence).
+26. **Rule-set versions are overwritten, but each run freezes the set it used.** Saving bumps `version` but
+   replaces the row (the same behaviour configurations have), so there is no browsable rule history; however
+   every run stores the full frozen `StoredRuleSet` in its `RunSnapshot`, so the exact rules behind a run are
+   always recoverable. Note that `RuleSetService.create` always starts a new set at version 1, so version
+   numbers alone are not unique — the snapshot records the set id as well.
 27. **History-scoped rules build an in-memory history array per entity.** `buildRuleContext` passes the full
     event history for `any_event`/`all_events` conditions; this scales with the loaded file (the join itself
     is still linear).
@@ -849,8 +934,20 @@ paths.
     repeats a key (e.g. the sample's `1008`); unmatched = no events or no rule match. Orphan events (an event
     with no primary record) never produce output rows by design and are only reported in stats.
 50. **Export status is computed by scanning a run's decisions + review items** (`ExportService.status`),
-    like the queue counts, rather than by indexed aggregates. Fine for operational runs; revisit alongside
-    the review-queue counts at scale.
+   like the queue counts, rather than by indexed aggregates. Fine for operational runs; revisit alongside
+   the review-queue counts at scale.
+51. **Run snapshots store the configuration and rule set in full.** That is what makes them independent of
+   later edits, but it duplicates data across runs and grows with the rule set; there is no dedup/compaction
+   yet. The snapshot is read only by the run detail/summary and the audit endpoint, so the cost is storage,
+   not query time.
+52. **A snapshot references dataset ids, not detached copies of the source files.** Reproducibility assumes
+   the primary/events files still resolve for that run (they do in a persistent deployment; in the default
+   in-memory mode both the files and the run are lost on restart — see #2). Re-running a historical run
+   against the *same* input bytes is therefore a manual re-upload in the current build.
+53. **There is no "what would this run look like under the current rules?" diff yet.** The full frozen
+   snapshot plus the current active set are both readable, so the feature is a comparison endpoint away, but
+   it is not built. Likewise the UI shows the frozen versions on the run summary but does not yet let a user
+   open the full frozen rule set in the editor.
 
 ## 11. Technical Decisions
 
@@ -880,6 +977,8 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
   `ReviewState`, append-only `ReviewResolutionLog`, targeted output regeneration).
 - ADR-016 output generation is a modular, validated, data-preserving export stage (primary-row preservation,
   deterministic order, nullable blanks, streamed writes, re-read validation, live derived `ExportSummary`).
+- ADR-017 every run freezes an immutable snapshot of its configuration and rule set at creation; execution
+  evaluates the snapshot, so edits affect only future runs and historical reports stay auditable.
 
 Additional decisions made during implementation:
 
@@ -949,7 +1048,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 235 tests / 26 files passing (`npm test`).** Coverage by area:
+**Status: 245 tests / 28 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -976,6 +1075,8 @@ Not yet implemented (risks acknowledged):
 | Output summary (core) | `packages/core/src/domain/output.test.ts` | review-state → output-state mapping, unmatched reasons, full aggregation (reviewed/unmatched), defaults and order-independence |
 | Export writers | `packages/file-processing/src/export.test.ts` | stream-to-storage CSV, `validateStoredTable` pass + row-count/column failures, XLSX leading `Summary` sheet, type preservation (leading zeros, long identifiers, dates, nulls) |
 | Export API | `apps/api/src/export.test.ts` | live summary/validation/`pending_review`, XLSX `Summary` + deterministic primary-file row order, `ready` + `reviewed` after every case resolved, leading-zero identifiers preserved upload → run → xlsx |
+| Run snapshot (core) | `packages/core/src/domain/run-snapshot.test.ts` | schema defaults (null configuration/rule set) and the summary mapping (versions, names, rule count) |
+| End-to-end journey | `apps/api/src/workflow-journey.test.ts` | upload the field-service fixtures → validate the mapping + resolved-config preview → save configuration v1 → run → freeze snapshot (config v1, 7 rules, full audit payload) → classify with the expected per-entity review reasons → review every exception (override the no-events case, accept the rest) → export `ready` (reviewed 5, overridden 1) → **reproducibility**: edit the setup (v2) and replace the active rule set, then assert the historical run's decisions/snapshot are unchanged while a new run uses the new versions (`no_rule_match`) |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
 | Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
@@ -1017,31 +1118,32 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 8: durable persistence & the loop back into rules** (queue `08-session.md`; session 7
-already shipped output generation & Excel export — see §8). The review loop and the export are complete; the
-next structural gap is durability plus using human decisions. Recommended order:
+**Product session 9: durable persistence & the loop back into rules** (queue `09-session.md`; session 8
+shipped the end-to-end workflow experience and run reproducibility — see §8). The journey, review loop and
+export are complete and run snapshots already guarantee reproducibility; the next structural gap is
+durability plus using human decisions. Recommended order:
 
-1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0004`), and exercise the
+1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0005`), and exercise the
    API against `REPOSITORY_DRIVER=postgres`. Add gated repository integration tests (memory vs Postgres
-   parity) covering the new `review_resolutions` audit, `reviewItems.counts()` / filtered listings,
-   `artifacts.update`, `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug`, and
-   `run_decisions.decision_source`. Fix any divergence the tests surface (the adapters have never run against
-   a live database).
+   parity) covering the new `run_snapshots` (including the embedded-timestamp revival), the
+   `review_resolutions` audit, `reviewItems.counts()` / filtered listings, `artifacts.update`,
+   `rule_sets` `listByWorkflowSlug`/`getActiveByWorkflowSlug`, and `run_decisions.decision_source`. Fix any
+   divergence the tests surface (the adapters have never run against a live database).
 2. **Turn human corrections into rule suggestions.** Mine `review_resolutions` (`changedFields`, automation
    vs applied values) into candidate rules/condition hypotheses and surface them (read-only) on the Rules
    page or a review-insights panel — never auto-save a rule. This is the payoff of the audit trail.
-3. **Immutable version snapshots.** Rule sets and workflow configurations currently overwrite on save and
-   only increment `version`; add immutable history rows (or a versions table) so a run and its resolutions
-   can be tied to the exact rules/mapping used.
+3. **Immutable version history (browsable).** Run snapshots make history reproducible, but configurations and
+   rule sets still overwrite in place; add immutable history rows (or versions tables) so a user can browse a
+   previous configuration/rule-set version, and add a "diff this run against the current rules" view.
 4. **Review-loop polish:** reviewers are anonymous (`resolvedBy` null) — add at least a name/actor input (and
    then auth), support reopening/re-resolving an item (the data model already supports history), and expose
    reason/severity filters in the UI (the API supports them today).
 5. **AI follow-ups:** per-configuration provider choice, token/cost accounting, prompt-injection fixtures and
    an adapter contract test against a local endpoint. Also consider `decisionSource`-based filtering in the
    decision log UI.
-6. **Streaming/chunking:** the loader still reads whole files into memory (`readAllRows`) and artifact
-   regeneration re-reads whole outputs; add a streaming/chunked path behind the existing `TabularReader`
-   contract.
+6. **Streaming/chunking:** the loader still reads whole files into memory (`readAllRows`), artifact
+   regeneration re-reads whole outputs and run snapshots store full payloads; add a streaming/chunked path
+   behind the existing `TabularReader` contract.
 7. Then: scheduling/watched-folder ingestion, exposing identifier normalization options through
    configuration, and route-level code splitting for the web bundle.
 
@@ -1064,9 +1166,10 @@ next structural gap is durability plus using human decisions. Recommended order:
 - **Data heuristics matter.** `normalizeKey` upper-cases and collapses whitespace; `parseTimestamp`
   handles ISO, `YYYY/MM/DD`, `MM/DD/YYYY` (or day-first via config) and Excel serials; leading-zero numeric
   strings stay strings. Changing these changes classification results — update the sample expectations too.
-- **Sample files are canonical fixtures.** `samples/account-faults/*.csv` are used by the API test and the
-  workflow test, and their README documents expected outcomes. If behavior changes intentionally, update
-  both the code and those expectations.
+- **Sample files are canonical fixtures.** `samples/account-faults/*.csv` are used by the API test, the
+  workflow test and the smoke script, and their README documents expected outcomes; `samples/field-service/*.csv`
+  are the independently created fixtures for the end-to-end journey test. If behavior changes intentionally,
+  update the code **and** both sets of expectations.
 - **Rule changes are product changes.** `packages/workflow-engine/src/workflows/account-faults/rules.ts`
   is validated by zod at import time; the default rule set is versioned (`version: 1`). Bump the version
   when rules change materially and note it here.
@@ -1094,6 +1197,13 @@ next structural gap is durability plus using human decisions. Recommended order:
   them; new presets/reasons go there and in the `ReviewReason` enum, never inline in a route or component.
   Output regeneration requires `run.config.primaryAccountColumn` (uses the same `normalizeKey` as the
   pipeline) — do not invent a fallback column.
+- **Every run is reproducible from its own snapshot.** `RunService.createRun` writes a `RunSnapshot` (the
+  frozen configuration + rule set) through the write-only `RunSnapshotRepository` before execution; `execute`
+  must evaluate `snapshot.ruleSet`, never re-read the active set (only legacy runs without a snapshot fall
+  back). Never add an update path to `RunSnapshotRepository` and never mutate a snapshot — a later edit to a
+  configuration or rule set may only affect **future** runs. The schema lives in
+  `packages/core/src/domain/run-snapshot.ts`; the run DTOs carry the compact summary and
+  `GET /api/v1/runs/:id/snapshot` returns the full frozen payloads.
 - **Output generation is modular, deterministic and validated.** `build-output` (workflow) owns row assembly
   and must copy the primary source row, overwrite only the configured output columns, write missing values as
   `null`, and emit rows in primary-file order (sort by `rowIndex`). `RunService` owns writing: use
@@ -1139,6 +1249,7 @@ next structural gap is durability plus using human decisions. Recommended order:
   `packages/ai/src/{service,resolve,redact,openai-provider}.ts` →
   `packages/core/src/domain/review.ts` →
   `packages/core/src/domain/output.ts` →
+  `packages/core/src/domain/run-snapshot.ts` →
   `apps/api/src/services/review-service.ts` +
   `apps/api/src/services/export-service.ts` →
   `apps/api/src/services/dataset-service.ts` →
@@ -1157,4 +1268,5 @@ next structural gap is durability plus using human decisions. Recommended order:
 | Product 4 | 2026-09-16 | Rule engine & rule management: scoped conditions (`latest`/`any_event`/`all_events`) and full `RuleEvaluation` decision metadata, semantic `validateRuleSet` warnings/errors, `RuleSetService` + `/api/v1/rule-sets` (validated, versioned, one active set, resolved per run), Rules UI editor, +16 tests (179 total). Verified: lint/typecheck/179 tests/build/smoke. |
 | Product 5 | 2026-09-16 | AI-assisted classification layer: provider-neutral `ClassificationProvider` + structured request/result/outcome contracts, `AiClassificationService` (policy gate, redaction, timeout, bounded retries, strict zod validation, normalized failures), deterministic-first `resolveAssistedDecision` (AI never overrides a rule; auto-approval off by default), OpenAI-compatible adapter, `decisionSource` + AI provenance persisted (migration `0003`), review-card AI panel + run decision source, `__DecisionSource` output column, +30 tests (209 total). Verified: lint/typecheck/209 tests/build/smoke. |
 | Product 6 | 2026-09-16 | Review queue & human-in-the-loop: derived `ReviewState` + shared queue filter presets, append-only `review_resolutions` audit (migration `0004`) + repository, `ReviewService` (resolve/override/dismiss, automation snapshot, `changedFields`, output-artifact regeneration), enriched review DTOs (automation block, latest event, history, AI outcome, applicable rules), per-filter counts + filtered queue API, master/detail review workspace with keyboard shortcuts and audit trail, run-detail decision state, +13 tests (222 total). Verified: lint/typecheck/222 tests/build/smoke (filtered queue, override audit, regenerated output). |
-| Product 7 | 2026-09-16 | Output generation & Excel export: OutputRecordState/ExportSummary + summariseOutputRecords in core, deterministic primary-order output with null blanks, streamed writeTableToStorage, XLSX leading Summary sheet + type preservation, alidateStoredTable re-read validation that fails the run on mismatch, live ExportService/GET /runs/:id/export summary + status, run-page Final report panel, +13 tests (235 total). Verified: lint/typecheck/235 tests/build/smoke (export summary + validated xlsx/csv). |
+| Product 7 | 2026-09-16 | Output generation & Excel export: OutputRecordState/ExportSummary + summariseOutputRecords in core, deterministic primary-order output with null blanks, streamed writeTableToStorage, XLSX leading Summary sheet + type preservation, validateStoredTable re-read validation that fails the run on mismatch, live ExportService/GET /runs/:id/export summary + status, run-page Final report panel, +13 tests (235 total). Verified: lint/typecheck/235 tests/build/smoke (export summary + validated xlsx/csv). |
+| Product 8 | 2026-09-16 | End-to-end workflow experience & run reproducibility: immutable `RunSnapshot` (frozen configuration + rule set) + `RunSnapshotRepository` + `run_snapshots` table (migration `0005`), `RunService` captures at creation and executes the snapshot, `GET /api/v1/runs/:id/snapshot` + snapshot summary on run DTOs, shared `WorkflowProgress` journey stepper + plain-language statuses/error help, run summary dashboard linking to the run-scoped review queue and report, `samples/field-service` fixtures, +10 tests (245 total). Verified: lint/typecheck/245 tests/build/smoke (snapshot frozen; full journey incl. reproducibility). |

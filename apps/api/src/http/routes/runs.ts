@@ -6,6 +6,7 @@ import {
   reviewItemListResponseSchema,
   reviewStateForDecision,
   runListResponseSchema,
+  runSnapshotDtoSchema,
   runStatusSchema,
   ValidationError,
   type RunDto,
@@ -19,6 +20,8 @@ import {
   toDecisionDto,
   toReviewItemDto,
   toRunDto,
+  toRunSnapshotDto,
+  toRunSnapshotSummaryDto,
   toRunSummaryDto,
 } from '../dto.js';
 import { clampLimit, parseOffset, parseOrThrow } from '../http-utils.js';
@@ -28,12 +31,14 @@ async function describeRun(
   run: WorkflowRun,
   includeSteps: boolean,
 ): Promise<RunDto | RunSummaryDto> {
-  const [reviewItemCount, openReviewItemCount, primaryFile, eventsFile] = await Promise.all([
-    container.repositories.reviewItems.countByRun(run.id),
-    container.repositories.reviewItems.countOpenByRun(run.id),
-    container.repositories.files.getById(run.primaryFileId),
-    container.repositories.files.getById(run.eventsFileId),
-  ]);
+  const [reviewItemCount, openReviewItemCount, primaryFile, eventsFile, snapshot] =
+    await Promise.all([
+      container.repositories.reviewItems.countByRun(run.id),
+      container.repositories.reviewItems.countOpenByRun(run.id),
+      container.repositories.files.getById(run.primaryFileId),
+      container.repositories.files.getById(run.eventsFileId),
+      container.repositories.runSnapshots.getByRunId(run.id),
+    ]);
 
   const description = {
     workflowName: container.registry.get(run.workflowSlug)?.name ?? run.workflowSlug,
@@ -41,6 +46,7 @@ async function describeRun(
     eventsFileName: eventsFile?.originalName ?? null,
     reviewItemCount,
     openReviewItemCount,
+    snapshot: snapshot ? toRunSnapshotSummaryDto(snapshot) : null,
   };
 
   if (!includeSteps) {
@@ -106,6 +112,16 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
     const { id } = request.params as { id: string };
     const run = await requireRun(container, id);
     return describeRun(container, run, true);
+  });
+
+  app.get('/api/v1/runs/:id/snapshot', async (request) => {
+    const { id } = request.params as { id: string };
+    await requireRun(container, id);
+    const snapshot = await container.runService.getSnapshot(id);
+    if (!snapshot) {
+      throw new NotFoundError('Run snapshot', id);
+    }
+    return runSnapshotDtoSchema.parse(toRunSnapshotDto(snapshot));
   });
 
   app.get('/api/v1/runs/:id/decisions', async (request) => {

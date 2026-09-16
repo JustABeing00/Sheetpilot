@@ -8,6 +8,7 @@ export * from './domain/ids.js';
 export * from './domain/rules.js';
 export * from './domain/ai.js';
 export * from './domain/review.js';
+export * from './domain/run-snapshot.js';
 export * from './domain/output.js';
 export * from './api/contracts.js';
 export * from './ports/clock.js';

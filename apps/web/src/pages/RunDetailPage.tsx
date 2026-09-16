@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   useRun,
   useRunArtifacts,
@@ -7,6 +7,7 @@ import {
   useRunReviewItems,
 } from '../api/hooks.js';
 import { ReviewItemCard } from '../components/ReviewItemCard.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import {
   Badge,
   Card,
@@ -16,7 +17,15 @@ import {
   PageHeader,
   StatCard,
 } from '../components/ui.js';
-import { exportStatusTone, statusTone } from '../lib/status.js';
+import {
+  describeRunError,
+  exportStatusLabel,
+  exportStatusTone,
+  runStatusDescription,
+  runStatusLabel,
+  statusTone,
+} from '../lib/status.js';
+import type { PipelineStageKey } from '../lib/pipeline.js';
 import {
   formatBytes,
   formatCellValue,
@@ -57,22 +66,48 @@ export function RunDetailPage() {
       ? new Date(detail.finishedAt).getTime() - new Date(detail.startedAt).getTime()
       : null;
 
+  const summary = exportStatus.data?.summary;
+  const unresolved = summary?.unresolved ?? detail.openReviewItemCount;
+  const primaryArtifact =
+    exportStatus.data?.artifacts.find((artifact) => artifact.kind === 'output_xlsx') ??
+    exportStatus.data?.artifacts[0];
+
+  // Where the user is in the journey, derived from the run's real state rather than a stored flag.
+  const stage: PipelineStageKey =
+    detail.status === 'succeeded' ? (unresolved > 0 ? 'review' : 'export') : 'processing';
+
   return (
     <div className="page">
+      <WorkflowProgress current={stage} />
       <PageHeader
-        title={`Run ${detail.id.slice(0, 8)}`}
-        description={`${detail.workflowName} v${detail.workflowVersion}`}
-        actions={<Badge tone={statusTone(detail.status)}>{detail.status}</Badge>}
+        title="Run summary"
+        description={`${detail.workflowName} · run ${detail.id.slice(0, 8)}`}
+        actions={
+          <Badge tone={statusTone(detail.status)}>{runStatusLabel(detail.status)}</Badge>
+        }
       />
+
+      <div className={`run-status run-status-${detail.status}`}>
+        <p>{runStatusDescription(detail.status)}</p>
+        {detail.status === 'succeeded' ? (
+          <NextStep
+            runId={detail.id}
+            unresolved={unresolved}
+            reportReady={Boolean(primaryArtifact)}
+            reportUrl={primaryArtifact ? apiDownloadUrl(primaryArtifact.downloadUrl) : null}
+            reportFormat={primaryArtifact?.format ?? null}
+          />
+        ) : null}
+      </div>
 
       {detail.error ? (
         <div className="error-state" role="alert">
-          <strong>Run failed</strong>
-          <p>{detail.error}</p>
+          <strong>Processing stopped</strong>
+          <p>{describeRunError(detail.error)}</p>
         </div>
       ) : null}
 
-      <Card title="Overview">
+      <Card title="Overview" subtitle="What this run processed">
         <KeyValue
           items={[
             { label: 'Primary file', value: detail.primaryFileName ?? detail.primaryFileId },
@@ -85,28 +120,66 @@ export function RunDetailPage() {
         />
       </Card>
 
+      <Card
+        title="Reproducibility"
+        subtitle="The exact setup and rules this run used, frozen when it was created"
+      >
+        {detail.snapshot ? (
+          <>
+            <KeyValue
+              items={[
+                {
+                  label: 'Workflow version',
+                  value: `v${detail.snapshot.workflowVersion}`,
+                },
+                {
+                  label: 'Saved setup',
+                  value: detail.snapshot.configurationName
+                    ? `${detail.snapshot.configurationName} (v${detail.snapshot.configurationVersion})`
+                    : 'Inline configuration (not saved)',
+                },
+                {
+                  label: 'Rule set',
+                  value: detail.snapshot.ruleSetName
+                    ? `${detail.snapshot.ruleSetName} (v${detail.snapshot.ruleSetVersion}, ${detail.snapshot.ruleCount} rules)`
+                    : 'Workflow default rules',
+                },
+                { label: 'Frozen at', value: formatDateTime(detail.snapshot.capturedAt) },
+              ]}
+            />
+            <p className="muted small">
+              Editing the setup or the rules later will not change this run — a new run picks up the
+              new versions. This keeps every historical report auditable.
+            </p>
+          </>
+        ) : (
+          <p className="muted">This run predates run snapshots, so its inputs were not frozen.</p>
+        )}
+      </Card>
+
       <div className="stat-grid">
-        <StatCard label="Accounts" value={detail.stats['accounts'] ?? '—'} />
+        <StatCard label="Records" value={detail.stats['accounts'] ?? '—'} />
         <StatCard label="Output rows" value={detail.stats['outputRows'] ?? '—'} />
-        <StatCard label="Fault events" value={detail.stats['eventRows'] ?? '—'} />
-        <StatCard label="Rule match rate" value={formatPercent(detail.stats['ruleMatchRate'])} />
-        <StatCard label="Auto-approved" value={detail.stats['autoApprovedAccounts'] ?? '—'} />
+        <StatCard label="Events" value={detail.stats['eventRows'] ?? '—'} />
+        <StatCard label="Match rate" value={formatPercent(detail.stats['ruleMatchRate'])} />
+        <StatCard label="Auto-resolved" value={detail.stats['autoApprovedAccounts'] ?? '—'} />
         <StatCard label="Needs review" value={detail.stats['reviewAccounts'] ?? '—'} />
         <StatCard label="Orphan events" value={detail.stats['orphanEventAccounts'] ?? '—'} />
       </div>
 
       <Card
+        id="final-report"
         title="Final report"
         subtitle="Excel is the primary deliverable; the summary reflects automation and human decisions"
         actions={
           exportStatus.isSuccess ? (
             <Badge tone={exportStatusTone(exportStatus.data.status)}>
-              {humanizeToken(exportStatus.data.status)}
+              {exportStatusLabel(exportStatus.data.status)}
             </Badge>
           ) : null
         }
       >
-        {exportStatus.isLoading ? <LoadingState label="Loading export status…" /> : null}
+        {exportStatus.isLoading ? <LoadingState label="Loading report status…" /> : null}
         {exportStatus.isError ? (
           <ErrorState error={exportStatus.error} onRetry={() => void exportStatus.refetch()} />
         ) : null}
@@ -121,30 +194,70 @@ export function RunDetailPage() {
               <StatCard label="Errors" value={exportStatus.data.summary.errors} />
               <StatCard label="Unmatched" value={exportStatus.data.summary.unmatched} />
             </div>
-            {exportStatus.data.validation ? (
+            {exportStatus.data.summary.unresolved > 0 ? (
               <p className="muted small">
-                Validated on export: {exportStatus.data.validation.rowCount} rows ×{' '}
-                {exportStatus.data.validation.columnCount} columns
+                {exportStatus.data.summary.unresolved}{' '}
+                {exportStatus.data.summary.unresolved === 1 ? 'case still needs' : 'cases still need'}{' '}
+                a human decision.{' '}
+                <Link className="link" to={`/review?runId=${detail.id}`}>
+                  Review now
+                </Link>
               </p>
             ) : null}
-            <div className="export-actions">
-              {exportStatus.data.artifacts.map((artifact) => (
-                <a
-                  key={artifact.id}
-                  className="button"
-                  href={apiDownloadUrl(artifact.downloadUrl)}
-                  download
-                >
-                  Download {artifact.format.toUpperCase()}
-                  <span className="muted small"> ({formatBytes(artifact.sizeBytes)})</span>
-                </a>
-              ))}
-            </div>
+            {exportStatus.data.validation ? (
+              <p className="muted small">
+                Checked on export: {exportStatus.data.validation.rowCount} rows ×{' '}
+                {exportStatus.data.validation.columnCount} columns.
+              </p>
+            ) : null}
+            {exportStatus.data.artifacts.length > 0 ? (
+              <div className="export-actions">
+                {exportStatus.data.artifacts.map((artifact) => (
+                  <a
+                    key={artifact.id}
+                    className="button"
+                    href={apiDownloadUrl(artifact.downloadUrl)}
+                    download
+                  >
+                    Download {artifact.format.toUpperCase()}
+                    <span className="muted small"> ({formatBytes(artifact.sizeBytes)})</span>
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
       </Card>
 
-      <Card title="Steps" subtitle="Pipeline stages executed with their metrics">
+      <Card
+        title="Review queue"
+        subtitle="Only the unusual records require a human decision"
+        actions={
+          <Link className="button" to={`/review?runId=${detail.id}`}>
+            Open review queue
+          </Link>
+        }
+      >
+        {reviewItems.isLoading ? <LoadingState label="Loading review items…" /> : null}
+        {reviewItems.isError ? (
+          <ErrorState error={reviewItems.error} onRetry={() => void reviewItems.refetch()} />
+        ) : null}
+        {reviewItems.isSuccess && reviewItems.data.items.length === 0 ? (
+          <p className="muted">
+            Nothing to review — every record was classified automatically with high confidence.
+          </p>
+        ) : null}
+        <div className="review-list">
+          {reviewItems.data?.items.map((item) => (
+            <ReviewItemCard key={item.id} item={item} />
+          ))}
+        </div>
+      </Card>
+
+      <Card
+        title="Processing steps"
+        subtitle="The pipeline stages that ran, with their metrics"
+      >
         <ol className="step-list">
           {detail.steps.map((step) => (
             <li key={step.id}>
@@ -168,13 +281,13 @@ export function RunDetailPage() {
         </ol>
       </Card>
 
-      <Card title="Output artifacts" subtitle="Generated files available for download">
-        {artifacts.isLoading ? <LoadingState label="Loading artifacts…" /> : null}
+      <Card title="Generated files" subtitle="Every file produced by this run">
+        {artifacts.isLoading ? <LoadingState label="Loading files…" /> : null}
         {artifacts.isError ? (
           <ErrorState error={artifacts.error} onRetry={() => void artifacts.refetch()} />
         ) : null}
         {artifacts.isSuccess && artifacts.data.items.length === 0 ? (
-          <p className="muted">No artifacts were produced.</p>
+          <p className="muted">No files were produced.</p>
         ) : null}
         {artifacts.isSuccess && artifacts.data.items.length > 0 ? (
           <ul className="artifact-list">
@@ -197,33 +310,8 @@ export function RunDetailPage() {
       </Card>
 
       <Card
-        title="Review queue"
-        subtitle="Only the unusual accounts require a human decision"
-        actions={
-          <span className="muted small">
-            {reviewItems.data?.openCount ?? 0} open / {reviewItems.data?.items.length ?? 0} total
-          </span>
-        }
-      >
-        {reviewItems.isLoading ? <LoadingState label="Loading review items…" /> : null}
-        {reviewItems.isError ? (
-          <ErrorState error={reviewItems.error} onRetry={() => void reviewItems.refetch()} />
-        ) : null}
-        {reviewItems.isSuccess && reviewItems.data.items.length === 0 ? (
-          <p className="muted">
-            Nothing to review — every account was classified deterministically.
-          </p>
-        ) : null}
-        <div className="review-list">
-          {reviewItems.data?.items.map((item) => (
-            <ReviewItemCard key={item.id} item={item} />
-          ))}
-        </div>
-      </Card>
-
-      <Card
         title="Decision log"
-        subtitle="Every account keeps the rule, confidence and evidence behind its output"
+        subtitle="Every record keeps the rule, confidence and evidence behind its output"
       >
         {decisions.isLoading ? <LoadingState label="Loading decisions…" /> : null}
         {decisions.isError ? (
@@ -233,7 +321,7 @@ export function RunDetailPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Entity</th>
+                <th>Record</th>
                 <th>Rule</th>
                 <th>Source</th>
                 <th>Confidence</th>
@@ -260,6 +348,48 @@ export function RunDetailPage() {
           </table>
         ) : null}
       </Card>
+    </div>
+  );
+}
+
+function NextStep({
+  runId,
+  unresolved,
+  reportReady,
+  reportUrl,
+  reportFormat,
+}: {
+  runId: string;
+  unresolved: number;
+  reportReady: boolean;
+  reportUrl: string | null;
+  reportFormat: string | null;
+}) {
+  if (unresolved > 0) {
+    return (
+      <div className="next-step">
+        <strong>
+          {unresolved} {unresolved === 1 ? 'record needs' : 'records need'} your decision
+        </strong>
+        <p className="muted small">
+          The report is generated but marked “waiting for review” until a person resolves these cases.
+        </p>
+        <Link className="button button-primary" to={`/review?runId=${runId}`}>
+          Review {unresolved} {unresolved === 1 ? 'exception' : 'exceptions'}
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="next-step">
+      <strong>Everything is resolved — your report is ready</strong>
+      <p className="muted small">Download the finished file below, or from the Final report card.</p>
+      {reportReady && reportUrl ? (
+        <a className="button button-primary" href={reportUrl} download>
+          Download {(reportFormat ?? 'xlsx').toUpperCase()} report
+        </a>
+      ) : null}
     </div>
   );
 }

@@ -134,6 +134,22 @@ export const runs = pgTable(
   (table) => [index('runs_status_created_idx').on(table.status, table.createdAt)],
 );
 
+export const runSnapshots = pgTable(
+  'run_snapshots',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id').notNull().unique(),
+    workflowSlug: text('workflow_slug').notNull(),
+    workflowVersion: integer('workflow_version').notNull(),
+    configurationId: text('configuration_id'),
+    configuration: jsonb('configuration').$type<Record<string, unknown> | null>(),
+    ruleSetId: text('rule_set_id'),
+    ruleSet: jsonb('rule_set').$type<Record<string, unknown> | null>(),
+    capturedAt: timestampColumn('captured_at'),
+  },
+  (table) => [index('run_snapshots_run_idx').on(table.runId)],
+);
+
 export const runSteps = pgTable(
   'run_steps',
   {
@@ -236,6 +252,7 @@ export const schema = {
   datasets,
   workflowConfigurations,
   runs,
+  runSnapshots,
   runSteps,
   runDecisions,
   reviewItems,

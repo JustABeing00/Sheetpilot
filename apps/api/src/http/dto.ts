@@ -9,6 +9,7 @@ import type {
   ReviewResolutionLog,
   ReviewState,
   RunDto,
+  RunSnapshot,
   RunSummaryDto,
   StepRun,
   StoredRuleSet,
@@ -22,6 +23,7 @@ import {
   reviewAutomationFromEvidence,
   reviewEventsFromEvidence,
   reviewStateForItem,
+  toRunSnapshotSummary,
 } from '@sheetpilot/core';
 import type { RegisteredWorkflow } from '@sheetpilot/workflow-engine';
 import type {
@@ -33,6 +35,8 @@ import type {
   ReviewItemDto,
   ReviewResolutionLogDto,
   RuleSetDto,
+  RunSnapshotDto,
+  RunSnapshotSummaryDto,
   RuleSetSummaryDto,
   StepRunDto,
   WorkflowConfigurationDto,
@@ -154,6 +158,27 @@ export interface RunDescription {
   eventsFileName: string | null;
   reviewItemCount: number;
   openReviewItemCount: number;
+  snapshot: RunSnapshotSummaryDto | null;
+}
+
+export function toRunSnapshotSummaryDto(snapshot: RunSnapshot): RunSnapshotSummaryDto {
+  return {
+    ...toRunSnapshotSummary(snapshot),
+    capturedAt: snapshot.capturedAt.toISOString(),
+  };
+}
+
+export function toRunSnapshotDto(snapshot: RunSnapshot): RunSnapshotDto {
+  return {
+    runId: snapshot.runId,
+    workflowSlug: snapshot.workflowSlug,
+    workflowVersion: snapshot.workflowVersion,
+    capturedAt: snapshot.capturedAt.toISOString(),
+    configuration: snapshot.configuration
+      ? toWorkflowConfigurationDto(snapshot.configuration)
+      : null,
+    ruleSet: snapshot.ruleSet ? toRuleSetDto(snapshot.ruleSet) : null,
+  };
 }
 
 export function toRunDto(run: WorkflowRun, steps: StepRun[], description: RunDescription): RunDto {
@@ -174,6 +199,7 @@ export function toRunDto(run: WorkflowRun, steps: StepRun[], description: RunDes
     error: run.error,
     reviewItemCount: description.reviewItemCount,
     openReviewItemCount: description.openReviewItemCount,
+    snapshot: description.snapshot,
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt ? run.startedAt.toISOString() : null,
     finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,
@@ -198,6 +224,7 @@ export function toRunSummaryDto(run: WorkflowRun, description: RunDescription): 
     error: run.error,
     reviewItemCount: description.reviewItemCount,
     openReviewItemCount: description.openReviewItemCount,
+    snapshot: description.snapshot,
     createdAt: run.createdAt.toISOString(),
     startedAt: run.startedAt ? run.startedAt.toISOString() : null,
     finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,

@@ -19,6 +19,8 @@ import type {
   RuleSetRepository,
   RunListOptions,
   RunRepository,
+  RunSnapshot,
+  RunSnapshotRepository,
   StepRun,
   StepRunRepository,
   StoredRuleSet,
@@ -114,6 +116,7 @@ export function createInMemoryRepositories(): Repositories {
   const configurationStore = new Map<string, WorkflowConfiguration>();
   const workflowStore = new Map<string, Workflow>();
   const runStore = new Map<string, WorkflowRun>();
+  const runSnapshotStore = new Map<string, RunSnapshot>();
   const stepStore = new Map<string, StepRun[]>();
   const decisionStore = new Map<string, DecisionRecord[]>();
   const reviewStore = new Map<string, ReviewItem>();
@@ -206,6 +209,14 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
     count: () => Promise.resolve(runStore.size),
+  };
+
+  const runSnapshots: RunSnapshotRepository = {
+    create: (snapshot) => {
+      runSnapshotStore.set(snapshot.runId, snapshot);
+      return Promise.resolve(snapshot);
+    },
+    getByRunId: (runId) => Promise.resolve(runSnapshotStore.get(runId) ?? null),
   };
 
   const steps: StepRunRepository = {
@@ -351,6 +362,7 @@ export function createInMemoryRepositories(): Repositories {
     workflowConfigurations,
     workflows,
     runs,
+    runSnapshots,
     steps,
     decisions,
     reviewItems,

@@ -366,3 +366,35 @@ the chunk list and the concatenated copy at once). Recomputing the whole export 
 (rejected: expensive and can disturb unrelated rows; targeted patching plus a live summary is enough).
 Storing the summary/status (rejected: two sources of truth; it is a pure function of decisions + items).
 Putting the summary only in the UI (rejected: the deliverable should explain itself offline).
+
+
+## ADR-017 - Every run freezes an immutable snapshot of its configuration and rule set
+
+**Decision.** A run no longer reads its rules from the current active rule set at execution time. When a run
+is created, `RunService.createRun` captures a write-once `RunSnapshot` that embeds the full saved
+`WorkflowConfiguration` (its mappings and options) and the full active `StoredRuleSet` that were in force at
+that moment, plus the workflow version and a `capturedAt` timestamp. The snapshot is stored in its own
+`run_snapshots` table (one row per run, `run_id` unique) and is never updated. Execution evaluates the rules
+from the snapshot; only legacy runs created before snapshots fall back to the active set. Every run DTO
+carries a compact `snapshot` summary (configuration version/name, rule-set version/name, rule count) and
+`GET /api/v1/runs/:id/snapshot` returns the full frozen payloads for audit. The end-to-end journey UI renders
+this so a user can see exactly which versions produced a report.
+
+**Why.** Configurations and rule sets are edited in place (a save bumps a `version` but replaces the row), so
+without a snapshot, editing a mapping or a rule tomorrow would silently change what yesterday's run "would
+have" produced - breaking reproducibility and auditability. A run is a historical fact and must be
+reconstructible from its own inputs, independent of later edits. Rules are already data and review decisions
+are already append-only; freezing the inputs closes the last hole in the audit story.
+
+**Consequences.** One extra write on run creation and one small read per run fetch; the run list/detail DTOs
+gain a nullable `snapshot` field (null only for pre-snapshot runs). New runs pick up later edits, so
+"changing the rules only affects future runs" is now true by construction, not convention. The Postgres
+adapter revives the embedded ISO timestamps when reading the JSON payloads back into the domain schema.
+Snapshots are stored in full, so a future "diff this run against current rules" feature is a read away.
+`workflow_configurations` and `rule_sets` remain mutable pointers; immutability lives on the run.
+
+**Alternatives considered.** Making configuration/rule-set saves append-only version rows (rejected for now:
+a larger migration and it changes ids/references everywhere; the run snapshot already guarantees
+reproducibility and can be layered on top later). Storing the snapshot inside `runs.config` (rejected:
+unvalidated, untyped, and it conflates the resolved run input with the frozen definitions). Resolving the
+rule set at execution time only (rejected: a rule edit between queueing and execution would change the run).

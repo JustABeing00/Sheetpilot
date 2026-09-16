@@ -11,6 +11,7 @@ import {
   LoadingState,
   PageHeader,
 } from '../components/ui.js';
+import { WorkflowProgress } from '../components/WorkflowProgress.js';
 import { formatBytes, formatDateTime } from '../lib/format.js';
 
 export function DatasetsPage() {
@@ -45,9 +46,15 @@ export function DatasetsPage() {
 
   return (
     <div className="page">
+      <WorkflowProgress current="setup" label="Step 1 · Upload your files" />
       <PageHeader
         title="Datasets"
         description="Upload an Excel or CSV file and immediately see what the system detected: sheets, columns, types, row counts and validation warnings."
+        actions={
+          <Link className="button" to="/setup">
+            Continue to setup
+          </Link>
+        }
       />
 
       <form className="run-form" onSubmit={(event) => void submit(event)}>

@@ -32,15 +32,17 @@ export function Card({
   actions,
   children,
   className,
+  id,
 }: {
   title?: string;
   subtitle?: string;
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  id?: string;
 }) {
   return (
-    <section className={className ? `card ${className}` : 'card'}>
+    <section id={id} className={className ? `card ${className}` : 'card'}>
       {title || actions ? (
         <div className="card-header">
           <div>

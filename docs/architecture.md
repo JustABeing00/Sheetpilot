@@ -75,9 +75,10 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    and returns **202** immediately; execution happens in the background. A run can be started either with
    explicit file ids (legacy wizard) or with a `configurationId`, in which case
    `WorkflowConfigurationService.buildRunInput` resolves the saved mapping into file ids and workflow
-   config keys first.
+   config keys first. Before execution, `createRun` freezes a write-once `RunSnapshot` (the saved
+   configuration and the active rule set as they are right now) — see the reproducibility lifecycle below.
 3. `RunService.execute` builds a `StepContext`, creates the run's step records, then calls
-   `workflow.execute(input, ctx)`.
+   `workflow.execute(input, ctx)`, evaluating the **snapshotted** rule set (never the currently active one).
 4. `executeWorkflow` (engine) runs the workflow program's steps sequentially, merging state and recording
    per-step status, duration, metrics and errors. A failing step short-circuits the run and keeps the trace.
 5. The account-fault-triage program performs: load primary → load events → group by account → select
@@ -105,6 +106,22 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
    `RegisteredWorkflow.resolveRunInput` into `{ primaryFileId, eventsFileId, config }`, where config keys
    are the workflow's expected field names (`primaryAccountColumn`, `eventsTimestampColumn`, …) and the run
    records the `configurationId` for traceability.
+
+## Reproducibility & the run snapshot lifecycle
+
+1. A `WorkflowConfiguration` and a `RuleSet` are mutable: saving either bumps a `version` but replaces the
+   row, and a run references them by id. Left alone, editing them later would silently change what a
+   historical run "would have" produced.
+2. `RunService.createRun` therefore captures a `RunSnapshot` immediately after creating the run: the full
+   saved configuration (if the run was started from one) and the full active `StoredRuleSet`, plus the
+   workflow version and `capturedAt`. It is written once through the write-only `RunSnapshotRepository`
+   (there is no update method) and stored in the `run_snapshots` table keyed uniquely by `run_id`.
+3. `RunService.execute` reads the snapshot and evaluates the frozen rules. Only legacy runs without a
+   snapshot fall back to the active set, so "edits affect only future runs" holds by construction.
+4. Every run DTO carries a compact `snapshot` summary (configuration version/name, rule-set version/name,
+   rule count, captured time) and `GET /api/v1/runs/:id/snapshot` returns the full frozen configuration and
+   rule set for audit. The web app renders the summary so a user can see exactly which versions produced a
+   report.
 
 ## Matching / grouping lifecycle
 
@@ -223,7 +240,7 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | --- | --- | --- |
 | `WorkflowProgram<TState>` | `packages/workflow-engine/src/types.ts` | Ordered typed steps + state factory |
 | `RegisteredWorkflow` | `packages/workflow-engine/src/registry.ts` | What the API/registry know about a workflow; executes it and returns generic `WorkflowOutputs` |
-| `Repositories` (8 interfaces) | `packages/core/src/ports/repositories.ts` | Persistence ports implemented by in-memory and Postgres adapters |
+| `Repositories` (10 interfaces) | `packages/core/src/ports/repositories.ts` | Persistence ports implemented by in-memory and Postgres adapters |
 | `FileStorage` | `packages/core/src/ports/file-storage.ts` | Object storage port; `LocalFileStorage`, `InMemoryFileStorage` today, S3 later |
 | `TabularReader` / `TabularWriter` | `packages/file-processing/src/readers`, `writers` | Streaming async-generator contract with `describe()` for sheets/headers; CSV is fully streaming, XLSX is buffered today |
 | `inspectDataset` | `packages/file-processing/src/inspection.ts` | Bounded one-pass analysis producing inferred types, emptiness/uniqueness stats, samples and warnings |
@@ -234,6 +251,8 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `validateWorkflowConfiguration` | `packages/core/src/domain/workflow-config.ts` | Pure structural + semantic validation shared by the API and (via the endpoint) the UI |
 | `WorkflowConfigurationRepository` | `packages/core/src/ports/workflow-configurations.ts` | Persistence port for configurations (in-memory and Postgres adapters) |
 | `resolveRunInput` | `packages/workflow-engine/src/workflows/account-faults/configuration.ts` | Maps a saved configuration to the workflow's concrete run input |
+| `RunSnapshot` / `toRunSnapshotSummary` | `packages/core/src/domain/run-snapshot.ts` | The write-once, point-in-time capture of the configuration + rule-set versions a run was created with; the summary is embedded on every run DTO |
+| `RunSnapshotRepository` | `packages/core/src/ports/repositories.ts` | Write-only persistence port (`create`/`getByRunId`) for run snapshots (in-memory and Postgres adapters) |
 | `matchRecords` | `packages/matching-engine/src/match.ts` | Generic primary↔event join + grouping + deterministic latest selection; returns `MatchedEntity[]`, orphans and `MatchStats` |
 | `normalizeIdentifier` | `packages/matching-engine/src/normalize.ts` | Reported identifier normalization; defaults equal `normalizeKey`; dangerous merges opt-in |
 | `compareEventsLatestFirst` | `packages/matching-engine/src/match.ts` | The single deterministic latest-event comparator |
@@ -265,8 +284,9 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
   winner never depends on map/array ordering. Equally-ranked rules that disagree produce a `conflict` and the
   case needs review; a context with no matching rule produces `no_match` (review reason `no_rule_match`); a
   match below the configured confidence produces `low_confidence`. The engine never guesses.
-- Rules are data validated before they are saved (`validateRuleSet`), versioned on every save, and the active
-  set is resolved per run, so the exact rules used for a run are auditable and changeable without a redeploy.
+- Rules are data validated before they are saved (`validateRuleSet`), versioned on every save, and frozen
+  into each run's `RunSnapshot` at creation, so the exact rules (and configuration) used for a run are
+  auditable, changeable without a redeploy, and cannot be altered retroactively.
 - Records are matched on a normalized identifier only. `normalizeIdentifier` reports every transformation
   it applies; steps that can merge genuinely distinct identifiers (`stripSeparators`, `stripLeadingZeros`)
   are off by default, and using them marks the entity with the `identifier_transformed` issue.

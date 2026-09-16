@@ -157,5 +157,11 @@ carries a live **export summary** (`GET /api/v1/runs/:id/export`) — total reco
 unresolved, errors and unmatched — plus a `Summary` worksheet in the workbook, and the generated files are
 re-read and validated (columns + row count) before the run is marked successful. The run page shows the
 export status and the download buttons, so the flow reads UPLOAD → CONFIGURE → PROCESS → REVIEW EXCEPTIONS →
-EXPORT FINAL REPORT. Scheduling, authentication and multi-tenancy are deliberately deferred — see
-[`progress.md`](./progress.md) §15 for the prioritized next steps.
+EXPORT FINAL REPORT.
+
+The end-to-end journey is now a single, resumable experience with a shared progress indicator across Setup,
+Rules, Processing, Review and Export, and a run summary that links straight to the review queue and the
+report. Runs are **reproducible**: each run freezes an immutable snapshot of the configuration and rule-set
+versions it started with (`GET /api/v1/runs/:id/snapshot`), so editing a setup or the rules tomorrow changes
+only future runs and never a historical report. Scheduling, authentication and multi-tenancy are deliberately
+deferred — see [`progress.md`](./progress.md) §15 for the prioritized next steps.

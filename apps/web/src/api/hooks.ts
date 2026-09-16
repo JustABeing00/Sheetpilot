@@ -48,7 +48,8 @@ export const queryKeys = {
   runReviewItems: (runId: string) => ['runs', runId, 'review-items'] as const,
   artifacts: (runId: string) => ['runs', runId, 'artifacts'] as const,
   runExport: (runId: string) => ['runs', runId, 'export'] as const,
-  reviewQueue: (filter: string) => ['review-items', filter] as const,
+  reviewQueue: (filter: string, runId?: string) =>
+    ['review-items', filter, runId ?? 'all'] as const,
   reviewHistory: (itemId: string) => ['review-items', itemId, 'history'] as const,
   files: ['files'] as const,
   datasets: ['datasets'] as const,
@@ -147,11 +148,18 @@ export function useRunExport(runId: string | undefined) {
   });
 }
 
-export function useReviewQueue(filter: ReviewFilter) {
-  const query = filter === 'all' ? '?limit=200' : `?filter=${filter}&limit=200`;
+export function useReviewQueue(filter: ReviewFilter, runId?: string) {
+  const params = new URLSearchParams();
+  if (filter !== 'all') {
+    params.set('filter', filter);
+  }
+  params.set('limit', '200');
+  if (runId) {
+    params.set('runId', runId);
+  }
   return useQuery({
-    queryKey: queryKeys.reviewQueue(filter),
-    queryFn: () => apiGet(`/api/v1/review-items${query}`, reviewQueueResponseSchema),
+    queryKey: queryKeys.reviewQueue(filter, runId),
+    queryFn: () => apiGet(`/api/v1/review-items?${params.toString()}`, reviewQueueResponseSchema),
     refetchInterval: 5000,
   });
 }

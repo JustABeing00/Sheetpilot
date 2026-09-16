@@ -78,6 +78,25 @@ export const stepRunDtoSchema = z.object({
 });
 export type StepRunDto = z.infer<typeof stepRunDtoSchema>;
 
+/**
+ * The immutable inputs a run was created with (configuration + rule-set versions). Exposed on every run
+ * so the UI can state exactly which versions produced it and make clear that later edits do not change it.
+ */
+export const runSnapshotSummaryDtoSchema = z.object({
+  runId: z.string(),
+  workflowSlug: z.string(),
+  workflowVersion: z.number().int().positive(),
+  configurationId: z.string().nullable(),
+  configurationVersion: z.number().int().positive().nullable(),
+  configurationName: z.string().nullable(),
+  ruleSetId: z.string().nullable(),
+  ruleSetVersion: z.number().int().positive().nullable(),
+  ruleSetName: z.string().nullable(),
+  ruleCount: z.number().int().nonnegative(),
+  capturedAt: isoDateTimeSchema,
+});
+export type RunSnapshotSummaryDto = z.infer<typeof runSnapshotSummaryDtoSchema>;
+
 export const runDtoSchema = z.object({
   id: z.string(),
   workflowId: z.string(),
@@ -95,6 +114,8 @@ export const runDtoSchema = z.object({
   error: z.string().nullable(),
   reviewItemCount: z.number().int().nonnegative(),
   openReviewItemCount: z.number().int().nonnegative(),
+  /** Point-in-time capture of the versions this run used (never changes after creation). */
+  snapshot: runSnapshotSummaryDtoSchema.nullable(),
   createdAt: isoDateTimeSchema,
   startedAt: isoDateTimeSchema.nullable(),
   finishedAt: isoDateTimeSchema.nullable(),
@@ -406,6 +427,20 @@ export type RuleSetDto = z.infer<typeof ruleSetDtoSchema>;
 
 export const ruleSetListResponseSchema = z.object({ items: z.array(ruleSetSummaryDtoSchema) });
 export type RuleSetListResponse = z.infer<typeof ruleSetListResponseSchema>;
+
+/**
+ * The full frozen inputs of a run, for the audit view: the exact configuration and rule set that were
+ * captured when the run was created (independent of any later edits).
+ */
+export const runSnapshotDtoSchema = z.object({
+  runId: z.string(),
+  workflowSlug: z.string(),
+  workflowVersion: z.number().int().positive(),
+  capturedAt: isoDateTimeSchema,
+  configuration: workflowConfigurationDtoSchema.nullable(),
+  ruleSet: ruleSetDtoSchema.nullable(),
+});
+export type RunSnapshotDto = z.infer<typeof runSnapshotDtoSchema>;
 
 export const ruleSetValidationResponseSchema = z.object({
   valid: z.boolean(),
