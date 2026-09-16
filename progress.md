@@ -5,7 +5,7 @@
 > and keep the section structure intact. Never claim something is complete unless it exists, runs, and was
 > verified (state the verification command in §9/§13). Never write secrets here.
 
-**Last updated:** 2026-09-16 (product session 3 — matching, grouping & latest-event engine)
+**Last updated:** 2026-09-16 (product session 4 — rule engine & rule management)
 **Repository:** local working copy at `D:\ExcelProjectBydeepseek` (git initialized)
 **Product name:** SheetPilot (working name, package scope `@sheetpilot/*`; easily renamed)
 
@@ -24,18 +24,20 @@ types four columns by hand. SheetPilot does that automatically and leaves ambigu
 
 ## 2. Current Objective
 
-**Product session 3 objective: the reusable matching, grouping & latest-event engine.** The core
-data-processing step — primary records → match entity identifier → collect all related events → group by
-entity → pick the latest event deterministically → expose the grouped result to downstream logic — is now a
-standalone, example-agnostic package (`@sheetpilot/matching-engine`). It normalizes identifiers with an
-explicit, reported transformation pipeline (dangerous steps are opt-in and flagged), tracks every join
-statistic, preserves the full event history, and emits a normalized intermediate representation that the
-account-fault-triage workflow now consumes instead of its own ad-hoc grouping. **Status: achieved** (see §8,
-verified in §9).
+**Product session 4 objective: the rule engine and rule management.** Rules are now first-class, editable
+**data** rather than code. `@sheetpilot/rule-engine` evaluates a structured rule set deterministically and
+returns a full decision (winning rule + priority, confidence, explanation, resulting values, every condition
+evaluated with the actual value seen, matched-rule summaries, conflicts, and a `matched`/`no_match` status
+with `needsReview`/review reasons). Conditions can be scoped to the **latest record** or to the entity's
+whole history (`any_event`/`all_events`). The API exposes validated, versioned rule-set management
+(`GET/POST/PUT /api/v1/rule-sets`, `POST /api/v1/rule-sets/validate`) with exactly one active set per
+workflow, and a non-technical **Rules** page builds conditions/actions, validates and saves new versions. A
+run resolves the active persisted rule set, so edits take effect on the next run without a redeploy.
+**Status: achieved** (see §8, verified in §9).
 
-**Next (product session 4):** the platform's weakest points remain durability and the review loop. See §15
-for the recommended order: Postgres verification, review→artifact regeneration, rule management, then the
-configuration follow-ups that remain from session 2.
+**Next (product session 5):** durability and the review loop remain the platform's weakest points. See §15
+for the recommended order: Postgres verification, review→artifact regeneration, then the rule-management
+follow-ups (immutable version history, richer editors) and the configuration follow-ups from session 2.
 
 ## 3. Product Vision
 
@@ -69,9 +71,10 @@ core workflow is excellent.
 | Workflow configuration | `@sheetpilot/core` domain + `WorkflowConfigurationService` (API) | Roles-as-data (`WorkflowConfigurationDefinition`), pure validation, persisted/versioned `WorkflowConfiguration`, workflow-specific `resolveRunInput` |
 | Record matching | `@sheetpilot/matching-engine` (new) | Generic primary↔event join: reported identifier normalization, deterministic latest-event selection, full event history, join statistics; consumed by the account-faults workflow |
 | Storage | `LocalFileStorage` (disk) and `InMemoryFileStorage` behind the `FileStorage` port | S3 later |
-| Rules | Custom DSL in `@sheetpilot/rule-engine` | priority → specificity → id winner selection, explanation templates |
+| Rules | Custom DSL in `@sheetpilot/rule-engine` | Data-only rules (zod-validated); priority → specificity → id winner selection; `latest`/`any_event`/`all_events` condition scopes; decision metadata (resulting values, conditions evaluated, conflicts, no-match/low-confidence review flags); explanation templates |
+| Rule management | `RuleSetService` + `/api/v1/rule-sets` + Rules UI page | Validated before save (`validateRuleSet`), versioned on every save, one active set per workflow, resolved per run |
 | AI | `ClassificationProvider` port + `NoopClassificationProvider` + policy function | Real provider intentionally not implemented yet |
-| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 163 tests, 19 files, all green |
+| Tests | Vitest 5 (unit + integration + API E2E via `app.inject`) | 179 tests, 20 files, all green |
 | Monorepo | npm workspaces (`apps/*`, `packages/*`), internal packages expose TypeScript source | Bundled by tsup (API) and Vite (web) |
 | CI | GitHub Actions workflow at `.github/workflows/ci.yml` | lint → typecheck → test → build (not yet run on GitHub) |
 
@@ -114,6 +117,12 @@ Matching lifecycle: the workflow's load steps produce raw primary/event records 
 calls `matchRecords` (`@sheetpilot/matching-engine`), which normalizes identifiers, joins events to
 entities, orders each entity's complete event history latest-first and returns the entities plus join
 statistics → classification consumes the grouped representation.
+Rule lifecycle: rules are stored as versioned data in `rule_sets` (seeded from the workflow's in-code
+default) → the Rules UI/SDK validates a candidate set (`validateRuleSet`) and saves it via
+`POST/PUT /api/v1/rule-sets`, which bumps the version and makes it the single active set for the workflow →
+`RunService` loads the active set and passes it into the run → `evaluateRules` returns a full
+`RuleEvaluation` (winner, conditions evaluated, resulting values, conflicts, no-match/low-confidence review
+flags) that the workflow persists as decision evidence.
 
 ## 6. Repository Structure
 
@@ -127,10 +136,11 @@ apps/
     services/file-service.ts   thin compatibility wrapper (delegates upload to DatasetService)
     services/dataset-service.ts  validate → store → inspect → persist; paged row reads
     services/workflow-configuration-service.ts  validate + persist configurations; resolve runs from a configuration
-    services/run-service.ts    run creation/execution, step persistence, artifacts, review resolution
+    services/rule-set-service.ts  validate + version + activate rule sets; one active set per workflow
+    services/run-service.ts    run creation/execution, step persistence, artifacts, review resolution; injects the active rule set
     http/dto.ts            entity → DTO serializers
     http/http-utils.ts     zod parse helper, limit/offset, multipart field extraction
-    http/routes/*.ts       health, meta, workflows, workflow-configurations, files, datasets, runs, review-items, artifacts
+    http/routes/*.ts       health, meta, workflows, workflow-configurations, rule-sets, files, datasets, runs, review-items, artifacts
     fixtures.ts            reads the sample CSVs for tests
     server.test.ts         API integration + E2E test (upload → run → artifacts → review resolve)
   web/src/
@@ -140,7 +150,7 @@ apps/
     components/AppShell.tsx        sidebar shell, API status, open-review counter
     components/ui.tsx              Card, Badge, StatCard, EmptyState, LoadingState, ErrorState, Field, KeyValue
     components/ReviewItemCard.tsx  evidence view + accept/override/dismiss controls
-    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, NotFound
+    pages/*.tsx            Dashboard, Datasets, DatasetDetail, Setup, Runs, RunDetail, NewRun, Workflows, WorkflowDetail, ReviewQueue, Rules, NotFound
     lib/format.ts, lib/rules.ts, lib/status.ts, lib/datasets.ts, lib/configurations.ts   formatting, condition descriptions, badge tones, dataset column/flag helpers, mapping suggestions
     styles/app.css         design tokens + component styles (light professional theme)
 packages/
@@ -149,7 +159,8 @@ packages/
     domain/entities.ts     Workflow, FileAsset, WorkflowRun, StepRun, DecisionRecord, ReviewItem, Artifact…
     domain/dataset.ts      DatasetProfile/Analysis/Column/Warning schemas, DatasetSummary
     domain/workflow-config.ts  dataset/column role definitions, WorkflowConfiguration, validateWorkflowConfiguration
-    domain/rules.ts        Rule, ConditionGroup, RuleAction, RuleSet, RuleEvaluation
+    domain/rules.ts        Rule, ConditionGroup, RuleAction (with condition scope), RuleSet, RuleEvaluation
+                           (decision status, resulting values, evaluated conditions, conflicts, review reasons), validation issues
     api/contracts.ts       HTTP request/response schemas shared with the web app
     ports/                 repositories, datasets, workflow-configurations, file-storage, classification, logger, clock
     errors.ts              AppError hierarchy + zod error formatting + public error body
@@ -167,7 +178,8 @@ packages/
     normalize.ts           normalizeIdentifier (trim/collapse/case + opt-in dangerous steps) and renderCellText
     match.ts               matchRecords (join + grouping + deterministic latest), compareEventsLatestFirst
     scripts/benchmark.mts  synthetic benchmark (10k–250k entities) for performance observations
-  rule-engine/src/         conditions.ts, evaluate.ts, actions.ts, template.ts, validate.ts
+  rule-engine/src/         conditions.ts (scope-aware evaluation + condition trace), evaluate.ts (deterministic
+                           winner + decision metadata + conflicts), actions.ts, template.ts, validate.ts (semantic validation)
   ai/src/                  noop-provider.ts, policy.ts, factory.ts
   workflow-engine/src/
     engine.ts              executeWorkflow (ordered steps, state merge, traces, cancel handling)
@@ -213,6 +225,51 @@ Account-fault-triage specifics: 4 business columns (`RootCause`, `FaultCategory`
 confidence, review status, review reasons, explanation), 7 default rules over a 7-option taxonomy.
 
 ## 8. Completed
+
+### Product session 4 — Rule engine & rule management (2026-09-16)
+
+- [x] `@sheetpilot/core` (`domain/rules.ts`): conditions gained a **`scope`** (`latest` default, `any_event`,
+      `all_events`) with UX labels; `RuleEvaluation` became a first-class decision contract carrying
+      `winnerPriority`, `status` (`matched`/`no_match`), `needsReview`, `reviewReasons`
+      (`no_rule_match`/`rule_conflict`/`low_confidence`), `resultingValues`, the flattened `conditions`
+      trace (`expected`, `actual`, `matched`), `matchedRules` summaries and typed `conflicts` (with values).
+      Added `EvaluatedCondition`, `RuleMatchSummary`, `RuleConflict`, `RuleValidationIssue` schemas.
+- [x] `@sheetpilot/rule-engine`:
+  - `conditions.ts` — `evaluateConditionDetail` / `evaluateConditionsDetailed` honour the condition scope
+    (history scopes read the field from every entry of `context.events`; `any_event` = some, `all_events` =
+    non-empty and every) and return an ordered trace of every leaf inspected. `evaluateCondition(s)` stay as
+    boolean wrappers; `findMatchedTerm` unchanged.
+  - `evaluate.ts` — `evaluateRules(rules, context, options)` returns the winner (priority ↓, specificity ↓,
+    id ↑) plus the full metadata above. `minConfidence` drives `low_confidence`; `reviewOnNoMatch` /
+    `reviewOnConflict` (default true) drive the review flags. Conflicts are same-priority disagreement (the
+    intended fallback hierarchy is not a conflict) and the winner is still reported deterministically.
+  - `validate.ts` — errors for missing/empty values, empty lists, invalid regex and conflicting actions
+    inside one rule; warnings for empty search text, non-numeric comparisons, shared priorities, duplicate
+    condition signatures that can never win, and missing explanation templates.
+- [x] `@sheetpilot/workflow-engine`: the account-faults `buildRuleContext` now also passes the **full event
+      history** (`events`) so history-scoped rules work; `createState` accepts an optional per-run `ruleSet`;
+      `classify` calls the engine with `minConfidence` and records the whole `RuleEvaluation` (rule status,
+      needs review, evaluated conditions, matched rules, resulting values) into decision evidence. The
+      default in-code rule set is unchanged, so the canonical sample results are identical.
+- [x] `@sheetpilot/db`: `RuleSetRepository.listByWorkflowSlug` added to the port and both adapters;
+      `storedRuleSetSchema` unchanged (no schema migration needed).
+- [x] `apps/api`: new `RuleSetService` (list/get/validate/create/update with versioning and single-active
+      enforcement), routes `GET/POST /api/v1/rule-sets`, `POST /api/v1/rule-sets/validate`,
+      `GET/PUT /api/v1/rule-sets/:id`, DTO mappers, container wiring, and `InvalidRuleSetError` (422
+      `invalid_rule_set`). `RunService.execute` now loads the active persisted rule set and injects it into
+      the run input, so rule edits apply to the next run.
+- [x] `apps/web`: new **Rules** page — workflow + rule-set picker, per-rule editor (name, priority,
+      confidence, enabled, recursive all/any condition builder with scope/operator/value/case-sensitivity,
+      output-action builder, explanation template, tags), inline validation issues, "Save new version" and
+      "Save as a new rule set"; router + nav entries; `lib/rules.ts` operator/scope labels; CSS.
+- [x] Tests: +16 (179 total, 20 files) — `packages/rule-engine/src/rule-engine.test.ts` rewritten (21 tests:
+      history scopes, decision metadata, resulting values, no-match/conflict/low-confidence, semantic
+      validation), `account-faults.test.ts` +2 (per-run rule set with `any_event` scope; no-match evidence),
+      and `apps/api/src/rule-set.test.ts` (7 API tests: list/validate/invalid-save/create-deactivate/update
+      version/run-uses-active-set/404).
+- [x] `scripts/smoke.mjs` now also lists, validates (valid + invalid), and saves a rule set end to end.
+- [x] Docs: ADR-013, `docs/architecture.md` (rule management & evaluation lifecycle, abstractions), README,
+      this file.
 
 ### Product session 3 — Matching, grouping & latest-event engine (2026-09-16)
 
@@ -374,14 +431,15 @@ Verified commands in this environment (Node 24.6.0, npm 11.5.1, Windows):
 | --- | --- | --- |
 | Types | `npm run typecheck` | clean across all 10 workspaces |
 | Lint | `npm run lint` | clean |
-| Tests | `npm test` | 19 files / 163 tests passed |
+| Tests | `npm test` | 20 files / 179 tests passed |
 | Build | `npm run build` | API bundle (`apps/api/dist/index.js`) + web assets (`apps/web/dist`) |
 | Production smoke | start `node apps/api/dist/index.js` then `npm run smoke` | run succeeded, 3 artifacts, 7 review items, 9 decision records, review resolution OK; then datasets validated → configuration saved → configured run succeeded (9 accounts, 7 review items) |
 | Matching engine | `npm run benchmark -w @sheetpilot/matching-engine` | 1,000,000 events joined + grouped + latest-selected in 2.7 s (368k events/s); unit suite covers normalization, one-to-many, orphans, duplicates, ties, missing/invalid timestamps |
 | Dev servers | `npm run dev` (or the two dev scripts) | API on 4000, Vite on 5173, `/api` proxy verified with `curl`/`Invoke-WebRequest` |
 | Datasets (API) | `npm run dev:api` then `POST /api/v1/datasets` (multipart) + `GET .../rows` | CSV inspected (10 rows, typed columns, warnings), rows paged with `limit`/`offset` |
 | Configurations (API) | `POST /api/v1/workflow-configurations/validate`, create, then `POST /api/v1/runs { configurationId }` | validation returns issues + resolved config; saved config version bumps; configured run succeeds and records `configurationId` |
-| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) |
+| Rule management (API) | start the API, then `GET /api/v1/rule-sets`, `POST .../validate` (valid + invalid regex), `POST /api/v1/rule-sets`, run and read `/runs/:id/decisions` | seeded active set listed (7 rules); invalid regex fails validation; save bumps version and deactivates the previous set; a run resolves the active set and applies it |
+| Migrations | `npm run db:generate` | `0000_lying_jigsaw.sql` (8 tables, incl. `rule_sets`) + `0001_pretty_dorian_gray.sql` (`datasets`) + `0002_slow_colonel_america.sql` (`workflow_configurations`, `runs.configuration_id`) — no new migration in session 4 (rule sets gained only a new query, no columns) |
 
 Working end to end: upload datasets (CSV/XLSX) → inspect sheets/columns/types/warnings and preview rows
 in the **Datasets** UI → **Setup**: assign datasets to roles, map the account/timestamp/description/output
@@ -464,6 +522,23 @@ primary key, ambiguous timestamps), 1 orphan event account ignored and counted.
     identifiers that differ by punctuation or leading zeros.
 25. **The engine preserves duplicate events.** Identical event rows are never deduplicated (they can be
     legitimate repeated reports); callers that need deduplication must do it before calling `matchRecords`.
+26. **Rule-set versions are overwritten, not snapshotted.** Saving bumps `version` but replaces the row (the
+    same behaviour configurations have); there is no immutable rule history yet, and a run stores only the
+    resolved rules indirectly (through the active set + decision evidence).
+27. **History-scoped rules build an in-memory history array per entity.** `buildRuleContext` passes the full
+    event history for `any_event`/`all_events` conditions; this scales with the loaded file (the join itself
+    is still linear).
+28. **Rule validation is semantic, not a proof.** It catches missing values, bad regex, conflicting actions
+    and unreachable duplicates, but it cannot prove that overlapping rule sets are logically exclusive, and
+    different-priority overlaps are intentional fallbacks rather than errors.
+29. **The Rules UI does not know the workflow's output schema.** Output fields are free text, so a typo in an
+    action field is not flagged until it reaches the output (the `__`-prefixed and business columns are
+    conventions, not a validated vocabulary).
+30. **Single active set is enforced by the service, not the database.** `RuleSetService` deactivates siblings
+    on save and `getActiveByWorkflowSlug` returns the first active row; direct DB writes could still create
+    two active sets.
+31. **AI suggestions cannot yet be converted into rules.** The policy seam and evidence exist, but the Rules
+    UI has no "accept a suggestion as a rule" flow (deliberately, per the AI-assists-never-overrides rule).
 
 ## 11. Technical Decisions
 
@@ -483,6 +558,9 @@ Recorded as ADRs in [`docs/decisions.md`](./docs/decisions.md):
   persisted/versioned, and runs resolve them through the workflow's `resolveRunInput`.
 - ADR-012 matching/grouping/latest-event selection is a standalone, example-agnostic engine; identifier
   normalization reports every transformation and only performs dangerous merges when explicitly opted in.
+- ADR-013 rules are data, evaluated deterministically (full decision metadata, scoped conditions, no-match/
+  conflict/low-confidence review flags), and managed through a validated, versioned API with one active set
+  per workflow resolved per run.
 
 Additional decisions made during implementation:
 
@@ -526,7 +604,7 @@ Not yet implemented (risks acknowledged):
 
 ## 13. Testing
 
-**Status: 163 tests / 19 files passing (`npm test`).** Coverage by area:
+**Status: 179 tests / 20 files passing (`npm test`).** Coverage by area:
 
 | Area | File | What it proves |
 | --- | --- | --- |
@@ -543,10 +621,11 @@ Not yet implemented (risks acknowledged):
 | Dataset API | `apps/api/src/dataset.test.ts` | ingest + list + detail, row paging, re-analysis, traversal-safe names, 415/422/404/413 error states |
 | Configuration validation | `packages/core/src/domain/workflow-config.test.ts` | missing roles/columns, unknown datasets/columns, date-as-identifier and non-date-timestamp confirmation flow, empty columns, required/invalid options, duplicate assignments |
 | Configuration API | `apps/api/src/workflow-configuration.test.ts` | workflow definition exposed to UI, validate incomplete/complete + resolved preview, invalid save rejected (422), create/list/get/update version bump, run started from a configuration records `configurationId` |
-| Rules | `packages/rule-engine/src/rule-engine.test.ts` | 15 operators, tie-breaks, conflicts, actions, validation |
+| Rules | `packages/rule-engine/src/rule-engine.test.ts` | operators (15), case/numeric/date coercions, membership/emptiness, safe regex, `latest`/`any_event`/`all_events` scopes, decision metadata (resulting values, evaluated conditions, matched rules, status), deterministic tie-breaks, same-priority conflicts + `rule_conflict`, no-match/`no_rule_match`, low-confidence threshold, `applyActions` semantics, validation (duplicates, missing values, bad regex, conflicting actions, shared priorities, unreachable duplicates) |
+| Rule management API | `apps/api/src/rule-set.test.ts` | list seeded active set, validate (valid + blocking errors), refuse invalid save (422 `invalid_rule_set`), create + deactivate previous, update version bump, run resolves and applies the active set, 404 |
 | AI policy | `packages/ai/src/ai.test.ts` | policy decisions, noop provider, fail-fast factory |
 | Engine | `packages/workflow-engine/src/engine.test.ts` | step ordering, state merge, metrics, failure short-circuit, cancellation |
-| Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence |
+| Workflow | `packages/workflow-engine/.../account-faults.test.ts` | full classification output, latest fault, review reasons, stats, evidence, per-run rule set with history-scoped conditions, no-match decision evidence |
 | API | `apps/api/src/server.test.ts` | health, meta, workflows, uploads, 415, run E2E, artifacts download, decisions, review resolve, 404/400/409 |
 | UI helpers | `apps/web/src/lib/format.test.ts` | formatting utilities |
 
@@ -555,7 +634,9 @@ including `datasets` and `workflow_configurations`), rule engine property/fuzz t
 CSV/`DATASET_MAX_SCAN_ROWS` inspection, Playwright browser tests for the datasets/setup/new-run flows,
 configuration-resolution tests for multi-dataset roles, and coverage reporting in CI. For the matching
 engine: a randomized/property test asserting that the latest selection is invariant under input shuffling,
-and a very-large-file (streaming) test once the loader is chunked.
+and a very-large-file (streaming) test once the loader is chunked. For the rule engine: a randomized/property
+test asserting the winner is invariant under rule shuffling, a golden test over the default account-faults
+rule set, and a Playwright test for the Rules editor (validate → save → run uses it).
 
 ## 14. Environment
 
@@ -580,24 +661,27 @@ Postgres for later verification: `docker compose up -d postgres` (user/password/
 
 ## 15. Next Session — exact recommended work
 
-**Product session 4: pick the highest-value next slice** (queue `04-session.md`). The matching engine and
-configuration layer now exist, so the platform's weakest points are durability and the review loop.
-Recommended order:
+**Product session 5: pick the highest-value next slice** (queue `05-session.md`). Rule management now exists,
+so the platform's weakest points remain **durability** and the **review loop**. Recommended order:
 
 1. **Verify Postgres.** `docker compose up -d postgres`, run the migrations (`0000`–`0002`), and exercise
-   the API against `REPOSITORY_DRIVER=postgres` (ingest a dataset, save a configuration, run it, page
-   rows). Add gated repository integration tests. In-memory mode still loses everything on restart.
-2. **Review → artifact regeneration.** Resolving a review item currently records the decision but does not
-   rewrite the output CSV/XLSX. Apply resolutions to the output rows and regenerate the artifacts
+   the API against `REPOSITORY_DRIVER=postgres` (ingest a dataset, save a configuration and a rule set, run
+   it, page rows). Add gated repository integration tests (including `rule_sets`
+   `listByWorkflowSlug`/`getActiveByWorkflowSlug`). In-memory mode still loses everything on restart.
+2. **Review → artifact regeneration.** Resolving a review item records the decision but does not rewrite the
+   output CSV/XLSX. Apply resolutions to the output rows and regenerate the artifacts
    (`RunService`/artifact writer) so the exported file matches the reviewed result.
-3. **Rule management.** Expose the persisted `rule_sets` through the API/UI (list, edit with validation,
-   version) instead of shipping rules only as code. Bump the rule-set version on material changes.
-4. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
+3. **Rule-management follow-ups:** immutable rule-set version snapshots (keep previous versions instead of
+   overwriting), validate action fields against the workflow's declared output columns, an
+   "accept an AI suggestion as a rule" flow, and importing/exporting a rule set as JSON.
+4. **Review-loop follow-ups:** surface matching-engine issues (`ambiguous_latest_timestamp`,
+   `duplicate_primary`, `no_valid_timestamp`) as review reasons alongside the workflow's own reasons; bulk
+   review actions; show `__Explanation` / decision evidence in the output preview.
+5. **Configuration follow-ups:** immutable version snapshots, a "reuse for a new daily file" flow that
    re-points assignments while keeping column mappings, and deprecating the legacy `/files` wizard.
-5. **Matching-engine follow-ups:** surface engine issues as review reasons, expose the identifier
-   normalization options through configuration, and stream/chunk the loader.
-6. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, review
-   ergonomics (bulk actions, keyboard), and route-level code splitting for the web bundle.
+6. Then: scheduling/watched-folder ingestion, a real AI provider behind the existing policy seam, exposing
+   identifier normalization options through configuration, streaming/chunking the loader, and route-level
+   code splitting for the web bundle.
 
 **Definition of done for the next session:** the chosen priority item is implemented, has tests, docs
 (`docs/decisions.md` if architectural), all four verification commands pass (`lint`, `typecheck`, `test`,

@@ -238,18 +238,30 @@ function detectLatestTie(sorted: EventRecord[]): boolean {
   return first.occurredAt.getTime() === second.occurredAt.getTime();
 }
 
+function eventContextFields(
+  account: string,
+  event: EventRecord,
+  faultCount: number,
+): Record<string, unknown> {
+  return {
+    ...event.row,
+    account,
+    accountRaw: event.accountRaw,
+    description: normalizeText(event.description),
+    faultCount,
+    occurredAt: event.occurredAt?.toISOString() ?? '',
+  };
+}
+
 export function buildRuleContext(
   account: string,
   latest: EventRecord,
   faultCount: number,
+  history: EventRecord[] = [],
 ): Record<string, unknown> {
   return {
-    ...latest.row,
-    account,
-    accountRaw: latest.accountRaw,
-    description: normalizeText(latest.description),
-    faultCount,
-    occurredAt: latest.occurredAt?.toISOString() ?? '',
+    ...eventContextFields(account, latest, faultCount),
+    events: history.map((event) => eventContextFields(account, event, faultCount)),
   };
 }
 
@@ -258,8 +270,9 @@ function rootCauseForEvent(
   account: string,
   event: EventRecord,
   faultCount: number,
+  history: EventRecord[] = [],
 ): string | null {
-  const result = evaluateRules(rules.rules, buildRuleContext(account, event, faultCount));
+  const result = evaluateRules(rules.rules, buildRuleContext(account, event, faultCount, history));
   if (!result.winner) {
     return null;
   }
@@ -274,9 +287,16 @@ function emptyEvaluation(): RuleEvaluation {
   return {
     matchedRuleIds: [],
     winnerRuleId: null,
+    winnerPriority: null,
     confidence: 0,
+    status: 'no_match',
+    needsReview: false,
+    reviewReasons: [],
     explanation: '',
     conflicts: [],
+    conditions: [],
+    resultingValues: {},
+    matchedRules: [],
     evaluatedRuleCount: 0,
   };
 }
@@ -314,7 +334,8 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
         if (latest) {
           const result = evaluateRules(
             state.rules.rules,
-            buildRuleContext(group.account, latest, group.events.length),
+            buildRuleContext(group.account, latest, group.events.length, sorted),
+            { minConfidence: state.config.reviewBelowConfidence },
           );
           evaluation = result.evaluation;
           matchedTerm = result.matched[0]?.matchedTerm ?? null;
@@ -345,7 +366,7 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
           const conflicting = sorted
             .slice(1)
             .map((event) =>
-              rootCauseForEvent(state.rules, group.account, event, group.events.length),
+              rootCauseForEvent(state.rules, group.account, event, group.events.length, sorted),
             )
             .filter(
               (rootCause): rootCause is string =>
@@ -390,7 +411,13 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
             rowIndex: event.rowIndex,
             occurredAt: event.occurredAt?.toISOString() ?? null,
             description: event.description,
-            rootCause: rootCauseForEvent(state.rules, group.account, event, group.events.length),
+            rootCause: rootCauseForEvent(
+              state.rules,
+              group.account,
+              event,
+              group.events.length,
+              sorted,
+            ),
           }));
 
         const uniqueReasons = [...new Set(reviewReasons)];
@@ -410,6 +437,7 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
           matchedTerm,
           explanation: evaluation.explanation,
           conflicts: evaluation.conflicts,
+          evaluation,
           appliedActions,
           outputValues,
           confidence: evaluation.winnerRuleId ? evaluation.confidence : 0,
@@ -449,6 +477,12 @@ function buildEvidence(decision: EntityDecision): Record<string, unknown> {
     matchedTerm: decision.matchedTerm,
     explanation: decision.explanation,
     conflicts: decision.conflicts,
+    ruleStatus: decision.evaluation.status,
+    needsReview: decision.evaluation.needsReview,
+    ruleReviewReasons: decision.evaluation.reviewReasons,
+    evaluatedConditions: decision.evaluation.conditions,
+    matchedRules: decision.evaluation.matchedRules,
+    resultingValues: decision.evaluation.resultingValues,
     ai: decision.ai,
   };
 }

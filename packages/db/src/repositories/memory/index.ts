@@ -242,7 +242,15 @@ export function createInMemoryRepositories(): Repositories {
           (ruleSet) => ruleSet.workflowSlug === workflowSlug && ruleSet.active,
         ) ?? null,
       ),
-    list: () => Promise.resolve([...ruleSetStore.values()]),
+    listByWorkflowSlug: (workflowSlug) =>
+      Promise.resolve(
+        byDateDesc(
+          [...ruleSetStore.values()].filter((ruleSet) => ruleSet.workflowSlug === workflowSlug),
+          (ruleSet) => ruleSet.updatedAt,
+        ),
+      ),
+    list: () =>
+      Promise.resolve(byDateDesc([...ruleSetStore.values()], (ruleSet) => ruleSet.updatedAt)),
   };
 
   return {

@@ -89,6 +89,7 @@ export interface RuleSetRepository {
   upsert(ruleSet: StoredRuleSet): Promise<StoredRuleSet>;
   getById(id: string): Promise<StoredRuleSet | null>;
   getActiveByWorkflowSlug(workflowSlug: string): Promise<StoredRuleSet | null>;
+  listByWorkflowSlug(workflowSlug: string): Promise<StoredRuleSet[]>;
   list(): Promise<StoredRuleSet[]>;
 }
 

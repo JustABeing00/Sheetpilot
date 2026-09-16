@@ -1,6 +1,18 @@
-import type { ConditionNode, RuleCondition } from '@sheetpilot/core';
+import type {
+  ConditionNode,
+  EvaluatedCondition,
+  RuleCondition,
+  RuleConditionScope,
+} from '@sheetpilot/core';
 
 export type RuleContext = Record<string, unknown>;
+
+/**
+ * Key under which callers may pass the entity's event history (latest-first or not, order does not
+ * matter for evaluation). Conditions with scope `any_event`/`all_events` read their field from every
+ * entry of this array.
+ */
+export const HISTORY_CONTEXT_KEY = 'events';
 
 export type Comparable = string | number | boolean | null;
 
@@ -80,8 +92,22 @@ function tryParseDate(value: Comparable): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-export function evaluateCondition(condition: RuleCondition, context: RuleContext): boolean {
-  const raw = context[condition.field];
+function asHistory(context: RuleContext): RuleContext[] {
+  const history = context[HISTORY_CONTEXT_KEY];
+  if (!Array.isArray(history)) {
+    return [];
+  }
+  return history.filter(
+    (entry): entry is RuleContext => typeof entry === 'object' && entry !== null,
+  );
+}
+
+function scopeOf(condition: RuleCondition): RuleConditionScope {
+  return condition.scope ?? 'latest';
+}
+
+/** Evaluates a single leaf against one raw field value. */
+function matchLeaf(condition: RuleCondition, raw: unknown): boolean {
   const caseSensitive = condition.caseSensitive;
   const left = normalizeComparable(raw, caseSensitive);
   const operand = condition.value;
@@ -186,12 +212,89 @@ export function evaluateCondition(condition: RuleCondition, context: RuleContext
   }
 }
 
-export function evaluateConditions(node: ConditionNode, context: RuleContext): boolean {
-  if ('mode' in node) {
-    const results = node.conditions.map((child) => evaluateConditions(child, context));
-    return node.mode === 'all' ? results.every(Boolean) : results.some(Boolean);
+export interface ConditionDetail {
+  matched: boolean;
+  actual: unknown;
+}
+
+/**
+ * Evaluates a leaf condition honouring its scope. For history scopes the field is read from every
+ * entry of `context.events`; `any_event` passes on the first match, `all_events` requires a non-empty
+ * history in which every entry matches.
+ */
+export function evaluateConditionDetail(
+  condition: RuleCondition,
+  context: RuleContext,
+): ConditionDetail {
+  const scope = scopeOf(condition);
+
+  if (scope === 'latest') {
+    const actual = context[condition.field];
+    return { matched: matchLeaf(condition, actual), actual };
   }
-  return evaluateCondition(node, context);
+
+  const history = asHistory(context);
+  if (history.length === 0) {
+    return { matched: false, actual: null };
+  }
+
+  const values = history.map((entry) => entry[condition.field]);
+  const matches = values.map((value) => matchLeaf(condition, value));
+
+  if (scope === 'any_event') {
+    const index = matches.findIndex(Boolean);
+    return { matched: index !== -1, actual: values[index] ?? null };
+  }
+
+  return { matched: matches.every(Boolean), actual: null };
+}
+
+export function evaluateCondition(condition: RuleCondition, context: RuleContext): boolean {
+  return evaluateConditionDetail(condition, context).matched;
+}
+
+export interface ConditionsEvaluation {
+  matched: boolean;
+  conditions: EvaluatedCondition[];
+}
+
+/**
+ * Evaluates a condition tree and returns both the boolean outcome and a flat, ordered trace of every
+ * leaf condition that was inspected — this is the "conditions evaluated" evidence a reviewer sees.
+ */
+export function evaluateConditionsDetailed(
+  node: ConditionNode,
+  context: RuleContext,
+): ConditionsEvaluation {
+  if ('mode' in node) {
+    const children = node.conditions.map((child) => evaluateConditionsDetailed(child, context));
+    return {
+      matched:
+        node.mode === 'all'
+          ? children.every((child) => child.matched)
+          : children.some((child) => child.matched),
+      conditions: children.flatMap((child) => child.conditions),
+    };
+  }
+
+  const detail = evaluateConditionDetail(node, context);
+  return {
+    matched: detail.matched,
+    conditions: [
+      {
+        field: node.field,
+        operator: node.operator,
+        scope: scopeOf(node),
+        expected: node.value,
+        actual: detail.actual,
+        matched: detail.matched,
+      },
+    ],
+  };
+}
+
+export function evaluateConditions(node: ConditionNode, context: RuleContext): boolean {
+  return evaluateConditionsDetailed(node, context).matched;
 }
 
 export function collectLeafConditions(node: ConditionNode): RuleCondition[] {

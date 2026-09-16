@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import {
   aiPolicySchema,
+  ruleSetSchema,
   type ClassificationSuggestion,
   type MetricRecord,
   type OutputValue,
   type ReviewReason,
   type ReviewSeverity,
+  type RuleEvaluation,
   type RuleSet,
   type WorkflowConfigField,
 } from '@sheetpilot/core';
@@ -121,6 +123,11 @@ export const accountFaultInputSchema = z.object({
   config: z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
     .default({}),
+  /**
+   * Rule set to evaluate. When omitted (e.g. direct engine tests) the workflow falls back to the
+   * in-code default. The API always supplies the persisted active rule set for the workflow.
+   */
+  ruleSet: ruleSetSchema.optional(),
 });
 export type AccountFaultInput = z.infer<typeof accountFaultInputSchema>;
 
@@ -162,7 +169,8 @@ export interface EntityDecision {
   matchedRuleIds: string[];
   matchedTerm: string | null;
   explanation: string;
-  conflicts: Array<{ ruleIds: string[]; field: string; reason: string }>;
+  conflicts: Array<{ ruleIds: string[]; field: string; values: string[]; reason: string }>;
+  evaluation: RuleEvaluation;
   appliedActions: AppliedAction[];
   outputValues: Record<string, OutputValue>;
   confidence: number;

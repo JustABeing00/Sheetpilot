@@ -29,7 +29,7 @@ import {
   datasetAssignmentSchema,
   workflowConfigurationDefinitionSchema,
 } from '../domain/workflow-config.js';
-import { ruleSchema } from '../domain/rules.js';
+import { ruleSchema, ruleValidationIssueSchema } from '../domain/rules.js';
 
 export const isoDateTimeSchema = z
   .string()
@@ -311,6 +311,54 @@ export type ArtifactDto = z.infer<typeof artifactDtoSchema>;
 
 export const ruleDtoSchema = ruleSchema;
 export type RuleDto = z.infer<typeof ruleDtoSchema>;
+
+export const ruleSetSummaryDtoSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  workflowSlug: z.string(),
+  name: z.string(),
+  version: z.number().int().positive(),
+  active: z.boolean(),
+  ruleCount: z.number().int().nonnegative(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type RuleSetSummaryDto = z.infer<typeof ruleSetSummaryDtoSchema>;
+
+export const ruleSetDtoSchema = ruleSetSummaryDtoSchema.extend({
+  rules: z.array(ruleDtoSchema),
+});
+export type RuleSetDto = z.infer<typeof ruleSetDtoSchema>;
+
+export const ruleSetListResponseSchema = z.object({ items: z.array(ruleSetSummaryDtoSchema) });
+export type RuleSetListResponse = z.infer<typeof ruleSetListResponseSchema>;
+
+export const ruleSetValidationResponseSchema = z.object({
+  valid: z.boolean(),
+  issues: z.array(ruleValidationIssueSchema),
+});
+export type RuleSetValidationResponse = z.infer<typeof ruleSetValidationResponseSchema>;
+
+export const validateRuleSetRequestSchema = z.object({
+  workflowSlug: z.string().min(1),
+  rules: z.array(ruleDtoSchema),
+});
+export type ValidateRuleSetRequest = z.infer<typeof validateRuleSetRequestSchema>;
+
+export const createRuleSetRequestSchema = z.object({
+  workflowSlug: z.string().min(1),
+  name: z.string().min(1).max(200),
+  rules: z.array(ruleDtoSchema).min(1),
+  activate: z.boolean().default(true),
+});
+export type CreateRuleSetRequest = z.infer<typeof createRuleSetRequestSchema>;
+
+export const updateRuleSetRequestSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  rules: z.array(ruleDtoSchema).min(1).optional(),
+  active: z.boolean().optional(),
+});
+export type UpdateRuleSetRequest = z.infer<typeof updateRuleSetRequestSchema>;
 
 export const workflowSummaryDtoSchema = z.object({
   id: z.string(),

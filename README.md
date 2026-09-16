@@ -132,6 +132,8 @@ review queue, API and UI are implemented and tested end to end for the account f
 ingestion includes production-quality validation and a dataset inspection/preview UI, the
 column-mapping/workflow configuration layer lets a nontechnical user connect files and columns once and
 reuse the setup, and the reusable matching engine performs the deterministic primary↔event join and
-latest-event selection with reported identifier normalization. Scheduling, editable rules, AI providers,
-authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md) §15 for the
-prioritized next steps.
+latest-event selection with reported identifier normalization. Rules are first-class, editable **data**: the
+**Rules** page lets a non-technical user build conditions (over the latest record or the whole event history)
+and output assignments, validate them, and save a new version that the next run picks up. Scheduling, AI
+providers, authentication and multi-tenancy are deliberately deferred — see [`progress.md`](./progress.md)
+§15 for the prioritized next steps.

@@ -8,6 +8,7 @@ import type {
   RunDto,
   RunSummaryDto,
   StepRun,
+  StoredRuleSet,
   WorkflowConfiguration,
   WorkflowConfigurationSummary,
   WorkflowRun,
@@ -20,6 +21,8 @@ import type {
   DecisionDto,
   FileAssetDto,
   ReviewItemDto,
+  RuleSetDto,
+  RuleSetSummaryDto,
   StepRunDto,
   WorkflowConfigurationDto,
   WorkflowConfigurationSummaryDto,
@@ -241,6 +244,27 @@ export function toArtifactDto(artifact: Artifact): ArtifactDto {
     sizeBytes: artifact.sizeBytes,
     downloadUrl: `/api/v1/artifacts/${artifact.id}/download`,
     createdAt: artifact.createdAt.toISOString(),
+  };
+}
+
+export function toRuleSetSummaryDto(ruleSet: StoredRuleSet): RuleSetSummaryDto {
+  return {
+    id: ruleSet.id,
+    slug: ruleSet.slug,
+    workflowSlug: ruleSet.workflowSlug,
+    name: ruleSet.name,
+    version: ruleSet.version,
+    active: ruleSet.active,
+    ruleCount: ruleSet.rules.length,
+    createdAt: ruleSet.createdAt.toISOString(),
+    updatedAt: ruleSet.updatedAt.toISOString(),
+  };
+}
+
+export function toRuleSetDto(ruleSet: StoredRuleSet): RuleSetDto {
+  return {
+    ...toRuleSetSummaryDto(ruleSet),
+    rules: ruleSet.rules,
   };
 }
 

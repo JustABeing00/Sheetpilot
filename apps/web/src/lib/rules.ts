@@ -1,32 +1,53 @@
-import type { ConditionNode, RuleCondition } from '@sheetpilot/core';
+import type {
+  ConditionNode,
+  RuleCondition,
+  RuleConditionScope,
+  RuleOperator,
+} from '@sheetpilot/core';
 import { formatCellValue } from './format.js';
 
-const OPERATOR_LABELS: Record<RuleCondition['operator'], string> = {
-  equals: '=',
-  not_equals: '≠',
+export const OPERATOR_LABELS: Record<RuleOperator, string> = {
+  equals: 'is exactly',
+  not_equals: 'is not',
   contains: 'contains',
   not_contains: 'does not contain',
   starts_with: 'starts with',
   ends_with: 'ends with',
-  matches_regex: 'matches',
-  in: 'in',
-  not_in: 'not in',
+  matches_regex: 'matches pattern',
+  in: 'is one of',
+  not_in: 'is not one of',
   is_empty: 'is empty',
   is_not_empty: 'is not empty',
-  gt: '>',
-  gte: '≥',
-  lt: '<',
-  lte: '≤',
+  gt: 'is greater than',
+  gte: 'is greater or equal to',
+  lt: 'is less than',
+  lte: 'is less or equal to',
 };
+
+export const CONDITION_SCOPE_LABELS: Record<RuleConditionScope, string> = {
+  latest: 'the latest record',
+  any_event: 'any record in its history',
+  all_events: 'every record in its history',
+};
+
+export const OPERATORS_WITHOUT_VALUE = new Set<RuleOperator>(['is_empty', 'is_not_empty']);
+
+export const OPERATORS_WITH_LIST_VALUE = new Set<RuleOperator>(['in', 'not_in']);
 
 function describeLeaf(condition: RuleCondition): string {
   const value = Array.isArray(condition.value)
     ? `[${condition.value.join(', ')}]`
     : formatCellValue(condition.value);
-  if (condition.operator === 'is_empty' || condition.operator === 'is_not_empty') {
-    return `${condition.field} ${OPERATOR_LABELS[condition.operator]}`;
+  const scopePrefix =
+    condition.scope && condition.scope !== 'latest'
+      ? condition.scope === 'any_event'
+        ? 'history has a record where '
+        : 'history every record where '
+      : '';
+  if (OPERATORS_WITHOUT_VALUE.has(condition.operator)) {
+    return `${scopePrefix}${condition.field} ${OPERATOR_LABELS[condition.operator]}`;
   }
-  return `${condition.field} ${OPERATOR_LABELS[condition.operator]} ${value}`;
+  return `${scopePrefix}${condition.field} ${OPERATOR_LABELS[condition.operator]} ${value}`;
 }
 
 export function describeCondition(node: ConditionNode): string {

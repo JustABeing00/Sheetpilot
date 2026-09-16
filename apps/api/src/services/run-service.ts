@@ -116,11 +116,16 @@ export class RunService {
     const runLogger = this.deps.logger.child({ runId });
 
     try {
+      const activeRuleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(
+        run.workflowSlug,
+      );
+
       const execution = await workflow.execute(
         {
           primaryFileId: run.primaryFileId,
           eventsFileId: run.eventsFileId,
           config: run.config,
+          ...(activeRuleSet ? { ruleSet: activeRuleSet } : {}),
         },
         ctx,
       );

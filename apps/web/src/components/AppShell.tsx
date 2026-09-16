@@ -8,6 +8,7 @@ const navigation = [
   { to: '/runs/new', label: 'New run' },
   { to: '/runs', label: 'Runs' },
   { to: '/review', label: 'Review queue' },
+  { to: '/rules', label: 'Rules' },
   { to: '/workflows', label: 'Workflows' },
 ];
 

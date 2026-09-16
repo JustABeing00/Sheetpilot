@@ -13,16 +13,22 @@ import {
   metaResponseSchema,
   reviewItemDtoSchema,
   reviewItemListResponseSchema,
+  ruleSetDtoSchema,
+  ruleSetListResponseSchema,
+  ruleSetValidationResponseSchema,
   runDtoSchema,
   runListResponseSchema,
   workflowConfigurationDtoSchema,
   workflowConfigurationListResponseSchema,
   workflowDetailDtoSchema,
   workflowListResponseSchema,
+  type CreateRuleSetRequest,
   type CreateRunRequest,
   type CreateWorkflowConfigurationRequest,
   type ResolveReviewItemRequest,
+  type UpdateRuleSetRequest,
   type UpdateWorkflowConfigurationRequest,
+  type ValidateRuleSetRequest,
   type ValidateWorkflowConfigurationRequest,
 } from '@sheetpilot/core';
 import { apiGet, apiPost, apiPut, apiUpload } from './client.js';
@@ -48,6 +54,8 @@ export const queryKeys = {
   workflowConfigurationsBySlug: (slug: string) =>
     ['workflow-configurations', 'slug', slug] as const,
   workflowConfiguration: (id: string) => ['workflow-configurations', id] as const,
+  ruleSets: (slug?: string) => ['rule-sets', slug ?? 'all'] as const,
+  ruleSet: (id: string) => ['rule-sets', id] as const,
 };
 
 export function useHealth() {
@@ -292,6 +300,52 @@ export function useUpdateWorkflowConfiguration() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.workflowConfigurations });
+    },
+  });
+}
+
+export function useRuleSets(workflowSlug?: string) {
+  const query = workflowSlug ? `?workflowSlug=${encodeURIComponent(workflowSlug)}` : '';
+  return useQuery({
+    queryKey: queryKeys.ruleSets(workflowSlug),
+    queryFn: () => apiGet(`/api/v1/rule-sets${query}`, ruleSetListResponseSchema),
+  });
+}
+
+export function useRuleSet(ruleSetId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.ruleSet(ruleSetId ?? ''),
+    queryFn: () => apiGet(`/api/v1/rule-sets/${ruleSetId}`, ruleSetDtoSchema),
+    enabled: Boolean(ruleSetId),
+  });
+}
+
+export function useValidateRuleSet() {
+  return useMutation({
+    mutationFn: (input: ValidateRuleSetRequest) =>
+      apiPost('/api/v1/rule-sets/validate', input, ruleSetValidationResponseSchema),
+  });
+}
+
+export function useCreateRuleSet() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateRuleSetRequest) =>
+      apiPost('/api/v1/rule-sets', input, ruleSetDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['rule-sets'] });
+    },
+  });
+}
+
+export function useUpdateRuleSet() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; body: UpdateRuleSetRequest }) =>
+      apiPut(`/api/v1/rule-sets/${input.id}`, input.body, ruleSetDtoSchema),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['rule-sets'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.ruleSet(variables.id) });
     },
   });
 }

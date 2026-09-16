@@ -6,6 +6,7 @@ import { DatasetsPage } from '../pages/DatasetsPage.js';
 import { NewRunPage } from '../pages/NewRunPage.js';
 import { NotFoundPage } from '../pages/NotFoundPage.js';
 import { ReviewQueuePage } from '../pages/ReviewQueuePage.js';
+import { RulesPage } from '../pages/RulesPage.js';
 import { RunDetailPage } from '../pages/RunDetailPage.js';
 import { RunsPage } from '../pages/RunsPage.js';
 import { SetupPage } from '../pages/SetupPage.js';
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
       { path: 'setup', element: <SetupPage /> },
       { path: 'setup/:configurationId', element: <SetupPage /> },
       { path: 'review', element: <ReviewQueuePage /> },
+      { path: 'rules', element: <RulesPage /> },
       { path: 'workflows', element: <WorkflowsPage /> },
       { path: 'workflows/:slug', element: <WorkflowDetailPage /> },
       { path: '*', element: <NotFoundPage /> },

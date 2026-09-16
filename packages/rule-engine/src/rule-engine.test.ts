@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { ruleSchema, type Rule } from '@sheetpilot/core';
+import {
+  ruleConditionSchema,
+  ruleSchema,
+  type ConditionNode,
+  type Rule,
+  type RuleCondition,
+} from '@sheetpilot/core';
 import { evaluateCondition, findMatchedTerm, type RuleContext } from './conditions.js';
 import { evaluateRules } from './evaluate.js';
 import { applyActions } from './actions.js';
 import { validateRuleSet } from './validate.js';
 
+function condition(partial: Record<string, unknown>): RuleCondition {
+  return ruleConditionSchema.parse(partial);
+}
+
 function makeRule(partial: Record<string, unknown>): Rule {
   return ruleSchema.parse(partial);
+}
+
+function group(mode: 'all' | 'any', conditions: ConditionNode[]): ConditionNode {
+  return { mode, conditions };
 }
 
 const context: RuleContext = {
@@ -20,19 +34,29 @@ describe('evaluateCondition', () => {
   it('matches contains case-insensitively by default', () => {
     expect(
       evaluateCondition(
-        { field: 'description', operator: 'contains', value: 'no power', caseSensitive: false },
+        condition({ field: 'description', operator: 'contains', value: 'no power' }),
         context,
       ),
     ).toBe(true);
     expect(
       evaluateCondition(
-        { field: 'description', operator: 'contains', value: 'No Power', caseSensitive: false },
+        condition({
+          field: 'description',
+          operator: 'contains',
+          value: 'No Power',
+          caseSensitive: false,
+        }),
         context,
       ),
     ).toBe(true);
     expect(
       evaluateCondition(
-        { field: 'description', operator: 'contains', value: 'No Power', caseSensitive: true },
+        condition({
+          field: 'description',
+          operator: 'contains',
+          value: 'No Power',
+          caseSensitive: true,
+        }),
         context,
       ),
     ).toBe(false);
@@ -40,23 +64,17 @@ describe('evaluateCondition', () => {
 
   it('coerces numeric strings for comparisons', () => {
     expect(
-      evaluateCondition(
-        { field: 'faultCount', operator: 'gt', value: '2', caseSensitive: false },
-        context,
-      ),
+      evaluateCondition(condition({ field: 'faultCount', operator: 'gt', value: '2' }), context),
     ).toBe(true);
     expect(
-      evaluateCondition(
-        { field: 'faultCount', operator: 'lte', value: 2, caseSensitive: false },
-        context,
-      ),
+      evaluateCondition(condition({ field: 'faultCount', operator: 'lte', value: 2 }), context),
     ).toBe(false);
   });
 
   it('compares dates as timestamps', () => {
     expect(
       evaluateCondition(
-        { field: 'occurredAt', operator: 'lt', value: '2026-03-05', caseSensitive: false },
+        condition({ field: 'occurredAt', operator: 'lt', value: '2026-03-05' }),
         context,
       ),
     ).toBe(true);
@@ -65,63 +83,95 @@ describe('evaluateCondition', () => {
   it('supports membership and emptiness checks', () => {
     expect(
       evaluateCondition(
-        { field: 'account', operator: 'in', value: ['A-100', 'B-200'], caseSensitive: false },
+        condition({ field: 'account', operator: 'in', value: ['A-100', 'B-200'] }),
         context,
       ),
     ).toBe(true);
     expect(
       evaluateCondition(
-        { field: 'account', operator: 'not_in', value: ['B-200'], caseSensitive: false },
+        condition({ field: 'account', operator: 'not_in', value: ['B-200'] }),
         context,
       ),
     ).toBe(true);
+    expect(evaluateCondition(condition({ field: 'missing', operator: 'is_empty' }), context)).toBe(
+      true,
+    );
     expect(
-      evaluateCondition(
-        { field: 'missing', operator: 'is_empty', value: null, caseSensitive: false },
-        context,
-      ),
-    ).toBe(true);
-    expect(
-      evaluateCondition(
-        { field: 'account', operator: 'is_not_empty', value: null, caseSensitive: false },
-        context,
-      ),
+      evaluateCondition(condition({ field: 'account', operator: 'is_not_empty' }), context),
     ).toBe(true);
   });
 
   it('handles regex safely, including invalid patterns', () => {
     expect(
       evaluateCondition(
-        {
+        condition({
           field: 'description',
           operator: 'matches_regex',
           value: 'power\\s+detected',
-          caseSensitive: false,
-        },
+        }),
         context,
       ),
     ).toBe(true);
     expect(
       evaluateCondition(
-        {
-          field: 'description',
-          operator: 'matches_regex',
-          value: '([unclosed',
-          caseSensitive: false,
-        },
+        condition({ field: 'description', operator: 'matches_regex', value: '([unclosed' }),
         context,
       ),
     ).toBe(false);
   });
 
+  it('evaluates conditions over the latest record by default', () => {
+    const scoped = condition({ field: 'description', operator: 'contains', value: 'no power' });
+    expect(scoped.scope).toBe('latest');
+    expect(evaluateCondition(scoped, context)).toBe(true);
+  });
+
+  it('evaluates any_event / all_events scopes over the event history', () => {
+    const historyContext: RuleContext = {
+      description: 'power restored',
+      events: [
+        { description: 'power restored' },
+        { description: 'communication lost' },
+        { description: 'communication lost again' },
+      ],
+    };
+
+    const anyEvent = condition({
+      field: 'description',
+      operator: 'contains',
+      value: 'communication lost',
+      scope: 'any_event',
+    });
+    expect(evaluateCondition(anyEvent, historyContext)).toBe(true);
+
+    const allEvents = condition({
+      field: 'description',
+      operator: 'contains',
+      value: 'communication lost',
+      scope: 'all_events',
+    });
+    expect(evaluateCondition(allEvents, historyContext)).toBe(false);
+
+    const allRestored = condition({
+      field: 'description',
+      operator: 'contains',
+      value: 'power restored',
+      scope: 'all_events',
+    });
+    expect(
+      evaluateCondition(allRestored, {
+        events: [{ description: 'power restored' }, { description: 'power restored' }],
+      }),
+    ).toBe(true);
+
+    expect(evaluateCondition(anyEvent, { events: [] })).toBe(false);
+    expect(evaluateCondition(allEvents, { events: [] })).toBe(false);
+    expect(evaluateCondition(anyEvent, context)).toBe(false);
+  });
+
   it('finds the matched term for explanations', () => {
     const term = findMatchedTerm(
-      {
-        mode: 'all',
-        conditions: [
-          { field: 'description', operator: 'contains', value: 'no power', caseSensitive: false },
-        ],
-      },
+      group('all', [condition({ field: 'description', operator: 'contains', value: 'no power' })]),
       context,
     );
     expect(term).toBe('no power');
@@ -160,20 +210,62 @@ describe('evaluateRules', () => {
     }),
   ];
 
-  it('picks the highest priority enabled rule', () => {
+  it('picks the highest priority enabled rule and reports full decision metadata', () => {
     const result = evaluateRules(rules, context);
 
     expect(result.winner?.id).toBe('power-loss');
     expect(result.evaluation.matchedRuleIds).toEqual(['power-loss']);
+    expect(result.evaluation.winnerPriority).toBe(100);
     expect(result.evaluation.confidence).toBe(0.95);
+    expect(result.evaluation.status).toBe('matched');
     expect(result.evaluation.explanation).toBe('Term "no power" maps to Power Loss');
+    expect(result.evaluation.resultingValues).toEqual({ rootCause: 'Power Loss', priority: 'P2' });
+    expect(result.evaluation.conditions).toEqual([
+      {
+        field: 'description',
+        operator: 'contains',
+        scope: 'latest',
+        expected: 'no power',
+        actual: 'No power detected at site',
+        matched: true,
+      },
+    ]);
+    expect(result.evaluation.matchedRules.map((entry) => entry.ruleId)).toEqual(['power-loss']);
+    expect(result.evaluation.matchedRules[0]?.matchedTerm).toBe('no power');
   });
 
-  it('returns no winner and zero confidence when nothing matches', () => {
+  it('returns a no-match outcome that needs review', () => {
     const result = evaluateRules(rules, { description: 'mystery alarm' });
+
     expect(result.winner).toBeNull();
+    expect(result.evaluation.status).toBe('no_match');
+    expect(result.evaluation.needsReview).toBe(true);
+    expect(result.evaluation.reviewReasons).toEqual(['no_rule_match']);
     expect(result.evaluation.confidence).toBe(0);
     expect(result.evaluation.explanation).toBe('');
+    expect(result.evaluation.resultingValues).toEqual({});
+  });
+
+  it('can suppress the no-match review outcome', () => {
+    const result = evaluateRules(
+      rules,
+      { description: 'mystery alarm' },
+      { reviewOnNoMatch: false },
+    );
+    expect(result.evaluation.needsReview).toBe(false);
+    expect(result.evaluation.reviewReasons).toEqual([]);
+  });
+
+  it('flags low confidence relative to the configured threshold', () => {
+    const lowConfidence = evaluateRules(
+      rules.filter((rule) => rule.id === 'generic-fault'),
+      { description: 'generic fault detected' },
+      { minConfidence: 0.8 },
+    );
+
+    expect(lowConfidence.winner?.id).toBe('generic-fault');
+    expect(lowConfidence.evaluation.reviewReasons).toEqual(['low_confidence']);
+    expect(lowConfidence.evaluation.needsReview).toBe(true);
   });
 
   it('breaks ties deterministically by specificity then id', () => {
@@ -220,6 +312,17 @@ describe('evaluateRules', () => {
     expect(result.evaluation.conflicts).toHaveLength(1);
     expect(result.evaluation.conflicts[0]?.field).toBe('rootCause');
     expect(result.evaluation.conflicts[0]?.ruleIds.sort()).toEqual(['x1', 'x2']);
+    expect(result.evaluation.conflicts[0]?.values.sort()).toEqual(['Power Loss', 'Sensor Fault']);
+    expect(result.evaluation.reviewReasons).toEqual(['rule_conflict']);
+    expect(result.evaluation.needsReview).toBe(true);
+    // The winner is still deterministic and exposed for traceability.
+    expect(result.winner?.id).toBe('x1');
+  });
+
+  it('does not treat a lower-priority fallback as a conflict', () => {
+    const result = evaluateRules(rules, context);
+    expect(result.evaluation.conflicts).toEqual([]);
+    expect(result.evaluation.reviewReasons).toEqual([]);
   });
 });
 
@@ -278,6 +381,74 @@ describe('validateRuleSet', () => {
     expect(errors.some((issue) => issue.message.includes("Duplicate rule id 'dup'"))).toBe(true);
     expect(errors.some((issue) => issue.ruleId === 'missing-value')).toBe(true);
     expect(errors.some((issue) => issue.ruleId === 'bad-regex')).toBe(true);
+  });
+
+  it('detects conflicting actions inside a single rule', () => {
+    const issues = validateRuleSet({
+      rules: [
+        makeRule({
+          id: 'conflicting-actions',
+          name: 'Conflicting actions',
+          when: { conditions: [{ field: 'a', operator: 'equals', value: 'x' }] },
+          then: [
+            { field: 'out', value: 'one' },
+            { field: 'out', value: 'two' },
+          ],
+        }),
+      ],
+    });
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === 'error' &&
+          issue.ruleId === 'conflicting-actions' &&
+          issue.message.includes("'out'"),
+      ),
+    ).toBe(true);
+  });
+
+  it('warns about shared priorities and unreachable duplicate conditions', () => {
+    const issues = validateRuleSet({
+      rules: [
+        makeRule({
+          id: 'high',
+          name: 'High',
+          priority: 100,
+          when: { conditions: [{ field: 'a', operator: 'contains', value: 'x' }] },
+          then: [{ field: 'out', value: 'high' }],
+          explanationTemplate: 'high',
+        }),
+        makeRule({
+          id: 'low',
+          name: 'Low',
+          priority: 50,
+          when: { conditions: [{ field: 'a', operator: 'contains', value: 'x' }] },
+          then: [{ field: 'out', value: 'low' }],
+          explanationTemplate: 'low',
+        }),
+        makeRule({
+          id: 'peer',
+          name: 'Peer',
+          priority: 100,
+          when: { conditions: [{ field: 'b', operator: 'contains', value: 'y' }] },
+          then: [{ field: 'out', value: 'peer' }],
+          explanationTemplate: 'peer',
+        }),
+      ],
+    });
+
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === 'warning' && issue.ruleId === 'low' && issue.message.includes("'high'"),
+      ),
+    ).toBe(true);
+    expect(
+      issues.some(
+        (issue) => issue.level === 'warning' && issue.message.includes('share priority 100'),
+      ),
+    ).toBe(true);
   });
 
   it('passes a healthy rule set', () => {

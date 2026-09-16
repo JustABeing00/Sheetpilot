@@ -14,12 +14,12 @@
 ```mermaid
 flowchart TB
   subgraph UI["apps/web — Frontend / UI"]
-    pages["Dashboard · Datasets · Setup · New run · Runs · Run detail · Review queue · Workflows"]
+    pages["Dashboard · Datasets · Setup · New run · Runs · Run detail · Review queue · Rules · Workflows"]
   end
 
   subgraph API["apps/api — API / application layer"]
     routes["HTTP routes (Fastify)"]
-    services["DatasetService · WorkflowConfigurationService · FileService · RunService"]
+    services["DatasetService · WorkflowConfigurationService · RuleSetService · FileService · RunService"]
     container["Composition root (container.ts)"]
   end
 
@@ -122,6 +122,26 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 4. The workflow maps `MatchedEntity[]` back to its own `AccountGroup[]`; classification and output building
    consume the grouped representation and never re-derive the join or "latest".
 
+## Rule management & evaluation lifecycle
+
+1. Rules live in the persisted `rule_sets` table (seeded from the workflow's in-code default). A workflow has
+   exactly one **active** rule set; saving a new one deactivates its siblings.
+2. The API validates every candidate rule set with the pure `validateRuleSet` from `@sheetpilot/rule-engine`
+   (errors block a save with `422 invalid_rule_set`; warnings — shared priorities, unreachable duplicate
+   conditions, empty search text, non-numeric comparisons — are advisory). The Rules UI calls the same
+   `POST /api/v1/rule-sets/validate` endpoint before saving, so the browser never disagrees with the server.
+3. Saving (`POST`/`PUT /api/v1/rule-sets`) bumps the version and keeps the previous rule data in the row's
+   history-free version number; the rule engine itself is stateless and UI-independent.
+4. `RunService.execute` loads the active rule set for the workflow and passes it into the run input; the
+   account-faults `createState` uses it (falling back to the in-code default when absent).
+5. The `classify` step builds a `RuleContext` from the latest fault **plus the full event history** and calls
+   `evaluateRules(rules, context, { minConfidence })`. Conditions with `scope: latest` read the latest record;
+   `any_event`/`all_events` read every history entry.
+6. The engine returns a `RuleEvaluation` — winner + priority, confidence, explanation, `resultingValues`,
+   the flattened `conditions` trace, matched-rule summaries, `status`, and `conflicts`/`reviewReasons`
+   (`no_rule_match`, `rule_conflict`, `low_confidence`). The workflow persists this as decision evidence and
+   uses it to route `review` items; a conflict or no-match is never silently guessed.
+
 ## Key abstractions (ports & contracts)
 
 | Concept | Location | Notes |
@@ -142,8 +162,12 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 | `matchRecords` | `packages/matching-engine/src/match.ts` | Generic primary↔event join + grouping + deterministic latest selection; returns `MatchedEntity[]`, orphans and `MatchStats` |
 | `normalizeIdentifier` | `packages/matching-engine/src/normalize.ts` | Reported identifier normalization; defaults equal `normalizeKey`; dangerous merges opt-in |
 | `compareEventsLatestFirst` | `packages/matching-engine/src/match.ts` | The single deterministic latest-event comparator |
-| `Rule`, `ConditionGroup`, `RuleAction` | `packages/core/src/domain/rules.ts` | Business rules are data with zod validation, versioned in `RuleSet`s |
-| `evaluateRules` | `packages/rule-engine/src/evaluate.ts` | Deterministic winner: priority ↓, specificity ↓, rule id ↑; conflicts reported |
+| `Rule`, `ConditionGroup`, `RuleAction` | `packages/core/src/domain/rules.ts` | Business rules are data with zod validation, versioned in `RuleSet`s; conditions carry a `scope` (`latest`/`any_event`/`all_events`) |
+| `RuleEvaluation` | `packages/core/src/domain/rules.ts` | The decision contract: winner+priority, confidence, resulting values, evaluated conditions, matched-rule summaries, status, conflicts and review reasons |
+| `evaluateRules` | `packages/rule-engine/src/evaluate.ts` | Deterministic winner: priority ↓, specificity ↓, rule id ↑; returns full decision metadata; never silently guesses (no-match/conflict/low-confidence flagged) |
+| `validateRule` / `validateRuleSet` | `packages/rule-engine/src/validate.ts` | Pure semantic validation (errors block, warnings advise) shared by the API and the Rules UI |
+| `RuleSetRepository` | `packages/core/src/ports/repositories.ts` | Persistence port for versioned rule sets; `listByWorkflowSlug`, `getActiveByWorkflowSlug` |
+| `RuleSetService` | `apps/api/src/services/rule-set-service.ts` | Validates, versions and activates rule sets; one active set per workflow |
 | `ClassificationProvider` | `packages/core/src/ports/classification.ts` | AI port; `NoopClassificationProvider` today |
 | `decideAiUsage` | `packages/ai/src/policy.ts` | AI is only consulted per explicit policy and never overrides a deterministic match |
 | API DTO schemas | `packages/core/src/api/contracts.ts` | Single source of truth for request/response shapes used by API and web |
@@ -151,7 +175,11 @@ consumes `core` contracts (HTTP DTO schemas) and never touches Node-only package
 ## Determinism and traceability rules
 
 - Rules are evaluated by priority, then by number of conditions (specificity), then by rule id, so the
-  winner never depends on map/array ordering.
+  winner never depends on map/array ordering. Equally-ranked rules that disagree produce a `conflict` and the
+  case needs review; a context with no matching rule produces `no_match` (review reason `no_rule_match`); a
+  match below the configured confidence produces `low_confidence`. The engine never guesses.
+- Rules are data validated before they are saved (`validateRuleSet`), versioned on every save, and the active
+  set is resolved per run, so the exact rules used for a run are auditable and changeable without a redeploy.
 - Records are matched on a normalized identifier only. `normalizeIdentifier` reports every transformation
   it applies; steps that can merge genuinely distinct identifiers (`stripSeparators`, `stripLeadingZeros`)
   are off by default, and using them marks the entity with the `identifier_transformed` issue.

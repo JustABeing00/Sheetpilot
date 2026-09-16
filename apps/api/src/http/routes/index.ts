@@ -6,6 +6,7 @@ import { registerFileRoutes } from './files.js';
 import { registerHealthRoutes } from './health.js';
 import { registerMetaRoutes } from './meta.js';
 import { registerReviewItemRoutes } from './review-items.js';
+import { registerRuleSetRoutes } from './rule-sets.js';
 import { registerRunRoutes } from './runs.js';
 import { registerWorkflowConfigurationRoutes } from './workflow-configurations.js';
 import { registerWorkflowRoutes } from './workflows.js';
@@ -19,6 +20,7 @@ export function registerRoutes(
   registerMetaRoutes(app, container);
   registerWorkflowRoutes(app, container);
   registerWorkflowConfigurationRoutes(app, container);
+  registerRuleSetRoutes(app, container);
   registerFileRoutes(app, container);
   registerDatasetRoutes(app, container);
   registerRunRoutes(app, container);

@@ -5,6 +5,7 @@ import {
   CapturingLogger,
   fileAssetSchema,
   fixedClock,
+  ruleSetSchema,
   type FileAsset,
   type FileRepository,
 } from '@sheetpilot/core';
@@ -27,7 +28,7 @@ interface Harness {
   storage: InMemoryFileStorage;
 }
 
-async function runWorkflow(): Promise<Harness> {
+async function runWorkflow(input: Record<string, unknown> = {}): Promise<Harness> {
   const storage = new InMemoryFileStorage();
   await storage.put('uploads/primary.csv', PRIMARY_CSV);
   await storage.put('uploads/events.csv', EVENTS_CSV);
@@ -79,7 +80,7 @@ async function runWorkflow(): Promise<Harness> {
   });
 
   const execution = await workflow.execute(
-    { primaryFileId: 'file-primary', eventsFileId: 'file-events' },
+    { primaryFileId: 'file-primary', eventsFileId: 'file-events', ...input },
     ctx,
   );
 
@@ -249,5 +250,90 @@ describe('account fault triage workflow', () => {
       outputRows: 10,
     });
     expect(stats.ruleMatchRate).toBeCloseTo(0.6667);
+  });
+
+  it('evaluates a per-run rule set including history-scoped conditions', async () => {
+    const ruleSet = ruleSetSchema.parse({
+      slug: 'custom-history',
+      workflowSlug: 'account-fault-triage',
+      name: 'Custom history rules',
+      version: 1,
+      rules: [
+        {
+          id: 'history-battery',
+          name: 'Battery seen anywhere in history',
+          priority: 200,
+          when: {
+            mode: 'all',
+            conditions: [
+              {
+                field: 'description',
+                operator: 'contains',
+                value: 'battery',
+                scope: 'any_event',
+              },
+            ],
+          },
+          then: [
+            { field: 'RootCause', value: 'History Battery' },
+            { field: 'FaultCategory', value: 'Power' },
+            { field: 'RecommendedAction', value: 'Review fault history' },
+            { field: 'Priority', value: 'P2' },
+          ],
+          confidence: 0.99,
+          explanationTemplate: 'Account history contains a battery fault.',
+        },
+      ],
+    });
+
+    const { execution } = await runWorkflow({ ruleSet });
+    const [harborPoint] = rowsFor(execution, '1002');
+    const decision = execution.state!.decisionRecords.find((record) => record.entityKey === '1002');
+    const evidence = decision?.evidence as {
+      ruleStatus?: string;
+      evaluatedConditions?: Array<{ scope?: string; matched?: boolean }>;
+    };
+
+    expect(harborPoint?.['RootCause']).toBe('History Battery');
+    expect(harborPoint?.['__MatchedRules']).toBe('history-battery');
+    expect(decision?.matchedRuleIds).toEqual(['history-battery']);
+    expect(evidence.ruleStatus).toBe('matched');
+    expect(evidence.evaluatedConditions?.[0]?.scope).toBe('any_event');
+    expect(evidence.evaluatedConditions?.[0]?.matched).toBe(true);
+  });
+
+  it('flags a no-match outcome as needing review in the decision evidence', async () => {
+    const ruleSet = ruleSetSchema.parse({
+      slug: 'custom-strict',
+      workflowSlug: 'account-fault-triage',
+      name: 'Strict rules',
+      version: 1,
+      rules: [
+        {
+          id: 'never',
+          name: 'Never matches this sample',
+          priority: 10,
+          when: {
+            mode: 'all',
+            conditions: [{ field: 'description', operator: 'contains', value: 'quantum flux' }],
+          },
+          then: [{ field: 'RootCause', value: 'Quantum' }],
+          confidence: 1,
+          explanationTemplate: 'quantum',
+        },
+      ],
+    });
+
+    const { execution } = await runWorkflow({ ruleSet });
+    const decision = execution.state!.decisionRecords.find((record) => record.entityKey === '1001');
+    const evidence = decision?.evidence as {
+      ruleStatus?: string;
+      needsReview?: boolean;
+      ruleReviewReasons?: string[];
+    };
+
+    expect(evidence.ruleStatus).toBe('no_match');
+    expect(evidence.needsReview).toBe(true);
+    expect(evidence.ruleReviewReasons).toContain('no_rule_match');
   });
 });

@@ -18,6 +18,7 @@ import { LocalFileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
+import { RuleSetService } from './services/rule-set-service.js';
 import { RunService } from './services/run-service.js';
 import { WorkflowConfigurationService } from './services/workflow-configuration-service.js';
 
@@ -32,6 +33,7 @@ export interface AppContainer {
   fileService: FileService;
   datasetService: DatasetService;
   workflowConfigurationService: WorkflowConfigurationService;
+  ruleSetService: RuleSetService;
   runService: RunService;
   close(): Promise<void>;
 }
@@ -134,6 +136,7 @@ export async function createContainer(
     clock,
     logger,
   });
+  const ruleSetService = new RuleSetService({ repositories, registry, clock, logger });
   const runService = new RunService({ repositories, storage, registry, clock, logger });
 
   return {
@@ -147,6 +150,7 @@ export async function createContainer(
     fileService,
     datasetService,
     workflowConfigurationService,
+    ruleSetService,
     runService,
     async close() {
       await databaseHandle?.close();

@@ -213,6 +213,74 @@ async function main() {
     `configured run: ${configuredFinished.status}, ${configuredFinished.stats.accounts} accounts, ${configuredFinished.reviewItemCount} review items`,
   );
 
+  // Rule management: rules are data, validated before saving and versioned on save.
+  const ruleSets = await request('/api/v1/rule-sets?workflowSlug=account-fault-triage');
+  assert(ruleSets.items.length >= 1, 'expected at least one seeded rule set');
+  const activeRuleSet = ruleSets.items.find((item) => item.active);
+  assert(activeRuleSet, 'expected a seeded active rule set');
+  console.log(
+    `rule sets     : ${ruleSets.items.length} set(s), active=${activeRuleSet.slug} (${activeRuleSet.ruleCount} rules)`,
+  );
+
+  const sentinelRules = [
+    {
+      id: 'smoke-sentinel',
+      name: 'Smoke sentinel',
+      priority: 999,
+      when: {
+        mode: 'any',
+        conditions: [{ field: 'description', operator: 'contains', value: 'no power' }],
+      },
+      then: [
+        { field: 'RootCause', value: 'Smoke Sentinel' },
+        { field: 'FaultCategory', value: 'Power' },
+        { field: 'RecommendedAction', value: 'smoke' },
+        { field: 'Priority', value: 'P1' },
+      ],
+      confidence: 0.9,
+      explanationTemplate: 'Sentinel matched "{matchedTerm}".',
+    },
+  ];
+
+  const ruleValidation = await request('/api/v1/rule-sets/validate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workflowSlug: 'account-fault-triage', rules: sentinelRules }),
+  });
+  assert(ruleValidation.valid, 'sentinel rule set must validate');
+
+  const badRuleValidation = await request('/api/v1/rule-sets/validate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      workflowSlug: 'account-fault-triage',
+      rules: [
+        {
+          id: 'smoke-bad-regex',
+          name: 'Bad regex',
+          when: { conditions: [{ field: 'description', operator: 'matches_regex', value: '([' }] },
+          then: [{ field: 'RootCause', value: 'x' }],
+        },
+      ],
+    }),
+  });
+  assert(!badRuleValidation.valid, 'invalid regex must fail rule validation');
+  console.log(
+    `rule validate : valid=${ruleValidation.valid}, bad-regex valid=${badRuleValidation.valid}`,
+  );
+
+  const savedRuleSet = await request('/api/v1/rule-sets', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      workflowSlug: 'account-fault-triage',
+      name: 'Smoke rule set',
+      rules: sentinelRules,
+    }),
+  });
+  assert(savedRuleSet.active, 'a newly saved rule set is active by default');
+  console.log(`rule set saved: ${savedRuleSet.slug} v${savedRuleSet.version}`);
+
   console.log('\nSmoke test passed.');
   console.log(`Sample output (first 3 lines):\n${rows.slice(0, 3).join('\n')}`);
 }

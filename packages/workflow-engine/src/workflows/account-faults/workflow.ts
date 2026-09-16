@@ -58,7 +58,7 @@ export function createAccountFaultProgram(
       return Promise.resolve({
         input: parsedInput,
         config,
-        rules,
+        rules: parsedInput.ruleSet ?? rules,
         primaries: [],
         events: [],
         groups: [],

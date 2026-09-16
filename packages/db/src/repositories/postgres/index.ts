@@ -410,6 +410,14 @@ export function createPostgresRepositories(db: Database): Repositories {
           .limit(1);
         return row ? toRuleSet(row) : null;
       },
+      async listByWorkflowSlug(workflowSlug) {
+        const rows = await db
+          .select()
+          .from(ruleSets)
+          .where(eq(ruleSets.workflowSlug, workflowSlug))
+          .orderBy(desc(ruleSets.updatedAt));
+        return rows.map(toRuleSet);
+      },
       async list() {
         const rows = await db.select().from(ruleSets).orderBy(asc(ruleSets.slug));
         return rows.map(toRuleSet);

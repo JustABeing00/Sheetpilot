@@ -194,3 +194,42 @@ review reasons in `classify`, so wiring them together is future work. Default no
 test the edge cases). Putting the engine in `file-processing` (rejected: that package is about IO/format
 handling, not record semantics). Using a third-party fuzzy-match library (rejected: opaque, and the product
 requires explainable, deterministic matching).
+
+## ADR-013 — Rules are data, evaluated deterministically, and managed through a validated, versioned API
+
+**Decision.** Business classification rules are structured data (`Rule`/`RuleSet`, zod-validated in `core`),
+never executable code. `@sheetpilot/rule-engine` evaluates a rule set against a context and returns a rich
+`RuleEvaluation`: the winning rule and priority, the confidence, a rendered explanation, the full list of
+matched rules, the **resulting values** the winner would set, the flattened **conditions evaluated** (with
+the actual value seen and whether it matched), and any **conflicts**. Conditions carry a `scope`
+(`latest` / `any_event` / `all_events`) so a rule can assert over the entity's whole history, not just the
+latest record. The evaluation is a first-class decision: `status` is `matched` or `no_match`, and
+`needsReview`/`reviewReasons` encode the three cases a deterministic engine must never guess about — no rule
+matched (`no_rule_match`), equally-ranked rules disagreed (`rule_conflict`), or confidence is below the
+configured threshold (`low_confidence`). Rules with different priorities are an intended fallback hierarchy,
+so only same-priority disagreement is a conflict; the winner is still chosen deterministically (priority →
+specificity → rule id) and reported for traceability. `apps/api` exposes a `RuleSetService` and
+`GET/POST/PUT /api/v1/rule-sets` plus `POST /api/v1/rule-sets/validate`; every save is re-validated with the
+same pure validator and bumped to a new version, and keeping a single active set per workflow means a run
+always resolves exactly one source of truth. `RunService` loads the active persisted rule set and passes it
+into the run input, so UI edits take effect on the next run without a restart.
+
+**Why.** The initial workflow's value (and the product's "trust" goal) rests on standardized, auditable
+classification. Rules as data can be validated before they run, versioned, diffed, edited by non-technical
+users, and later suggested by AI without the AI ever becoming the source of truth. Returning conditions,
+resulting values and conflicts from the engine — rather than recomputing them in the UI or workflow — keeps
+explainability consistent across the API, the output file and the review queue.
+
+**Consequences.** `rule-engine` stays UI- and workflow-agnostic: it only knows `RuleContext` (an open
+record, optionally containing an `events` history array). History scopes read fields from that array, so the
+workflow is responsible for passing normalized history (it does, in `buildRuleContext`). The persisted
+`rule_sets` table gained a `listByWorkflowSlug` query but no new columns; conflicts are detected among
+same-priority matches; duplicate condition signatures with lower priority are reported as warnings by the
+validator. The in-code default rule set is still the seed and the test fixture; management is additive.
+
+**Alternatives considered.** Executing rules as JavaScript (rejected: unsafe, unauditable, untestable).
+A generic expression language (rejected as premature: the operator set plus nested all/any groups covers the
+use case and is far easier for non-technical users to reason about). Letting runs read rules straight from
+the registry's in-code set (rejected: makes rule editing impossible without a redeploy). Using lowest
+priority number as the winner (rejected: higher number = more specific/intentional, matching the existing
+priority ordering).
