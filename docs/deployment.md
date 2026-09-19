@@ -151,6 +151,40 @@ descriptions leave the process.
 - **Rollback:** Redeploy a previous Render deploy; for the Worker, `wrangler rollback` or redeploy a
   previous commit.
 
+## Shared object storage (Cloudflare R2)
+
+By default files live on a local disk (fine for one instance). To share files between the API and the
+worker, or to run more than one API instance, use S3-compatible storage:
+
+1. Create an R2 bucket and an S3 API token (Access Key ID + Secret).
+2. Set on the API and worker services:
+   - `STORAGE_DRIVER=s3`
+   - `S3_BUCKET=<bucket>`
+   - `S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`
+   - `S3_REGION=auto`
+   - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`
+3. The Render persistent disk is then optional; remove it if you fully move to R2.
+
+Objects are written under `uploads/…` and `runs/…`, so R2 lifecycle rules can expire them independently.
+
+## Observability
+
+- Every request carries an `x-request-id` (an inbound header is honoured, otherwise one is minted) and
+  logs a structured completion line (`reqId`, method, url, statusCode, durationMs).
+- `/healthz` is liveness; `/readyz` proves Postgres connectivity.
+- Recommended: ship logs to Render's log stream, add a Sentry DSN for error tracking, and alert on 5xx
+  rate, failed runs, queue depth and disk/R2 growth.
+
+## Backups and disaster recovery
+
+- **Postgres:** enable Render's automated backups + point-in-time recovery; record the RPO/RTO and run a
+  restore drill at least once.
+- **R2:** enable object versioning (or a bucket replication rule) so a bad delete is recoverable.
+- **Together:** the database and the object store must be restored to the same point — run snapshots and
+  artifacts reference each other by id/key.
+- **Migrations:** forward-only, applied by the pre-deploy step or `DB_AUTO_MIGRATE=true` on a single
+  instance. Never run migrations from more than one process at once.
+
 ## Local production rehearsal
 
 ```bash

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -21,6 +22,11 @@ export function buildServer(container: AppContainer, options: ServerOptions): Fa
     trustProxy: security.trustProxy,
     // Bound how long a slow client may take to send a request body.
     requestTimeout: 120_000,
+    // Correlate a request across the Worker, this API and the logs (accept an inbound id, else mint one).
+    genReqId: (request: { headers: Record<string, unknown> }) => {
+      const inbound = request.headers['x-request-id'];
+      return typeof inbound === 'string' && inbound.length > 0 ? inbound : randomUUID();
+    },
   } as const;
 
   const app: FastifyInstance = options.loggerInstance
@@ -53,6 +59,26 @@ export function buildServer(container: AppContainer, options: ServerOptions): Fa
       fieldSize: 1024 * 1024,
       parts: 20,
     },
+  });
+
+  // Propagate the request id back to the caller and log a structured completion line for every
+  // request (method, path, status, latency) so an incident can be traced end to end.
+  app.addHook('onSend', async (request, reply, payload) => {
+    reply.header('x-request-id', String(request.id));
+    return payload;
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    request.log.info(
+      {
+        reqId: request.id,
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        durationMs: Math.round(reply.elapsedTime),
+      },
+      'request completed',
+    );
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
