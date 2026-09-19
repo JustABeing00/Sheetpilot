@@ -15,6 +15,9 @@ static assets                                    Render Postgres + persistent di
 The Worker serves the SPA and proxies API calls to Render, injecting the `x-api-key` header
 server-side. The API key never reaches the browser, and the app stays same-origin (no CORS).
 
+Related documents: [compliance and data residency](compliance.md) · [billing and quotas](billing.md) ·
+[transactional email](email.md) · [legal templates](legal/privacy-policy.md).
+
 ## Repository artifacts
 
 | File | Purpose |
