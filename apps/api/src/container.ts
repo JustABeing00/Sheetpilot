@@ -31,6 +31,7 @@ import { readSession } from './auth/session.js';
 import { readActiveWorkspace } from './auth/workspace-cookie.js';
 import type { AuthUser } from './auth/types.js';
 import { BillingService } from './services/billing-service.js';
+import { LogEmailSender, ResendEmailSender } from './services/email-service.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { DeletionService } from './services/deletion-service.js';
@@ -288,11 +289,20 @@ export async function createContainer(
     bootstrapTenantName: config.auth.bootstrapTenantName,
   });
 
+  const emailProvider = config.auth.providers.email;
+  const emails = config.auth.enabled
+    ? emailProvider
+      ? new ResendEmailSender({ apiKey: emailProvider.apiKey, from: emailProvider.from, logger })
+      : new LogEmailSender(logger)
+    : undefined;
+
   const workspaceService = new WorkspaceService({
     repositories,
     clock,
     logger,
     quotas: quotaService,
+    emails,
+    loginUrl: config.auth.url,
   });
 
   let authConfig: AuthConfig | null = null;

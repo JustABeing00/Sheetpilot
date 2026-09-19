@@ -8,6 +8,8 @@ import {
   tenantSlug,
   type Clock,
   type CreateInvitationRequest,
+  type EmailSender,
+  type Invitation,
   type Logger,
   type Membership,
   type MembershipRole,
@@ -25,6 +27,18 @@ export interface WorkspaceServiceDeps {
   logger: Logger;
   /** Plan-quota gate; omitted in unit tests and when enforcement is disabled. */
   quotas?: QuotaService;
+  /** Transactional email for invitations; omitted in tests and when no provider is configured. */
+  emails?: EmailSender;
+  /** Where invited people sign in; included in the invitation email. */
+  loginUrl?: string | null;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /** How long an invitation stays valid. */
@@ -181,7 +195,7 @@ export class WorkspaceService {
 
     const now = this.deps.clock.now();
     const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
-    return this.deps.repositories.invitations.create({
+    const invitation = await this.deps.repositories.invitations.create({
       id: newId(),
       tenantId,
       email,
@@ -191,6 +205,53 @@ export class WorkspaceService {
       expiresAt,
       createdAt: now,
     });
+    await this.sendInvitationEmail(tenantId, invitation);
+    return invitation;
+  }
+
+  /**
+   * Best-effort invitation email: the invitation itself is already persisted, so a delivery failure is
+   * logged rather than surfaced — the recipient can still join by signing in with their email.
+   */
+  private async sendInvitationEmail(tenantId: string, invitation: Invitation): Promise<void> {
+    const emails = this.deps.emails;
+    if (!emails) {
+      return;
+    }
+    const tenant = await this.deps.repositories.tenants.getById(tenantId);
+    if (!tenant) {
+      return;
+    }
+
+    const loginUrl = this.deps.loginUrl ?? null;
+    const expiresOn = invitation.expiresAt.toISOString().slice(0, 10);
+    const signInLine = loginUrl
+      ? `Sign in at ${loginUrl} with ${invitation.email} and you will join automatically.`
+      : `Sign in with ${invitation.email} and you will join automatically.`;
+    const subject = `You're invited to join ${tenant.name} on SheetPilot`;
+    const text = [
+      `You have been invited to join the "${tenant.name}" workspace on SheetPilot as ${invitation.role}.`,
+      signInLine,
+      `The invitation is valid until ${expiresOn}.`,
+      'If you were not expecting this, you can ignore this email.',
+    ].join('\n\n');
+    const html = [
+      `<p>You have been invited to join the <strong>${escapeHtml(tenant.name)}</strong> workspace on SheetPilot as ${escapeHtml(invitation.role)}.</p>`,
+      loginUrl
+        ? `<p><a href="${escapeHtml(loginUrl)}">Sign in</a> with ${escapeHtml(invitation.email)} and you will join automatically.</p>`
+        : `<p>Sign in with ${escapeHtml(invitation.email)} and you will join automatically.</p>`,
+      `<p>The invitation is valid until ${expiresOn}. If you were not expecting this, you can ignore this email.</p>`,
+    ].join('\n');
+
+    try {
+      await emails.send({ to: invitation.email, subject, text, html });
+      this.deps.logger.info({ tenantId, invitationId: invitation.id }, 'invitation email sent');
+    } catch (error) {
+      this.deps.logger.warn(
+        { err: error, tenantId, invitationId: invitation.id },
+        'invitation email could not be sent',
+      );
+    }
   }
 
   async revokeInvitation(userId: string, tenantId: string, invitationId: string): Promise<void> {
