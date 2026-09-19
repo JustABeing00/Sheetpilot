@@ -10,6 +10,11 @@ build/
 coverage/
 .vitest/
 
+# playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
 # environment - never commit secrets
 .env
 .env.*

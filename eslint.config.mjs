@@ -66,7 +66,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['*.config.mjs', '*.config.ts', '**/*.config.ts'],
+    files: ['*.config.mjs', '*.config.ts', '**/*.config.ts', 'e2e/**/*.ts'],
     extends: [tseslint.configs.disableTypeChecked],
   },
 );

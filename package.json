@@ -25,6 +25,8 @@
     "start": "node apps/api/dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
     "db:generate": "npm run db:generate -w @sheetpilot/db",
     "db:migrate": "npm run db:migrate -w @sheetpilot/db",
     "db:push": "npm run db:push -w @sheetpilot/db",
@@ -39,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.0",
     "concurrently": "^10.0.5",
     "eslint": "^10.10.0",
