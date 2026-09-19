@@ -61,6 +61,8 @@ export const metaResponseSchema = z.object({
     aiProviderConfigured: z.boolean(),
     postgresRepository: z.boolean(),
     scheduler: z.boolean(),
+    authEnabled: z.boolean(),
+    authProviders: z.array(z.string()),
   }),
 });
 export type MetaResponse = z.infer<typeof metaResponseSchema>;

@@ -40,9 +40,11 @@ import {
   type ValidateRuleSetRequest,
   type ValidateWorkflowConfigurationRequest,
 } from '@sheetpilot/core';
+import { fetchSession, type Session } from './auth.js';
 import { apiGet, apiPost, apiPut, apiUpload } from './client.js';
 
 export const queryKeys = {
+  session: ['session'] as const,
   health: ['health'] as const,
   meta: ['meta'] as const,
   workflows: ['workflows'] as const,
@@ -71,6 +73,14 @@ export const queryKeys = {
   savedWorkflows: ['saved-workflows'] as const,
   savedWorkflow: (id: string) => ['saved-workflows', id] as const,
 };
+
+export function useSession() {
+  return useQuery<Session | null>({
+    queryKey: queryKeys.session,
+    queryFn: fetchSession,
+    staleTime: 30_000,
+  });
+}
 
 export function useHealth() {
   return useQuery({

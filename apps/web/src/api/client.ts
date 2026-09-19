@@ -3,6 +3,11 @@ import type { ZodType } from 'zod';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
+/** Absolute URL for an API path (same-origin in production, through the Worker proxy). */
+export function apiUrl(path: string): string {
+  return `${baseUrl}${path}`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -57,7 +62,10 @@ async function parseResponse<T>(response: Response, schema: ZodType<T>): Promise
 }
 
 export async function apiGet<T>(path: string, schema: ZodType<T>): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, { headers: { accept: 'application/json' } });
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: { accept: 'application/json' },
+    credentials: 'include',
+  });
   if (!response.ok) {
     throw await parseError(response);
   }
@@ -69,6 +77,7 @@ export async function apiPost<T>(path: string, body: unknown, schema: ZodType<T>
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body),
+    credentials: 'include',
   });
   if (!response.ok) {
     throw await parseError(response);
@@ -81,6 +90,7 @@ export async function apiPut<T>(path: string, body: unknown, schema: ZodType<T>)
     method: 'PUT',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body),
+    credentials: 'include',
   });
   if (!response.ok) {
     throw await parseError(response);
@@ -93,6 +103,7 @@ export async function apiUpload<T>(path: string, form: FormData, schema: ZodType
     method: 'POST',
     body: form,
     headers: { accept: 'application/json' },
+    credentials: 'include',
   });
   if (!response.ok) {
     throw await parseError(response);

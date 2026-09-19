@@ -15,6 +15,12 @@ export function registerMetaRoutes(app: FastifyInstance, container: AppContainer
         aiProviderConfigured: container.config.ai.configured,
         postgresRepository: container.config.repository.driver === 'postgres',
         scheduler: false,
+        authEnabled: container.auth.enabled,
+        authProviders: [
+          ...(container.config.auth.providers.email ? ['email'] : []),
+          ...(container.config.auth.providers.google ? ['google'] : []),
+          ...(container.config.auth.providers.github ? ['github'] : []),
+        ],
       },
     }),
   );

@@ -67,7 +67,13 @@ export function registerSecurityHooks(app: FastifyInstance, options: SecurityOpt
       }
     }
 
-    if (options.authenticate && request.url.startsWith('/api/v1/')) {
+    // `/api/v1/meta` stays public: the SPA must read capabilities (e.g. authEnabled, providers) to
+    // render the login gate before anyone is signed in.
+    if (
+      options.authenticate &&
+      request.url.startsWith('/api/v1/') &&
+      !request.url.startsWith('/api/v1/meta')
+    ) {
       const user = await options.authenticate(request);
       if (!user) {
         reply

@@ -1,5 +1,7 @@
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useHealth, useMeta, useReviewQueue } from '../api/hooks.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { signOut } from '../api/auth.js';
+import { useHealth, useMeta, useReviewQueue, useSession } from '../api/hooks.js';
 import { useScrollReveal } from '../lib/useScrollReveal.js';
 
 const navigation = [
@@ -15,14 +17,25 @@ const navigation = [
 
 export function AppShell() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const meta = useMeta();
   const health = useHealth();
   const reviewQueue = useReviewQueue('needs_review');
+  const session = useSession();
 
   const openCount = reviewQueue.data?.openCount ?? 0;
   const online = health.isSuccess;
+  const authEnabled = meta.data?.capabilities.authEnabled === true;
+  const user = session.data?.user ?? null;
 
   useScrollReveal(pathname);
+
+  const handleSignOut = async () => {
+    await signOut(`${window.location.origin}/login`);
+    queryClient.clear();
+    void navigate('/login', { replace: true });
+  };
 
   return (
     <div className="app-shell">
@@ -60,6 +73,20 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar-footer">
+          {authEnabled && user ? (
+            <div className="sidebar-account">
+              <span className="sidebar-account-name" title={user.email ?? undefined}>
+                {user.name ?? user.email ?? 'Signed in'}
+              </span>
+              <button
+                type="button"
+                className="button button-ghost small"
+                onClick={() => void handleSignOut()}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : null}
           <div className="status-line" role="status">
             <span className={online ? 'dot dot-online' : 'dot dot-offline'} aria-hidden="true" />
             {online ? 'API connected' : 'API unreachable'}

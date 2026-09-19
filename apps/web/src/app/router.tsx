@@ -1,9 +1,11 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.js';
+import { AuthGate } from '../components/AuthGate.js';
 import { RouteError } from '../components/RouteError.js';
 import { LoadingState } from '../components/ui.js';
 import { LandingPage } from '../pages/LandingPage.js';
+import { LoginPage } from '../pages/LoginPage.js';
 
 /**
  * Pages are code-split per route: the landing page and app shell load immediately, and each screen is
@@ -26,8 +28,13 @@ function page(loader: () => Promise<{ default: ComponentType }>) {
 
 export const router = createBrowserRouter([
   { path: '/', element: <LandingPage />, errorElement: <RouteError /> },
+  { path: '/login', element: <LoginPage />, errorElement: <RouteError /> },
   {
-    element: <AppShell />,
+    element: (
+      <AuthGate>
+        <AppShell />
+      </AuthGate>
+    ),
     errorElement: <RouteError />,
     children: [
       {

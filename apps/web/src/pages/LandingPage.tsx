@@ -117,7 +117,7 @@ export function LandingPage() {
             <a href="#capabilities">Capabilities</a>
             <a href="#automation">Automation</a>
             <span className="landing-nav-actions">
-              <Link className="button button-ghost" to="/dashboard">
+              <Link className="button button-ghost" to="/login">
                 Log in
               </Link>
               <Link className="button button-primary button-pill" to="/dashboard">
