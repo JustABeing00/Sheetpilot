@@ -30,6 +30,7 @@ import { buildAuthConfig } from './auth/config.js';
 import { readSession } from './auth/session.js';
 import { readActiveWorkspace } from './auth/workspace-cookie.js';
 import type { AuthUser } from './auth/types.js';
+import { BillingService } from './services/billing-service.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { DeletionService } from './services/deletion-service.js';
@@ -72,6 +73,7 @@ export interface AppContainer {
   inboxService: InboxService | null;
   idempotency: IdempotencyService;
   quotaService: QuotaService;
+  billing: BillingService | null;
   auth: {
     enabled: boolean;
     config: AuthConfig | null;
@@ -206,6 +208,16 @@ export async function createContainer(
     logger,
     enforced: config.plans.enforced,
   });
+
+  const billing =
+    config.billing.provider === 'stripe' && config.billing.stripeWebhookSecret
+      ? new BillingService({
+          repositories,
+          clock,
+          logger,
+          webhookSecret: config.billing.stripeWebhookSecret,
+        })
+      : null;
 
   const datasetService = new DatasetService({
     repositories,
@@ -385,6 +397,7 @@ export async function createContainer(
       tenancy: tenancyService,
     },
     quotaService,
+    billing,
     workspaceService,
     authenticate,
     async readiness() {

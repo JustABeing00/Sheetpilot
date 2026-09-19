@@ -114,4 +114,20 @@ describe('loadConfig', () => {
       }),
     ).toThrow(ConfigurationError);
   });
+
+  it('defaults plan enforcement off and requires a signing secret for stripe billing', () => {
+    const config = loadConfig({});
+    expect(config.plans.enforced).toBe(false);
+    expect(config.billing).toEqual({ provider: 'none', stripeWebhookSecret: null });
+
+    expect(() => loadConfig({ BILLING_PROVIDER: 'stripe' })).toThrow(ConfigurationError);
+    const billing = loadConfig({
+      BILLING_PROVIDER: 'stripe',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      QUOTAS_ENFORCED: 'true',
+    });
+    expect(billing.plans.enforced).toBe(true);
+    expect(billing.billing.provider).toBe('stripe');
+    expect(billing.billing.stripeWebhookSecret).toBe('whsec_test');
+  });
 });

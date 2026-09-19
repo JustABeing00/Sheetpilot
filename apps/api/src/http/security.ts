@@ -22,6 +22,12 @@ interface RateBucket {
 const HEALTH_PATHS = ['/healthz', '/readyz'];
 const MAX_TRACKED_CLIENTS = 10_000;
 
+/**
+ * Routes that must stay reachable without a session: the SPA reads capabilities from `/meta` before
+ * anyone signs in, and Stripe proves authenticity with its own webhook signature.
+ */
+const SESSION_EXEMPT_PATHS = ['/api/v1/meta', '/api/v1/billing/webhook'];
+
 /** Constant-time comparison that never throws on length mismatch. */
 function secretsMatch(provided: string, expected: string): boolean {
   const providedBuffer = Buffer.from(provided, 'utf8');
@@ -67,12 +73,10 @@ export function registerSecurityHooks(app: FastifyInstance, options: SecurityOpt
       }
     }
 
-    // `/api/v1/meta` stays public: the SPA must read capabilities (e.g. authEnabled, providers) to
-    // render the login gate before anyone is signed in.
     if (
       options.authenticate &&
       request.url.startsWith('/api/v1/') &&
-      !request.url.startsWith('/api/v1/meta')
+      !SESSION_EXEMPT_PATHS.some((path) => request.url.startsWith(path))
     ) {
       const user = await options.authenticate(request);
       if (!user) {
