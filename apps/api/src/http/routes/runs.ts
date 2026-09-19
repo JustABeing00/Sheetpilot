@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   createRunRequestSchema,
   decisionListResponseSchema,
   exportStatusResponseSchema,
@@ -212,6 +213,18 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
           }
         : null,
     });
+  });
+
+  app.post('/api/v1/runs/:id/cancel', async (request) => {
+    const { id } = request.params as { id: string };
+    const run = await requireRun(container, id, tenantOf(request));
+    if (run.status !== 'queued' && run.status !== 'running') {
+      throw new ConflictError(`The run is already ${run.status} and cannot be cancelled.`);
+    }
+
+    await container.queue.cancel(id);
+    container.runService.cancelRun(id);
+    return describeRun(container, run, true);
   });
 
   app.delete('/api/v1/runs/:id', async (request, reply) => {

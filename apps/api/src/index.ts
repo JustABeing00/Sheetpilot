@@ -4,6 +4,7 @@ import { createDatabase, runMigrations } from '@sheetpilot/db';
 import { createContainer } from './container.js';
 import { createLogger } from './logger.js';
 import { buildServer } from './server.js';
+import { RunDispatcher } from './services/run-dispatcher.js';
 
 /**
  * `node dist/index.js --migrate` applies pending Drizzle migrations and exits. This is the production
@@ -25,6 +26,56 @@ async function runMigrationsCli(config: AppConfig, logger: ReturnType<typeof cre
   }
 }
 
+/**
+ * `node dist/index.js --worker` runs a dedicated run executor: no HTTP server, just the durable queue.
+ * This is the process that lets the API scale horizontally without executing runs itself.
+ */
+async function runWorker(
+  config: AppConfig,
+  logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  const container = await createContainer(config, logger);
+  if (!container.dispatcher) {
+    logger.warn(
+      'RUN_DISPATCH_IN_PROCESS=false, so this worker would never claim jobs; enabling an in-process dispatcher for this process',
+    );
+  }
+  const dispatcher =
+    container.dispatcher ??
+    new RunDispatcher({
+      queue: container.queue,
+      runService: container.runService,
+      logger,
+      pollIntervalMs: config.run.pollIntervalMs,
+      staleLockMs: config.run.staleLockMs,
+      retryDelayMs: config.run.retryDelayMs,
+    });
+
+  await dispatcher.recoverStale();
+  dispatcher.start();
+  logger.info(
+    { queue: container.queue.driver, pollIntervalMs: config.run.pollIntervalMs },
+    `${APP_NAME} run worker started`,
+  );
+
+  const shutdown = async (signal: string): Promise<void> => {
+    logger.info({ signal }, 'worker shutting down');
+    try {
+      await dispatcher.stop();
+      await container.close();
+    } finally {
+      process.exit(0);
+    }
+  };
+
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
+}
+
 async function main(): Promise<void> {
   const envFiles = loadEnvFiles();
   const config = loadConfig();
@@ -33,6 +84,11 @@ async function main(): Promise<void> {
 
   if (process.argv.includes('--migrate')) {
     await runMigrationsCli(config, logger);
+    return;
+  }
+
+  if (process.argv.includes('--worker')) {
+    await runWorker(config, logger);
     return;
   }
 

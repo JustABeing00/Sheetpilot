@@ -19,6 +19,7 @@ import {
   type FileStorage,
   type Logger,
   type Repositories,
+  type RunQueue,
   type RunSnapshot,
   type TabularFormat,
   type WorkflowConfiguration,
@@ -42,6 +43,10 @@ export interface RunServiceDeps {
   repositories: Repositories;
   storage: FileStorage;
   registry: WorkflowRegistry;
+  queue: RunQueue;
+  maxAttempts: number;
+  /** Called after a job is enqueued so an in-process dispatcher can start it immediately. */
+  onEnqueued?: () => void;
   clock: Clock;
   logger: Logger;
 }
@@ -132,11 +137,13 @@ export class RunService {
     // Freeze the configuration + rule-set versions before execution so a later edit can never change
     // what this run produced. Every run is reproducible from its own snapshot.
     await this.captureSnapshot(created, input.configurationOverride ?? null);
+    await this.deps.queue.enqueue(created.id, created.tenantId, this.deps.maxAttempts);
     this.deps.logger.info(
       { runId: created.id, workflowSlug: created.workflowSlug },
       'run queued for execution',
     );
-    void this.execute(created.id);
+    // With an in-process dispatcher this kicks the loop so the run starts without waiting for the poll.
+    this.deps.onEnqueued?.();
     return created;
   }
 
@@ -175,37 +182,90 @@ export class RunService {
     return this.deps.repositories.runSnapshots.create(snapshot);
   }
 
-  async execute(runId: string): Promise<void> {
+  async execute(runId: string): Promise<{ ok: boolean; error: string | null }> {
     // Mark synchronously (before any await) so two concurrent submissions for the same run can
     // never both execute it. A retry after completion is also skipped by the status check below.
     if (this.executing.has(runId)) {
       this.deps.logger.warn({ runId }, 'run is already executing; ignoring duplicate execution');
-      return;
+      return { ok: false, error: 'The run is already executing.' };
     }
     this.executing.add(runId);
     try {
-      await this.executeQueuedRun(runId);
+      return await this.executeQueuedRun(runId);
     } finally {
       this.executing.delete(runId);
     }
   }
 
-  private async executeQueuedRun(runId: string): Promise<void> {
+  /**
+   * Resets a run and its partial results so a retried job (e.g. after a worker crash) starts clean and
+   * cannot duplicate decisions, review items or artifacts. The immutable snapshot is kept.
+   */
+  async prepareForExecution(runId: string): Promise<void> {
+    const run = await this.deps.repositories.runs.getById(runId);
+    if (!run || run.status === 'queued') {
+      return;
+    }
+
+    const artifacts = await this.deps.repositories.artifacts.listByRun(runId);
+    for (const artifact of artifacts) {
+      try {
+        await this.deps.storage.remove(artifact.storageKey);
+      } catch (error) {
+        this.deps.logger.warn(
+          { artifactId: artifact.id, err: error },
+          'failed to remove a stale artifact before retrying a run',
+        );
+      }
+    }
+
+    await this.deps.repositories.reviewResolutions.deleteByRun(runId);
+    await this.deps.repositories.reviewItems.deleteByRun(runId);
+    await this.deps.repositories.decisions.deleteByRun(runId);
+    await this.deps.repositories.steps.deleteByRun(runId);
+    await this.deps.repositories.artifacts.deleteByRun(runId);
+
+    await this.deps.repositories.runs.update({
+      ...run,
+      status: 'queued',
+      stats: {},
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+  }
+
+  /** Marks a cancelled run as failed with an explanatory message (there is no `cancelled` status). */
+  async markCancelled(runId: string): Promise<void> {
+    const run = await this.deps.repositories.runs.getById(runId);
+    if (!run) {
+      return;
+    }
+    await this.deps.repositories.runs.update({
+      ...run,
+      status: 'failed',
+      error: 'The run was cancelled before it finished.',
+      finishedAt: this.deps.clock.now(),
+    });
+  }
+
+  private async executeQueuedRun(runId: string): Promise<{ ok: boolean; error: string | null }> {
     const run = await this.deps.repositories.runs.getById(runId);
     if (!run) {
       this.deps.logger.warn({ runId }, 'run not found for execution');
-      return;
+      return { ok: false, error: 'The run no longer exists.' };
     }
 
     if (run.status !== 'queued') {
       this.deps.logger.warn({ runId, status: run.status }, 'run is not queued; skipping execution');
-      return;
+      return { ok: false, error: `The run is ${run.status}.` };
     }
 
     const workflow = this.deps.registry.get(run.workflowSlug);
     if (!workflow) {
-      await this.fail(run, `Workflow '${run.workflowSlug}' is not registered`);
-      return;
+      const message = `Workflow '${run.workflowSlug}' is not registered`;
+      await this.fail(run, message);
+      return { ok: false, error: message };
     }
 
     const startedAt = this.deps.clock.now();
@@ -246,8 +306,9 @@ export class RunService {
       await this.persistSteps(run.id, run.tenantId, execution.steps);
 
       if (execution.status === 'failed' || !execution.state) {
-        await this.fail(run, execution.error?.message ?? 'Workflow execution failed', startedAt);
-        return;
+        const message = execution.error?.message ?? 'Workflow execution failed';
+        await this.fail(run, message, startedAt);
+        return { ok: false, error: message };
       }
 
       const exportStats = await this.persistResults(run, execution.state);
@@ -262,8 +323,11 @@ export class RunService {
       });
 
       runLogger.info({ stats: execution.state.stats }, 'run completed');
+      return { ok: true, error: null };
     } catch (error) {
-      await this.fail(run, describeError(error), startedAt);
+      const message = describeError(error);
+      await this.fail(run, message, startedAt);
+      return { ok: false, error: message };
     } finally {
       this.controllers.delete(runId);
     }

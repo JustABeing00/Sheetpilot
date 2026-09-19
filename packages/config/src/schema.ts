@@ -92,6 +92,14 @@ export const envSourceSchema = z.object({
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(15_000),
   AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
   AI_EXCLUDED_FIELDS: z.string().default(''),
+  RUN_DISPATCH_IN_PROCESS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  RUN_WORKER_POLL_MS: z.coerce.number().int().min(50).max(60_000).default(1000),
+  RUN_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(2),
+  RUN_STALE_LOCK_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(120_000),
+  RUN_RETRY_DELAY_MS: z.coerce.number().int().min(0).max(600_000).default(5_000),
   AUTH_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -164,6 +172,14 @@ export interface AppConfig {
   retention: {
     uploadTtlMs: number;
     sweepIntervalMs: number;
+  };
+  /** Durable run queue + dispatcher tuning. */
+  run: {
+    dispatchInProcess: boolean;
+    pollIntervalMs: number;
+    maxAttempts: number;
+    staleLockMs: number;
+    retryDelayMs: number;
   };
   dataset: {
     sampleRows: number;
@@ -374,6 +390,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     retention: {
       uploadTtlMs: Math.round(source.RETENTION_UPLOAD_TTL_HOURS * 60 * 60 * 1000),
       sweepIntervalMs: Math.round(source.RETENTION_SWEEP_INTERVAL_MINUTES * 60 * 1000),
+    },
+    run: {
+      dispatchInProcess: source.RUN_DISPATCH_IN_PROCESS,
+      pollIntervalMs: source.RUN_WORKER_POLL_MS,
+      maxAttempts: source.RUN_MAX_ATTEMPTS,
+      staleLockMs: source.RUN_STALE_LOCK_MS,
+      retryDelayMs: source.RUN_RETRY_DELAY_MS,
     },
     dataset: {
       sampleRows: source.DATASET_SAMPLE_ROWS,

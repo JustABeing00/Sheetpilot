@@ -11,16 +11,19 @@ import {
   type FileStorage,
   type Logger,
   type Repositories,
+  type RunQueue,
 } from '@sheetpilot/core';
 import { createDefaultWorkflowRegistry, type WorkflowRegistry } from '@sheetpilot/workflow-engine';
 import { createClassificationProvider } from '@sheetpilot/ai';
 import {
   createPostgresRepositories,
   createDatabase,
+  createInMemoryRepositories,
+  InMemoryRunQueue,
+  PostgresRunQueue,
   runMigrations,
   type DatabaseHandle,
 } from '@sheetpilot/db';
-import { createInMemoryRepositories } from '@sheetpilot/db';
 import { LocalFileStorage, S3FileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
 import { buildAuthConfig } from './auth/config.js';
@@ -29,6 +32,7 @@ import type { AuthUser } from './auth/types.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { DeletionService } from './services/deletion-service.js';
+import { RunDispatcher } from './services/run-dispatcher.js';
 import { TenancyService } from './services/tenancy-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
@@ -48,6 +52,8 @@ export interface AppContainer {
   clock: Clock;
   repositories: Repositories;
   storage: FileStorage;
+  queue: RunQueue;
+  dispatcher: RunDispatcher | null;
   classifier: ClassificationProvider;
   registry: WorkflowRegistry;
   fileService: FileService;
@@ -210,7 +216,32 @@ export async function createContainer(
     logger,
   });
   const ruleSetService = new RuleSetService({ repositories, registry, clock, logger });
-  const runService = new RunService({ repositories, storage, registry, clock, logger });
+  const queue: RunQueue = databaseHandle
+    ? new PostgresRunQueue(databaseHandle.db)
+    : new InMemoryRunQueue();
+
+  let dispatcher: RunDispatcher | null = null;
+  const runService = new RunService({
+    repositories,
+    storage,
+    registry,
+    queue,
+    maxAttempts: config.run.maxAttempts,
+    onEnqueued: () => dispatcher?.kick(),
+    clock,
+    logger,
+  });
+
+  dispatcher = config.run.dispatchInProcess
+    ? new RunDispatcher({
+        queue,
+        runService,
+        logger,
+        pollIntervalMs: config.run.pollIntervalMs,
+        staleLockMs: config.run.staleLockMs,
+        retryDelayMs: config.run.retryDelayMs,
+      })
+    : null;
   const reviewService = new ReviewService({ repositories, storage, clock, logger });
   const exportService = new ExportService({ repositories });
   const deletionService = new DeletionService({ repositories, storage, clock, logger });
@@ -264,9 +295,17 @@ export async function createContainer(
     return { id: claims.userId, email: claims.email, name: claims.name, tenantId };
   };
 
-  // A restart strands in-flight runs (they execute in-process). Mark them failed now so the UI never
-  // shows a phantom "processing" run.
-  await runService.recoverStaleRuns();
+  if (dispatcher) {
+    const recovered = await dispatcher.recoverStale();
+    if (recovered > 0) {
+      logger.warn({ recovered }, 'requeued runs stranded by a previous process');
+    }
+    dispatcher.start();
+  } else {
+    // No in-process dispatcher: a restart strands in-flight runs. Mark them failed now so the UI never
+    // shows a phantom "processing" run.
+    await runService.recoverStaleRuns();
+  }
   const savedWorkflowService = new SavedWorkflowService({
     repositories,
     registry,
@@ -300,6 +339,8 @@ export async function createContainer(
     clock,
     repositories,
     storage,
+    queue,
+    dispatcher,
     classifier,
     registry,
     fileService,
@@ -326,6 +367,7 @@ export async function createContainer(
     async close() {
       retentionService.stop();
       inboxService?.stop();
+      await dispatcher?.stop();
       await databaseHandle?.close();
     },
   };

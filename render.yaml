@@ -48,6 +48,9 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         sync: false
+      # Runs execute on the dedicated worker below; the API only serves requests.
+      - key: RUN_DISPATCH_IN_PROCESS
+        value: 'false'
       - key: AUTH_ENABLED
         value: 'false'
       - key: AUTH_SECRET
@@ -70,3 +73,44 @@ services:
       name: sheetpilot-data
       mountPath: /data
       sizeGB: 1
+
+  # Dedicated run executor: drains the durable Postgres queue. The API stays stateless and can scale.
+  # With STORAGE_DRIVER=s3 this service and the API share files; with local storage they must share the
+  # same disk, which Render only supports for a single service — use R2 for multi-service/multi-instance.
+  - type: worker
+    name: sheetpilot-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node apps/api/dist/index.js --worker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: 'true'
+      - key: REPOSITORY_DRIVER
+        value: postgres
+      - key: DB_AUTO_MIGRATE
+        value: 'false'
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sheetpilot-db
+          property: connectionString
+      - key: RUN_WORKER_POLL_MS
+        value: '1000'
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+      - key: STORAGE_DRIVER
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false

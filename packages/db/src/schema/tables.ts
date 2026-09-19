@@ -344,8 +344,33 @@ export const memberships = pgTable(
   ],
 );
 
+/**
+ * Durable run queue. One row per run: `queued` → `running` → `succeeded`/`failed`. A worker claims a
+ * job with `FOR UPDATE SKIP LOCKED`, so several workers (and API instances) never pick the same run.
+ */
+export const jobs = pgTable(
+  'jobs',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id').notNull().unique(),
+    tenantId: text('tenant_id'),
+    status: text('status').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(2),
+    availableAt: timestampColumn('available_at'),
+    lockedAt: timestamp('locked_at', { withTimezone: true, mode: 'date' }),
+    lockedBy: text('locked_by'),
+    lastError: text('last_error'),
+    cancelRequested: boolean('cancel_requested').notNull().default(false),
+    createdAt: timestampColumn('created_at'),
+    updatedAt: timestampColumn('updated_at'),
+  },
+  (table) => [index('jobs_status_available_idx').on(table.status, table.availableAt)],
+);
+
 export const schema = {
   workflows,
+  jobs,
   ruleSets,
   files,
   datasets,

@@ -20,4 +20,5 @@ export * from './ports/classification.js';
 export * from './ports/datasets.js';
 export * from './ports/workflow-configurations.js';
 export * from './ports/tenancy.js';
+export * from './ports/run-queue.js';
 export * from './ports/repositories.js';
