@@ -7,7 +7,7 @@ export default defineConfig({
   target: 'node22',
   outDir: 'dist',
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   dts: false,
   noExternal: [/^@sheetpilot\//],
 });

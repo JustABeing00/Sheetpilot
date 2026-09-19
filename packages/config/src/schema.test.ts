@@ -54,4 +54,24 @@ describe('loadConfig', () => {
   it('rejects invalid ports', () => {
     expect(() => loadConfig({ API_PORT: 'not-a-port' })).toThrow(ConfigurationError);
   });
+
+  it('falls back to the platform PORT when API_PORT is absent, and API_PORT wins', () => {
+    expect(loadConfig({ PORT: '10000' }).port).toBe(10000);
+    expect(loadConfig({ API_PORT: '4000', PORT: '10000' }).port).toBe(4000);
+  });
+
+  it('refuses an insecure production configuration unless ALLOW_INSECURE is set', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(ConfigurationError);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        REPOSITORY_DRIVER: 'postgres',
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/sheetpilot',
+        API_KEY: 'shared-secret',
+      }),
+    ).not.toThrow();
+
+    expect(() => loadConfig({ NODE_ENV: 'production', ALLOW_INSECURE: 'true' })).not.toThrow();
+  });
 });

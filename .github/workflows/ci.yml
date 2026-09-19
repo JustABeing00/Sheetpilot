@@ -31,3 +31,57 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sheetpilot
+          POSTGRES_PASSWORD: sheetpilot
+          POSTGRES_DB: sheetpilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sheetpilot -d sheetpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://sheetpilot:sheetpilot@localhost:5432/sheetpilot
+      REPOSITORY_DRIVER: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Start API and run the end-to-end smoke test
+        env:
+          NODE_ENV: test
+        run: |
+          node apps/api/dist/index.js &
+          API_PID=$!
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4000/readyz > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4000/readyz
+          npm run smoke
+          kill "$API_PID"

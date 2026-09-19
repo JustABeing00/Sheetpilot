@@ -12,7 +12,12 @@ import {
 } from '@sheetpilot/core';
 import { createDefaultWorkflowRegistry, type WorkflowRegistry } from '@sheetpilot/workflow-engine';
 import { createClassificationProvider } from '@sheetpilot/ai';
-import { createPostgresRepositories, createDatabase, type DatabaseHandle } from '@sheetpilot/db';
+import {
+  createPostgresRepositories,
+  createDatabase,
+  runMigrations,
+  type DatabaseHandle,
+} from '@sheetpilot/db';
 import { createInMemoryRepositories } from '@sheetpilot/db';
 import { LocalFileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
@@ -49,6 +54,8 @@ export interface AppContainer {
   retentionService: RetentionService;
   inboxService: InboxService | null;
   idempotency: IdempotencyService;
+  /** Resolves when the backing store is reachable; throws otherwise. Used by the readiness probe. */
+  readiness(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -125,6 +132,12 @@ export async function createContainer(
       throw new ConfigurationError('DATABASE_URL is required when REPOSITORY_DRIVER=postgres');
     }
     databaseHandle = createDatabase(config.repository.databaseUrl);
+    if (config.repository.autoMigrate) {
+      await runMigrations(databaseHandle.db, {
+        migrationsFolder: config.repository.migrationsDir ?? undefined,
+        logger,
+      });
+    }
     repositories = createPostgresRepositories(databaseHandle.db);
     logger.info({ driver: 'postgres' }, 'using postgres repositories');
   } else {
@@ -241,6 +254,9 @@ export async function createContainer(
     retentionService,
     inboxService,
     idempotency,
+    async readiness() {
+      await databaseHandle?.ping();
+    },
     async close() {
       retentionService.stop();
       inboxService?.stop();

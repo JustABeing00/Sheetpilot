@@ -14,6 +14,7 @@ export default tseslint.config(
       'packages/db/drizzle/**',
       'scripts/**',
       '**/scripts/**',
+      'apps/web/worker/**',
     ],
   },
   js.configs.recommended,

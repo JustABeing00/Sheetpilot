@@ -7,3 +7,14 @@ coverage
 package-lock.json
 packages/db/drizzle
 *.md
+
+# Files with no Prettier parser
+.env.example
+Dockerfile
+.dockerignore
+.nvmrc
+_headers
+_redirects
+robots.txt
+apps/web/public/favicon.svg
+apps/web/wrangler.jsonc

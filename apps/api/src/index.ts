@@ -1,14 +1,40 @@
 import { APP_NAME, APP_VERSION } from '@sheetpilot/core';
-import { loadConfig, loadEnvFiles } from '@sheetpilot/config';
+import { loadConfig, loadEnvFiles, type AppConfig } from '@sheetpilot/config';
+import { createDatabase, runMigrations } from '@sheetpilot/db';
 import { createContainer } from './container.js';
 import { createLogger } from './logger.js';
 import { buildServer } from './server.js';
+
+/**
+ * `node dist/index.js --migrate` applies pending Drizzle migrations and exits. This is the production
+ * migration path: it needs no TypeScript toolchain and runs from the same bundle as the server.
+ */
+async function runMigrationsCli(config: AppConfig, logger: ReturnType<typeof createLogger>) {
+  if (!config.repository.databaseUrl) {
+    throw new Error('DATABASE_URL is required to run migrations');
+  }
+  const handle = createDatabase(config.repository.databaseUrl);
+  try {
+    await runMigrations(handle.db, {
+      migrationsFolder: config.repository.migrationsDir ?? undefined,
+      logger,
+    });
+    logger.info('database migrations applied');
+  } finally {
+    await handle.close();
+  }
+}
 
 async function main(): Promise<void> {
   const envFiles = loadEnvFiles();
   const config = loadConfig();
   const logger = createLogger(config);
   const startedAt = Date.now();
+
+  if (process.argv.includes('--migrate')) {
+    await runMigrationsCli(config, logger);
+    return;
+  }
 
   const container = await createContainer(config, logger);
   const app = buildServer(container, { startedAt, loggerInstance: logger });
@@ -31,6 +57,11 @@ async function main(): Promise<void> {
   if (!config.security.apiKey) {
     logger.warn(
       'API_KEY is not set: the API has no authentication and must only be reachable from a trusted network',
+    );
+  }
+  if (config.isProduction && config.security.allowInsecure) {
+    logger.warn(
+      'ALLOW_INSECURE=true: production safety checks are disabled (in-memory persistence and/or no API key)',
     );
   }
   if (config.isProduction && config.corsOrigins.includes('http://localhost:5173')) {

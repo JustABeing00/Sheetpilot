@@ -17,7 +17,11 @@ export function registerRoutes(
   container: AppContainer,
   options: { startedAt: number },
 ): void {
-  registerHealthRoutes(app, { clock: container.clock, startedAt: options.startedAt });
+  registerHealthRoutes(app, {
+    clock: container.clock,
+    startedAt: options.startedAt,
+    readiness: () => container.readiness(),
+  });
   registerMetaRoutes(app, container);
   registerWorkflowRoutes(app, container);
   registerWorkflowConfigurationRoutes(app, container);

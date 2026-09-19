@@ -127,6 +127,7 @@ value is exposed to rules as `combinedDescription`, so a rule can match against 
 | --- | --- |
 | `npm run dev` | Run API and web app together |
 | `npm run build` | Build the API bundle and the web app |
+| `npm run start` | Run the built API bundle (`node apps/api/dist/index.js`) |
 | `npm run typecheck` | TypeScript strict typecheck for every workspace |
 | `npm run lint` | ESLint (type-aware) across the monorepo |
 | `npm run format` / `format:check` | Prettier write / verify |
@@ -134,7 +135,11 @@ value is exposed to rules as `combinedDescription`, so a rule can match against 
 | `npm run smoke` | End-to-end smoke test against a running API |
 | `npm run benchmark -w @sheetpilot/matching-engine` | Synthetic primary↔event join benchmark (10k–250k entities) |
 | `npm run db:generate` | Generate SQL migrations from the Drizzle schema |
+| `npm run db:migrate` | Apply migrations (source, via `tsx`) |
 | `npm run db:push` | Push the schema to a Postgres database (development) |
+
+In a production install (no dev toolchain), apply migrations with
+`node apps/api/dist/index.js --migrate`.
 
 ## Environment
 
@@ -144,17 +149,20 @@ Never commit a real `.env` file — `.gitignore` excludes it.
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `NODE_ENV` | `development` | `development` \| `test` \| `production` |
-| `API_HOST` / `API_PORT` | `127.0.0.1` / `4000` | API bind address |
+| `API_HOST` / `API_PORT` | `127.0.0.1` / `4000` | API bind address; precedence is `API_PORT`, then platform `PORT`, then 4000 |
 | `LOG_LEVEL` / `LOG_PRETTY` | `info` / `false` | Structured JSON logs; pretty logs require `pino-pretty` |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated list |
 | `REPOSITORY_DRIVER` | `memory` | `memory` (dev/test) or `postgres` (requires `DATABASE_URL`) |
 | `DATABASE_URL` | – | Required when `REPOSITORY_DRIVER=postgres` |
+| `DB_AUTO_MIGRATE` | `false` | Apply pending migrations at startup (single-instance only) |
+| `DB_MIGRATIONS_DIR` | – | Explicit path to the Drizzle SQL folder (required when the API bundle cannot resolve it) |
 | `STORAGE_DRIVER` / `STORAGE_LOCAL_DIR` | `local` / `.data/storage` | Uploaded files and generated artifacts |
 | `MAX_UPLOAD_MB` | `50` | Upload limit enforced by the API |
 | `JSON_BODY_LIMIT_MB` | `2` | JSON request-body limit for non-multipart endpoints |
 | `MAX_XLSX_UNCOMPRESSED_MB` / `MAX_XLSX_ENTRIES` | `512` / `20000` | ZIP-bomb guard: a workbook whose declared contents exceed these is rejected |
 | `RETENTION_UPLOAD_TTL_HOURS` / `RETENTION_SWEEP_INTERVAL_MINUTES` | `168` / `60` | Background deletion of unreferenced uploads (deliverables are kept) |
-| `API_KEY` | *(empty)* | When set, every `/api/v1` route requires a matching `x-api-key` header; `/healthz` stays open |
+| `API_KEY` | *(empty)* | When set, every `/api/v1` route requires a matching `x-api-key` header; `/healthz` and `/readyz` stay open |
+| `ALLOW_INSECURE` | `false` | Production refuses to boot with the memory driver and/or no `API_KEY` unless this is `true` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `600` / `60000` | Per-IP fixed-window rate limit; `0` disables it |
 | `TRUST_PROXY` | `false` | Set `true` only behind a trusted reverse proxy |
 | `DATASET_SAMPLE_ROWS` | `10` | Sample rows persisted/returned in a dataset preview |
@@ -239,14 +247,21 @@ sticky headers, and a `prefers-reduced-motion` override.
 
 ## Production readiness
 
-A final pre-production audit (session 12) exercised the full journey and the edge cases and recorded an
-honest verdict in [`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md). **SheetPilot is not
-production-ready as a multi-user, internet-facing SaaS; it is ready for a controlled single-tenant pilot on
-a trusted network.** The blockers are operational rather than pipeline logic: the Postgres adapter is
-unverified and migrations are not applied automatically, there is no authentication/tenancy, runs execute
-in a single process with no durable queue, and there is no delete/erasure flow. The document covers what
-works, operational and deployment requirements, the full environment-variable list, and security and
-scaling considerations.
+See [`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md) for the full audit and
+[`docs/deployment.md`](./docs/deployment.md) for the deployment runbook.
+
+**Deployable topology:** the API ships as a Docker image for Render (with Postgres and a persistent
+disk), and the SPA ships as a Cloudflare Worker (`wrangler deploy`) that serves the static build and
+proxies `/api` to the API, injecting `x-api-key` server-side so the key never reaches the browser.
+Migrations are applied by the image (`node apps/api/dist/index.js --migrate`) or at startup
+(`DB_AUTO_MIGRATE=true`), `/readyz` proves database connectivity, and production refuses to boot with
+the in-memory driver and/or no API key unless `ALLOW_INSECURE=true` is set deliberately.
+
+**Still not production-ready as a multi-user, internet-facing SaaS.** The remaining blockers are
+product/architecture, not packaging: there is no per-user identity or tenancy (only a single shared
+secret), runs execute in a single process with no durable queue (so exactly one API instance is
+supported), there is no delete/erasure flow, and the Postgres adapter is exercised by the CI Postgres
+job rather than by a long-running production deployment. Suitable for a controlled single-tenant pilot.
 
 ## Security and privacy
 

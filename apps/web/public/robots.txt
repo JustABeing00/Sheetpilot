@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /$
+Disallow: /dashboard
+Disallow: /datasets
+Disallow: /setup
+Disallow: /runs
+Disallow: /review
+Disallow: /rules
+Disallow: /workflows
+Disallow: /saved-workflows

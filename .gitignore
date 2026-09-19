@@ -20,6 +20,10 @@ coverage/
 tmp/
 *.log
 
+# cloudflare workers local state / secrets
+.wrangler/
+.dev.vars
+
 # automation harness scratch space
 .overnight-run/
 

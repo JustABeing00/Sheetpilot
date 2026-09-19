@@ -35,7 +35,9 @@ export type AiProviderId = CoreAiProviderId;
 export const envSourceSchema = z.object({
   NODE_ENV: nodeEnvSchema.default('development'),
   API_HOST: z.string().min(1).default('127.0.0.1'),
-  API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  // API_PORT wins when set; otherwise the platform-provided PORT (Render, Heroku, Fly, ...) is used.
+  API_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  PORT: z.coerce.number().int().min(1).max(65535).optional(),
   LOG_LEVEL: logLevelSchema.default('info'),
   LOG_PRETTY: z
     .enum(['true', 'false'])
@@ -44,6 +46,13 @@ export const envSourceSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   REPOSITORY_DRIVER: repositoryDriverSchema.default('memory'),
   DATABASE_URL: z.string().default(''),
+  // Apply pending Drizzle migrations at API startup (single-instance deployments only).
+  DB_AUTO_MIGRATE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  // Explicit path to the Drizzle SQL folder when it is not resolvable from the running file.
+  DB_MIGRATIONS_DIR: z.string().default(''),
   STORAGE_DRIVER: storageDriverSchema.default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/storage'),
   MAX_UPLOAD_MB: z.coerce.number().min(0.1).max(1024).default(50),
@@ -55,6 +64,11 @@ export const envSourceSchema = z.object({
   DATASET_SAMPLE_ROWS: z.coerce.number().int().min(1).max(500).default(10),
   DATASET_MAX_SCAN_ROWS: z.coerce.number().int().min(100).max(5_000_000).default(200_000),
   API_KEY: z.string().default(''),
+  // Escape hatch: allow production to start with the in-memory driver and/or no API key.
+  ALLOW_INSECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   RATE_LIMIT_MAX: z.coerce.number().int().min(0).max(1_000_000).default(600),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
   TRUST_PROXY: z
@@ -92,6 +106,8 @@ export interface AppConfig {
   repository: {
     driver: RepositoryDriver;
     databaseUrl: string | null;
+    autoMigrate: boolean;
+    migrationsDir: string | null;
   };
   storage: {
     driver: StorageDriver;
@@ -101,8 +117,10 @@ export interface AppConfig {
     maxXlsxEntries: number;
   };
   security: {
-    /** When set, every /api/v1 route (except health) requires an `x-api-key` header. */
+    /** When set, every /api/v1 route (except the health probes) requires an `x-api-key` header. */
     apiKey: string | null;
+    /** When true, production startup is permitted with the memory driver and/or no API key. */
+    allowInsecure: boolean;
     rateLimitMax: number;
     rateLimitWindowMs: number;
     trustProxy: boolean;
@@ -212,17 +230,37 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
+  // Production must be durable and authenticated unless the operator explicitly opts out. These are
+  // footguns (silent data loss, an open API), so they are hard failures rather than warnings.
+  if (source.NODE_ENV === 'production' && !source.ALLOW_INSECURE) {
+    const problems: string[] = [];
+    if (source.REPOSITORY_DRIVER !== 'postgres') {
+      problems.push('REPOSITORY_DRIVER must be "postgres"');
+    }
+    if (source.API_KEY.trim().length === 0) {
+      problems.push('API_KEY must be set');
+    }
+    if (problems.length > 0) {
+      throw new ConfigurationError(
+        `Refusing to start in production: ${problems.join('; ')}. Set ALLOW_INSECURE=true to override for a private pilot.`,
+        { variable: 'ALLOW_INSECURE' },
+      );
+    }
+  }
+
   return {
     nodeEnv: source.NODE_ENV,
     isProduction: source.NODE_ENV === 'production',
     host: source.API_HOST,
-    port: source.API_PORT,
+    port: source.API_PORT ?? source.PORT ?? 4000,
     logLevel: source.LOG_LEVEL,
     logPretty: source.LOG_PRETTY,
     corsOrigins: corsOrigins.length > 0 ? corsOrigins : ['http://localhost:5173'],
     repository: {
       driver: source.REPOSITORY_DRIVER,
       databaseUrl: source.DATABASE_URL.trim().length > 0 ? source.DATABASE_URL : null,
+      autoMigrate: source.DB_AUTO_MIGRATE,
+      migrationsDir: source.DB_MIGRATIONS_DIR.trim().length > 0 ? source.DB_MIGRATIONS_DIR : null,
     },
     storage: {
       driver: source.STORAGE_DRIVER,
@@ -233,6 +271,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     security: {
       apiKey: source.API_KEY.trim().length > 0 ? source.API_KEY : null,
+      allowInsecure: source.ALLOW_INSECURE,
       rateLimitMax: source.RATE_LIMIT_MAX,
       rateLimitWindowMs: source.RATE_LIMIT_WINDOW_MS,
       trustProxy: source.TRUST_PROXY,

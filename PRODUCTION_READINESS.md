@@ -375,3 +375,52 @@ data handling):**
   concrete findings are incorporated above and in §6.
 
 **Test totals after this session:** 34 files / **311 tests**, all passing.
+
+---
+
+## 11. Session 13 — deployment readiness changes
+
+This session did not change pipeline logic; it made the existing build deployable and closed
+operational gaps. See [`docs/deployment.md`](./docs/deployment.md) for the runbook.
+
+**Resolved**
+
+- **Packaging exists now.** `Dockerfile` (multi-stage, pruned runtime), `.dockerignore`, `.nvmrc`, and
+  a `render.yaml` Blueprint (web service + Postgres 16 + persistent disk + env).
+- **Frontend is a Cloudflare Worker.** `apps/web/wrangler.jsonc` + `apps/web/worker/index.js` serve
+  `dist/` as static assets with SPA fallback and proxy `/api`, `/healthz`, `/readyz` to the API,
+  injecting `x-api-key` server-side. The shared secret is not shipped to the browser (this replaces
+  the earlier "baked `VITE_API_KEY`" concern) and the browser stays same-origin (no CORS).
+- **Migrations are runnable in production.** `node apps/api/dist/index.js --migrate` runs the bundled
+  migrator with no TypeScript toolchain; `DB_AUTO_MIGRATE=true` applies them at startup; the folder is
+  resolved from `DB_MIGRATIONS_DIR` (set by the image). Root `db:migrate`/`db:push` scripts added.
+- **Health and safety guards.** `/readyz` proves Postgres connectivity (`/healthz` stays a liveness
+  probe); both probes are unauthenticated. Production refuses to boot with the memory driver and/or no
+  `API_KEY` unless `ALLOW_INSECURE=true`.
+- **Platform portability.** `PORT` (Render/Heroku/Fly) is honored when `API_PORT` is unset; logs a
+  warning when `ALLOW_INSECURE` is used in production.
+- **Cross-platform install fixed.** The Windows-only `@rolldown`/`lightningcss` bindings moved from
+  `devDependencies` to `optionalDependencies`, so `npm ci` works on Linux (CI and Docker) and still
+  installs the bindings on Windows.
+- **CI hardened.** `npm audit --omit=dev --audit-level=high` gate plus a Postgres 16 job that applies
+  migrations and runs the end-to-end smoke test against a real database.
+- **Production sourcemaps disabled** for both the API bundle and the web build.
+- **Web hardening.** Favicon, `robots.txt`, `_headers` (CSP + baseline headers + immutable asset
+  caching), and `/favicon.ico` redirect.
+
+**Verified this session**
+
+- `npm ci` → `npm run lint` → `npm run typecheck` → `npm run build` clean; `npm test` **36 files / 320
+  tests** passing; `wrangler deploy --dry-run` accepts the Worker config; the production guard and the
+  `--migrate` CLI fail fast with actionable messages; the built API served `/healthz` + `/readyz` and
+  the full smoke test passed end to end.
+
+**Still open (unchanged blockers)**
+
+- No per-user identity/tenancy (single shared secret only), so not a multi-user SaaS.
+- Single API instance: runs are in-process and there is no durable queue.
+- Postgres is now exercised by CI, but not yet by a long-running production deployment.
+- No delete/erasure flow; deliverables are never swept.
+- One pre-existing (unreachable) moderate advisory: `uuid@8.3.2` via `exceljs` (exceljs uses `v4`
+  only; the advisory covers `v3/v5/v6` with a caller-provided buffer). Accepted and tracked.
+- Pre-existing `npm run format:check` drift in 12 unrelated files (CI does not gate on formatting).

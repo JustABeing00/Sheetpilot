@@ -13,7 +13,7 @@ interface RateBucket {
   resetAt: number;
 }
 
-const HEALTH_PATH = '/healthz';
+const HEALTH_PATHS = ['/healthz', '/readyz'];
 const MAX_TRACKED_CLIENTS = 10_000;
 
 /** Constant-time comparison that never throws on length mismatch. */
@@ -29,7 +29,7 @@ function secretsMatch(provided: string, expected: string): boolean {
 }
 
 function isHealthProbe(url: string): boolean {
-  return url === HEALTH_PATH || url.startsWith(`${HEALTH_PATH}?`);
+  return HEALTH_PATHS.some((path) => url === path || url.startsWith(`${path}?`));
 }
 
 /**

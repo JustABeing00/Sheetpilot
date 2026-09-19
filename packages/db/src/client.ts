@@ -6,6 +6,8 @@ export type Database = PostgresJsDatabase<typeof schema>;
 
 export interface DatabaseHandle {
   db: Database;
+  /** Cheap connectivity probe for readiness checks. Throws when the server is unreachable. */
+  ping(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -19,6 +21,9 @@ export function createDatabase(connectionString: string): DatabaseHandle {
 
   return {
     db,
+    async ping() {
+      await client`select 1`;
+    },
     async close() {
       await client.end({ timeout: 5 });
     },
