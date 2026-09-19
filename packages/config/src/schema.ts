@@ -26,7 +26,7 @@ export type LogLevel = z.infer<typeof logLevelSchema>;
 export const repositoryDriverSchema = z.enum(['memory', 'postgres']);
 export type RepositoryDriver = z.infer<typeof repositoryDriverSchema>;
 
-export const storageDriverSchema = z.enum(['local']);
+export const storageDriverSchema = z.enum(['local', 's3']);
 export type StorageDriver = z.infer<typeof storageDriverSchema>;
 
 export const aiProviderIdSchema = coreAiProviderIdSchema;
@@ -55,6 +55,16 @@ export const envSourceSchema = z.object({
   DB_MIGRATIONS_DIR: z.string().default(''),
   STORAGE_DRIVER: storageDriverSchema.default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/storage'),
+  // S3-compatible object storage (AWS S3, Cloudflare R2, MinIO). Required when STORAGE_DRIVER=s3.
+  S3_BUCKET: z.string().default(''),
+  S3_REGION: z.string().default('auto'),
+  S3_ENDPOINT: z.string().default(''),
+  S3_ACCESS_KEY_ID: z.string().default(''),
+  S3_SECRET_ACCESS_KEY: z.string().default(''),
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   MAX_UPLOAD_MB: z.coerce.number().min(0.1).max(1024).default(50),
   JSON_BODY_LIMIT_MB: z.coerce.number().min(0.1).max(100).default(2),
   MAX_XLSX_UNCOMPRESSED_MB: z.coerce.number().min(1).max(4096).default(512),
@@ -132,6 +142,14 @@ export interface AppConfig {
     maxUploadBytes: number;
     maxXlsxUncompressedBytes: number;
     maxXlsxEntries: number;
+    s3: {
+      bucket: string;
+      region: string;
+      endpoint: string | null;
+      accessKeyId: string | null;
+      secretAccessKey: string | null;
+      forcePathStyle: boolean;
+    } | null;
   };
   security: {
     /** When set, every /api/v1 route (except the health probes) requires an `x-api-key` header. */
@@ -266,6 +284,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
   }
 
+  if (source.STORAGE_DRIVER === 's3' && source.S3_BUCKET.trim().length === 0) {
+    throw new ConfigurationError('S3_BUCKET is required when STORAGE_DRIVER=s3', {
+      variable: 'S3_BUCKET',
+    });
+  }
+
   if (source.INBOX_ENABLED) {
     if (source.INBOX_DIR.trim().length === 0) {
       throw new ConfigurationError('INBOX_DIR is required when INBOX_ENABLED=true', {
@@ -325,6 +349,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       maxUploadBytes: Math.round(source.MAX_UPLOAD_MB * 1024 * 1024),
       maxXlsxUncompressedBytes: Math.round(source.MAX_XLSX_UNCOMPRESSED_MB * 1024 * 1024),
       maxXlsxEntries: source.MAX_XLSX_ENTRIES,
+      s3:
+        source.STORAGE_DRIVER === 's3'
+          ? {
+              bucket: source.S3_BUCKET,
+              region: source.S3_REGION,
+              endpoint: source.S3_ENDPOINT.trim().length > 0 ? source.S3_ENDPOINT : null,
+              accessKeyId:
+                source.S3_ACCESS_KEY_ID.trim().length > 0 ? source.S3_ACCESS_KEY_ID : null,
+              secretAccessKey:
+                source.S3_SECRET_ACCESS_KEY.trim().length > 0 ? source.S3_SECRET_ACCESS_KEY : null,
+              forcePathStyle: source.S3_FORCE_PATH_STYLE,
+            }
+          : null,
     },
     security: {
       apiKey: source.API_KEY.trim().length > 0 ? source.API_KEY : null,

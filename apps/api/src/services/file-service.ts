@@ -45,7 +45,7 @@ export class FileService {
 }
 
 export function assertStorageConfigured(driver: string): void {
-  if (driver !== 'local') {
+  if (driver !== 'local' && driver !== 's3') {
     throw new ConfigurationError(`Storage driver '${driver}' is not supported yet`, { driver });
   }
 }

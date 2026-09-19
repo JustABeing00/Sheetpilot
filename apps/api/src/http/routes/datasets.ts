@@ -80,4 +80,11 @@ export function registerDatasetRoutes(app: FastifyInstance, container: AppContai
 
     return datasetRowsResponseSchema.parse(page);
   });
+
+  app.delete('/api/v1/datasets/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await container.deletionService.deleteDataset(id, tenantOf(request));
+    reply.status(204);
+    return null;
+  });
 }

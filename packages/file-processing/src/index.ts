@@ -16,3 +16,4 @@ export * from './writers/stream.js';
 export * from './export/validate.js';
 export * from './storage/local-file-storage.js';
 export * from './storage/memory-file-storage.js';
+export * from './storage/s3-file-storage.js';

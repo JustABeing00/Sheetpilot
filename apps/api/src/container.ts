@@ -21,13 +21,14 @@ import {
   type DatabaseHandle,
 } from '@sheetpilot/db';
 import { createInMemoryRepositories } from '@sheetpilot/db';
-import { LocalFileStorage } from '@sheetpilot/file-processing';
+import { LocalFileStorage, S3FileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
 import { buildAuthConfig } from './auth/config.js';
 import { readSession } from './auth/session.js';
 import type { AuthUser } from './auth/types.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
+import { DeletionService } from './services/deletion-service.js';
 import { TenancyService } from './services/tenancy-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
@@ -57,6 +58,7 @@ export interface AppContainer {
   reviewService: ReviewService;
   exportService: ExportService;
   savedWorkflowService: SavedWorkflowService;
+  deletionService: DeletionService;
   retentionService: RetentionService;
   inboxService: InboxService | null;
   idempotency: IdempotencyService;
@@ -133,7 +135,10 @@ export async function createContainer(
 ): Promise<AppContainer> {
   const clock = systemClock;
   const storage: FileStorage =
-    overrides.storage ?? new LocalFileStorage(path.resolve(config.storage.localDir));
+    overrides.storage ??
+    (config.storage.driver === 's3' && config.storage.s3
+      ? new S3FileStorage(config.storage.s3)
+      : new LocalFileStorage(path.resolve(config.storage.localDir)));
 
   let databaseHandle: DatabaseHandle | null = null;
   let repositories: Repositories;
@@ -208,6 +213,7 @@ export async function createContainer(
   const runService = new RunService({ repositories, storage, registry, clock, logger });
   const reviewService = new ReviewService({ repositories, storage, clock, logger });
   const exportService = new ExportService({ repositories });
+  const deletionService = new DeletionService({ repositories, storage, clock, logger });
   const retentionService = new RetentionService({
     storage,
     repositories,
@@ -304,6 +310,7 @@ export async function createContainer(
     reviewService,
     exportService,
     savedWorkflowService,
+    deletionService,
     retentionService,
     inboxService,
     idempotency,

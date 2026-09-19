@@ -249,6 +249,9 @@ export function createPostgresRepositories(db: Database): Repositories {
         const rows = options?.limit === undefined ? await query : await query.limit(options.limit);
         return rows.map(toFileAsset);
       },
+      async delete(id) {
+        await db.delete(files).where(eq(files.id, id));
+      },
     },
 
     datasets: {
@@ -269,6 +272,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
         return rows.map(toDataset);
+      },
+      async delete(id) {
+        await db.delete(datasets).where(eq(datasets.id, id));
       },
     },
 
@@ -319,6 +325,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
         return rows.map(toWorkflowConfiguration);
+      },
+      async delete(id) {
+        await db.delete(workflowConfigurations).where(eq(workflowConfigurations.id, id));
       },
     },
 
@@ -387,6 +396,9 @@ export function createPostgresRepositories(db: Database): Repositories {
         const [row] = await db.select({ value: count() }).from(runs);
         return row?.value ?? 0;
       },
+      async delete(id) {
+        await db.delete(runs).where(eq(runs.id, id));
+      },
     },
 
     runSnapshots: {
@@ -415,6 +427,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .where(eq(runSnapshots.runId, runId))
           .limit(1);
         return row ? toRunSnapshot(row) : null;
+      },
+      async deleteByRun(runId) {
+        await db.delete(runSnapshots).where(eq(runSnapshots.runId, runId));
       },
     },
 
@@ -463,6 +478,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .orderBy(asc(runSteps.stepOrder));
         return rows.map(toStepRun);
       },
+      async deleteByRun(runId) {
+        await db.delete(runSteps).where(eq(runSteps.runId, runId));
+      },
     },
 
     decisions: {
@@ -507,6 +525,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .from(runDecisions)
           .where(eq(runDecisions.runId, runId));
         return row?.value ?? 0;
+      },
+      async deleteByRun(runId) {
+        await db.delete(runDecisions).where(eq(runDecisions.runId, runId));
       },
     },
 
@@ -638,6 +659,9 @@ export function createPostgresRepositories(db: Database): Repositories {
         }
         return result;
       },
+      async deleteByRun(runId) {
+        await db.delete(reviewItems).where(eq(reviewItems.runId, runId));
+      },
     },
 
     reviewResolutions: {
@@ -682,6 +706,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .offset(options?.offset ?? 0);
         return rows.map(toReviewResolution);
       },
+      async deleteByRun(runId) {
+        await db.delete(reviewResolutions).where(eq(reviewResolutions.runId, runId));
+      },
     },
 
     artifacts: {
@@ -708,6 +735,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .where(eq(artifacts.runId, runId))
           .orderBy(asc(artifacts.createdAt));
         return rows.map(toArtifact);
+      },
+      async deleteByRun(runId) {
+        await db.delete(artifacts).where(eq(artifacts.runId, runId));
       },
     },
 
@@ -760,6 +790,9 @@ export function createPostgresRepositories(db: Database): Repositories {
           .where(tenantId != null ? eq(ruleSets.tenantId, tenantId) : undefined)
           .orderBy(asc(ruleSets.slug));
         return rows.map(toRuleSet);
+      },
+      async delete(id) {
+        await db.delete(ruleSets).where(eq(ruleSets.id, id));
       },
     },
   };

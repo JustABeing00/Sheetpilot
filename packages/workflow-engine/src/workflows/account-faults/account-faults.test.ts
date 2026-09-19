@@ -107,6 +107,7 @@ async function runWorkflow(
     create: (asset) => Promise.resolve(asset),
     getById: (id) => Promise.resolve(assets.find((asset) => asset.id === id) ?? null),
     list: () => Promise.resolve(assets),
+    delete: () => Promise.resolve(),
   };
 
   const workflow = createAccountFaultWorkflow({

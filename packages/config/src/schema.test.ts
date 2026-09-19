@@ -75,6 +75,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', ALLOW_INSECURE: 'true' })).not.toThrow();
   });
 
+  it('requires an S3 bucket when STORAGE_DRIVER=s3', () => {
+    expect(() => loadConfig({ STORAGE_DRIVER: 's3' })).toThrow(ConfigurationError);
+
+    const config = loadConfig({ STORAGE_DRIVER: 's3', S3_BUCKET: 'sheetpilot' });
+    expect(config.storage.driver).toBe('s3');
+    expect(config.storage.s3?.bucket).toBe('sheetpilot');
+  });
+
   it('requires a secret and at least one provider when auth is enabled', () => {
     expect(() => loadConfig({ AUTH_ENABLED: 'true' })).toThrow(ConfigurationError);
     expect(() => loadConfig({ AUTH_ENABLED: 'true', AUTH_SECRET: 'secret' })).toThrow(

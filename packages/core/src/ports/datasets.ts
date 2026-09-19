@@ -11,4 +11,5 @@ export interface DatasetRepository {
   create(dataset: DatasetProfile): Promise<DatasetProfile>;
   getById(id: DatasetId): Promise<DatasetProfile | null>;
   list(options?: DatasetListOptions): Promise<DatasetProfile[]>;
+  delete(id: DatasetId): Promise<void>;
 }

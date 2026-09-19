@@ -226,6 +226,10 @@ export function createInMemoryRepositories(): Repositories {
       fileStore.set(asset.id, asset);
       return Promise.resolve(asset);
     },
+    delete: (id) => {
+      fileStore.delete(id);
+      return Promise.resolve();
+    },
     getById: (id) => Promise.resolve(fileStore.get(id) ?? null),
     list: (options) => {
       const filtered = [...fileStore.values()].filter(
@@ -245,6 +249,10 @@ export function createInMemoryRepositories(): Repositories {
       datasetStore.set(dataset.id, dataset);
       return Promise.resolve(dataset);
     },
+    delete: (id) => {
+      datasetStore.delete(id);
+      return Promise.resolve();
+    },
     getById: (id) => Promise.resolve(datasetStore.get(id) ?? null),
     list: (options?: DatasetListOptions) => {
       const filtered = [...datasetStore.values()].filter(
@@ -263,6 +271,10 @@ export function createInMemoryRepositories(): Repositories {
     create: (configuration) => {
       configurationStore.set(configuration.id, configuration);
       return Promise.resolve(configuration);
+    },
+    delete: (id) => {
+      configurationStore.delete(id);
+      return Promise.resolve();
     },
     update: (configuration) => {
       configurationStore.set(configuration.id, configuration);
@@ -303,6 +315,10 @@ export function createInMemoryRepositories(): Repositories {
       runStore.set(run.id, run);
       return Promise.resolve(run);
     },
+    delete: (id) => {
+      runStore.delete(id);
+      return Promise.resolve();
+    },
     update: (run) => {
       runStore.set(run.id, run);
       return Promise.resolve(run);
@@ -325,6 +341,10 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(snapshot);
     },
     getByRunId: (runId) => Promise.resolve(runSnapshotStore.get(runId) ?? null),
+    deleteByRun: (runId) => {
+      runSnapshotStore.delete(runId);
+      return Promise.resolve();
+    },
   };
 
   const steps: StepRunRepository = {
@@ -351,6 +371,10 @@ export function createInMemoryRepositories(): Repositories {
       Promise.resolve(
         [...(stepStore.get(runId) ?? [])].sort((left, right) => left.order - right.order),
       ),
+    deleteByRun: (runId) => {
+      stepStore.delete(runId);
+      return Promise.resolve();
+    },
   };
 
   const decisions: DecisionRepository = {
@@ -365,6 +389,10 @@ export function createInMemoryRepositories(): Repositories {
     listByRun: (runId, options?: DecisionListOptions) =>
       Promise.resolve(paginate(decisionStore.get(runId) ?? [], options)),
     countByRun: (runId) => Promise.resolve((decisionStore.get(runId) ?? []).length),
+    deleteByRun: (runId) => {
+      decisionStore.delete(runId);
+      return Promise.resolve();
+    },
   };
 
   const reviewItems: ReviewItemRepository = {
@@ -412,6 +440,14 @@ export function createInMemoryRepositories(): Repositories {
           ),
         ),
       ),
+    deleteByRun: (runId) => {
+      for (const [id, item] of reviewStore) {
+        if (item.runId === runId) {
+          reviewStore.delete(id);
+        }
+      }
+      return Promise.resolve();
+    },
   };
 
   const reviewResolutions: ReviewResolutionRepository = {
@@ -436,6 +472,14 @@ export function createInMemoryRepositories(): Repositories {
           options,
         ),
       ),
+    deleteByRun: (runId) => {
+      for (const [id, entry] of resolutionStore) {
+        if (entry.runId === runId) {
+          resolutionStore.delete(id);
+        }
+      }
+      return Promise.resolve();
+    },
   };
 
   const artifacts: ArtifactRepository = {
@@ -450,6 +494,14 @@ export function createInMemoryRepositories(): Repositories {
     getById: (id) => Promise.resolve(artifactStore.get(id) ?? null),
     listByRun: (runId) =>
       Promise.resolve([...artifactStore.values()].filter((artifact) => artifact.runId === runId)),
+    deleteByRun: (runId) => {
+      for (const [id, artifact] of artifactStore) {
+        if (artifact.runId === runId) {
+          artifactStore.delete(id);
+        }
+      }
+      return Promise.resolve();
+    },
   };
 
   const ruleSets: RuleSetRepository = {
@@ -487,6 +539,10 @@ export function createInMemoryRepositories(): Repositories {
           (ruleSet) => ruleSet.updatedAt,
         ),
       ),
+    delete: (id) => {
+      ruleSetStore.delete(id);
+      return Promise.resolve();
+    },
   };
 
   return {

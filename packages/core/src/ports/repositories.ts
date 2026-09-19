@@ -25,6 +25,7 @@ export interface FileRepository {
   create(asset: FileAsset): Promise<FileAsset>;
   getById(id: FileId): Promise<FileAsset | null>;
   list(options?: { limit?: number; tenantId?: string | null }): Promise<FileAsset[]>;
+  delete(id: FileId): Promise<void>;
 }
 
 export interface WorkflowRepository {
@@ -48,6 +49,7 @@ export interface RunRepository {
   getById(id: RunId): Promise<WorkflowRun | null>;
   list(options?: RunListOptions): Promise<WorkflowRun[]>;
   count(): Promise<number>;
+  delete(id: RunId): Promise<void>;
 }
 
 /**
@@ -57,12 +59,14 @@ export interface RunRepository {
 export interface RunSnapshotRepository {
   create(snapshot: RunSnapshot): Promise<RunSnapshot>;
   getByRunId(runId: RunId): Promise<RunSnapshot | null>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface StepRunRepository {
   createMany(steps: StepRun[]): Promise<void>;
   update(step: StepRun): Promise<StepRun>;
   listByRun(runId: RunId): Promise<StepRun[]>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface DecisionListOptions {
@@ -74,6 +78,7 @@ export interface DecisionRepository {
   createMany(records: DecisionRecord[]): Promise<void>;
   listByRun(runId: RunId, options?: DecisionListOptions): Promise<DecisionRecord[]>;
   countByRun(runId: RunId): Promise<number>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface ReviewListOptions {
@@ -114,6 +119,7 @@ export interface ReviewItemRepository {
   countByRun(runId: RunId): Promise<number>;
   countOpenByRun(runId: RunId): Promise<number>;
   counts(tenantId?: string | null): Promise<ReviewCounts>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface ReviewHistoryListOptions {
@@ -126,6 +132,7 @@ export interface ReviewResolutionRepository {
   create(entry: ReviewResolutionLog): Promise<ReviewResolutionLog>;
   listByItem(reviewItemId: string): Promise<ReviewResolutionLog[]>;
   listByRun(runId: RunId, options?: ReviewHistoryListOptions): Promise<ReviewResolutionLog[]>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface ArtifactRepository {
@@ -133,6 +140,7 @@ export interface ArtifactRepository {
   update(artifact: Artifact): Promise<Artifact>;
   getById(id: ArtifactId): Promise<Artifact | null>;
   listByRun(runId: RunId): Promise<Artifact[]>;
+  deleteByRun(runId: RunId): Promise<void>;
 }
 
 export interface RuleSetRepository {
@@ -145,6 +153,7 @@ export interface RuleSetRepository {
   ): Promise<StoredRuleSet | null>;
   listByWorkflowSlug(workflowSlug: string, tenantId?: string | null): Promise<StoredRuleSet[]>;
   list(tenantId?: string | null): Promise<StoredRuleSet[]>;
+  delete(id: string): Promise<void>;
 }
 
 export interface Repositories {

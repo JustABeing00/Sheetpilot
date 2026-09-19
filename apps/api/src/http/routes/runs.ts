@@ -213,4 +213,11 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
         : null,
     });
   });
+
+  app.delete('/api/v1/runs/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await container.deletionService.deleteRun(id, tenantOf(request));
+    reply.status(204);
+    return null;
+  });
 }

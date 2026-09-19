@@ -13,4 +13,5 @@ export interface WorkflowConfigurationRepository {
   update(configuration: WorkflowConfiguration): Promise<WorkflowConfiguration>;
   getById(id: WorkflowConfigurationId): Promise<WorkflowConfiguration | null>;
   list(options?: WorkflowConfigurationListOptions): Promise<WorkflowConfiguration[]>;
+  delete(id: WorkflowConfigurationId): Promise<void>;
 }
