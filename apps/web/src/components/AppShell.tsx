@@ -1,5 +1,6 @@
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useHealth, useMeta, useReviewQueue } from '../api/hooks.js';
+import { useScrollReveal } from '../lib/useScrollReveal.js';
 
 const navigation = [
   { to: '/dashboard', label: 'Dashboard', end: true },
@@ -13,12 +14,15 @@ const navigation = [
 ];
 
 export function AppShell() {
+  const { pathname } = useLocation();
   const meta = useMeta();
   const health = useHealth();
   const reviewQueue = useReviewQueue('needs_review');
 
   const openCount = reviewQueue.data?.openCount ?? 0;
   const online = health.isSuccess;
+
+  useScrollReveal(pathname);
 
   return (
     <div className="app-shell">

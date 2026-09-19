@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ApiError } from '../api/client.js';
 import type { BadgeTone } from '../lib/status.js';
+import { Reveal } from './Reveal.js';
 
 export function Badge({ tone = 'neutral', children }: { tone?: BadgeTone; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
@@ -18,8 +19,12 @@ export function PageHeader({
   return (
     <header className="page-header">
       <div>
-        <h1>{title}</h1>
-        {description ? <p className="page-description">{description}</p> : null}
+        <Reveal as="h1">{title}</Reveal>
+        {description ? (
+          <Reveal as="p" className="page-description" delay={70}>
+            {description}
+          </Reveal>
+        ) : null}
       </div>
       {actions ? <div className="page-actions">{actions}</div> : null}
     </header>
