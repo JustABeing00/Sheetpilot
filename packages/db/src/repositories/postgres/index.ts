@@ -4,6 +4,7 @@ import {
   datasetProfileSchema,
   decisionRecordSchema,
   fileAssetSchema,
+  invitationSchema,
   membershipSchema,
   reviewItemSchema,
   reviewResolutionLogSchema,
@@ -39,6 +40,7 @@ import {
   artifacts,
   datasets,
   files,
+  invitations,
   memberships,
   reviewItems,
   reviewResolutions,
@@ -48,6 +50,7 @@ import {
   runSnapshots,
   runSteps,
   tenants,
+  users,
   workflowConfigurations,
   workflows,
 } from '../../schema/tables.js';
@@ -133,6 +136,55 @@ const toRunSnapshot = (row: typeof runSnapshots.$inferSelect): RunSnapshot =>
 
 export function createPostgresRepositories(db: Database): Repositories {
   return {
+    users: {
+      async getById(id) {
+        const [row] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+        return row ? { id: row.id, name: row.name, email: row.email, image: row.image } : null;
+      },
+      async getByEmail(email) {
+        const [row] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+        return row ? { id: row.id, name: row.name, email: row.email, image: row.image } : null;
+      },
+      async listByIds(ids) {
+        if (ids.length === 0) {
+          return [];
+        }
+        const rows = await db.select().from(users).where(inArray(users.id, ids));
+        return rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          image: row.image,
+        }));
+      },
+    },
+
+    invitations: {
+      async create(invitation) {
+        const [row] = await db.insert(invitations).values(invitation).returning();
+        return invitationSchema.parse(row!);
+      },
+      async getById(id) {
+        const [row] = await db.select().from(invitations).where(eq(invitations.id, id)).limit(1);
+        return row ? invitationSchema.parse(row) : null;
+      },
+      async listByTenant(tenantId) {
+        const rows = await db
+          .select()
+          .from(invitations)
+          .where(eq(invitations.tenantId, tenantId))
+          .orderBy(desc(invitations.createdAt));
+        return rows.map((row) => invitationSchema.parse(row));
+      },
+      async listByEmail(email) {
+        const rows = await db.select().from(invitations).where(eq(invitations.email, email));
+        return rows.map((row) => invitationSchema.parse(row));
+      },
+      async delete(id) {
+        await db.delete(invitations).where(eq(invitations.id, id));
+      },
+    },
+
     tenants: {
       async create(tenant) {
         const [row] = await db.insert(tenants).values(tenant).returning();

@@ -111,6 +111,26 @@ export async function apiUpload<T>(path: string, form: FormData, schema: ZodType
   return parseResponse(response, schema);
 }
 
+/** Sends a request whose response body is not needed (204-style actions). */
+export async function apiSend(
+  path: string,
+  method: 'PUT' | 'DELETE',
+  body?: unknown,
+): Promise<void> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    credentials: 'include',
+    headers:
+      body === undefined
+        ? { accept: 'application/json' }
+        : { 'content-type': 'application/json', accept: 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+}
+
 export function apiDownloadUrl(path: string): string {
   return `${baseUrl}${path}`;
 }

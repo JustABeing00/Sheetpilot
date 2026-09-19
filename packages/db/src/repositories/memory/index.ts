@@ -10,6 +10,8 @@ import type {
   DecisionRepository,
   FileAsset,
   FileRepository,
+  Invitation,
+  InvitationRepository,
   Membership,
   MembershipRepository,
   MembershipRole,
@@ -17,6 +19,7 @@ import type {
   ReviewCounts,
   Tenant,
   TenantRepository,
+  UserRepository,
   ReviewItem,
   ReviewItemRepository,
   ReviewListOptions,
@@ -140,6 +143,40 @@ export function createInMemoryRepositories(): Repositories {
   const ruleSetStore = new Map<string, StoredRuleSet>();
   const tenantStore = new Map<string, Tenant>();
   const membershipStore = new Map<string, Membership>();
+  const invitationStore = new Map<string, Invitation>();
+
+  const users: UserRepository = {
+    // The in-memory driver has no identity store: Auth.js requires Postgres, so this is only reached in
+    // single-tenant/dev mode where there are no members to resolve.
+    getById: () => Promise.resolve(null),
+    getByEmail: () => Promise.resolve(null),
+    listByIds: () => Promise.resolve([]),
+  };
+
+  const invitations: InvitationRepository = {
+    create: (invitation) => {
+      invitationStore.set(invitation.id, invitation);
+      return Promise.resolve(invitation);
+    },
+    getById: (id) => Promise.resolve(invitationStore.get(id) ?? null),
+    listByTenant: (tenantId) =>
+      Promise.resolve(
+        byDateDesc(
+          [...invitationStore.values()].filter((entry) => entry.tenantId === tenantId),
+          (entry) => entry.createdAt,
+        ),
+      ),
+    listByEmail: (email) =>
+      Promise.resolve(
+        [...invitationStore.values()].filter(
+          (entry) => entry.email.toLowerCase() === email.toLowerCase(),
+        ),
+      ),
+    delete: (id) => {
+      invitationStore.delete(id);
+      return Promise.resolve();
+    },
+  };
 
   const tenants: TenantRepository = {
     create: (tenant) => {
@@ -548,6 +585,8 @@ export function createInMemoryRepositories(): Repositories {
   return {
     tenants,
     memberships,
+    users,
+    invitations,
     files,
     datasets,
     workflowConfigurations,

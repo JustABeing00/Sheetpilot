@@ -34,6 +34,7 @@ import { DatasetService } from './services/dataset-service.js';
 import { DeletionService } from './services/deletion-service.js';
 import { RunDispatcher } from './services/run-dispatcher.js';
 import { TenancyService } from './services/tenancy-service.js';
+import { WorkspaceService } from './services/workspace-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
 import { InboxService } from './services/inbox-service.js';
@@ -73,6 +74,7 @@ export interface AppContainer {
     config: AuthConfig | null;
     tenancy: TenancyService;
   };
+  workspaceService: WorkspaceService;
   /** Resolves the authenticated user + active tenant from the session cookie, or null. */
   authenticate(request: FastifyRequest): Promise<AuthUser | null>;
   /** Resolves when the backing store is reachable; throws otherwise. Used by the readiness probe. */
@@ -262,6 +264,8 @@ export async function createContainer(
     bootstrapTenantName: config.auth.bootstrapTenantName,
   });
 
+  const workspaceService = new WorkspaceService({ repositories, clock, logger });
+
   let authConfig: AuthConfig | null = null;
   if (config.auth.enabled) {
     if (!databaseHandle) {
@@ -288,7 +292,9 @@ export async function createContainer(
     if (!claims) {
       return null;
     }
-    const tenantId = await tenancyService.ensurePersonalTenant(
+    // A pending invitation is accepted the moment the invited person signs in.
+    await workspaceService.acceptPendingInvitations(claims.userId, claims.email);
+    const tenantId = await workspaceService.ensureWorkspace(
       claims.userId,
       claims.name ?? claims.email,
     );
@@ -360,6 +366,7 @@ export async function createContainer(
       config: authConfig,
       tenancy: tenancyService,
     },
+    workspaceService,
     authenticate,
     async readiness() {
       await databaseHandle?.ping();

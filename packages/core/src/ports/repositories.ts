@@ -18,6 +18,7 @@ import type { ReviewResolutionLog } from '../domain/review.js';
 import type { RunSnapshot } from '../domain/run-snapshot.js';
 import type { StoredRuleSet } from '../domain/rules.js';
 import type { DatasetRepository } from './datasets.js';
+import type { InvitationRepository, UserRepository } from './identity.js';
 import type { MembershipRepository, TenantRepository } from './tenancy.js';
 import type { WorkflowConfigurationRepository } from './workflow-configurations.js';
 
@@ -159,6 +160,8 @@ export interface RuleSetRepository {
 export interface Repositories {
   tenants: TenantRepository;
   memberships: MembershipRepository;
+  users: UserRepository;
+  invitations: InvitationRepository;
   files: FileRepository;
   datasets: DatasetRepository;
   workflowConfigurations: WorkflowConfigurationRepository;

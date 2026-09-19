@@ -43,6 +43,12 @@ export class ConflictError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'forbidden', statusCode: 403, details });
+  }
+}
+
 export class PayloadTooLargeError extends AppError {
   constructor(message: string, details?: unknown) {
     super(message, { code: 'payload_too_large', statusCode: 413, details });

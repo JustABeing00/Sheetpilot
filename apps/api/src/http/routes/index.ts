@@ -11,6 +11,7 @@ import { registerRunRoutes } from './runs.js';
 import { registerSavedWorkflowRoutes } from './saved-workflows.js';
 import { registerWorkflowConfigurationRoutes } from './workflow-configurations.js';
 import { registerWorkflowRoutes } from './workflows.js';
+import { registerWorkspaceRoutes } from './workspaces.js';
 
 export function registerRoutes(
   app: FastifyInstance,
@@ -23,6 +24,7 @@ export function registerRoutes(
     readiness: () => container.readiness(),
   });
   registerMetaRoutes(app, container);
+  registerWorkspaceRoutes(app, container);
   registerWorkflowRoutes(app, container);
   registerWorkflowConfigurationRoutes(app, container);
   registerRuleSetRoutes(app, container);

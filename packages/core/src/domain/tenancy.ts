@@ -32,6 +32,18 @@ export const membershipSchema = z.object({
 });
 export type Membership = z.infer<typeof membershipSchema>;
 
+export const invitationSchema = z.object({
+  id: z.string().min(1),
+  tenantId: z.string().min(1),
+  email: z.string().email(),
+  role: membershipRoleSchema,
+  invitedBy: z.string().nullable().default(null),
+  acceptedAt: z.date().nullable().default(null),
+  expiresAt: z.date(),
+  createdAt: z.date(),
+});
+export type Invitation = z.infer<typeof invitationSchema>;
+
 /** Roles that may administer a tenant (invite, remove, rename, delete). */
 export function canManageTenant(role: MembershipRole): boolean {
   return role === 'owner' || role === 'admin';

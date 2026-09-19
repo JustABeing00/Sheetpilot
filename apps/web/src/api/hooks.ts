@@ -24,11 +24,17 @@ import {
   savedWorkflowDetailDtoSchema,
   savedWorkflowListResponseSchema,
   prepareSavedWorkflowRunResponseSchema,
+  invitationDtoSchema,
+  invitationListResponseSchema,
+  workspaceDetailDtoSchema,
+  workspaceDtoSchema,
+  workspaceListResponseSchema,
   workflowConfigurationDtoSchema,
   workflowConfigurationListResponseSchema,
   workflowDetailDtoSchema,
   workflowListResponseSchema,
   type CreateRuleSetRequest,
+  type MembershipRole,
   type CreateRunRequest,
   type CreateWorkflowConfigurationRequest,
   type PrepareSavedWorkflowRunRequest,
@@ -41,7 +47,7 @@ import {
   type ValidateWorkflowConfigurationRequest,
 } from '@sheetpilot/core';
 import { fetchSession, type Session } from './auth.js';
-import { apiGet, apiPost, apiPut, apiUpload } from './client.js';
+import { apiGet, apiPost, apiPut, apiSend, apiUpload } from './client.js';
 
 export const queryKeys = {
   session: ['session'] as const,
@@ -72,6 +78,8 @@ export const queryKeys = {
   ruleSet: (id: string) => ['rule-sets', id] as const,
   savedWorkflows: ['saved-workflows'] as const,
   savedWorkflow: (id: string) => ['saved-workflows', id] as const,
+  workspaces: ['workspaces'] as const,
+  currentWorkspace: ['workspaces', 'current'] as const,
 };
 
 export function useSession() {
@@ -433,6 +441,97 @@ export function useRunSavedWorkflow() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs });
       void queryClient.invalidateQueries({ queryKey: queryKeys.savedWorkflows });
+    },
+  });
+}
+
+export function useWorkspaces(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.workspaces,
+    queryFn: () => apiGet('/api/v1/workspaces', workspaceListResponseSchema),
+    enabled,
+  });
+}
+
+export function useCurrentWorkspace(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.currentWorkspace,
+    queryFn: () => apiGet('/api/v1/workspaces/current', workspaceDetailDtoSchema),
+    enabled,
+  });
+}
+
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiPost('/api/v1/workspaces', { name }, workspaceDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
+    },
+  });
+}
+
+export function useRenameWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      apiPut('/api/v1/workspaces/current', { name }, workspaceDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { membershipId: string; role: MembershipRole }) =>
+      apiSend(`/api/v1/workspaces/current/members/${input.membershipId}`, 'PUT', {
+        role: input.role,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useRemoveMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) =>
+      apiSend(`/api/v1/workspaces/current/members/${membershipId}`, 'DELETE'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useInvitations(enabled: boolean) {
+  return useQuery({
+    queryKey: ['workspaces', 'invitations'],
+    queryFn: () => apiGet('/api/v1/workspaces/current/invitations', invitationListResponseSchema),
+    enabled,
+  });
+}
+
+export function useInviteMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { email: string; role: MembershipRole }) =>
+      apiPost('/api/v1/workspaces/current/invitations', input, invitationDtoSchema),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+  });
+}
+
+export function useRevokeInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      apiSend(`/api/v1/workspaces/current/invitations/${invitationId}`, 'DELETE'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
     },
   });
 }

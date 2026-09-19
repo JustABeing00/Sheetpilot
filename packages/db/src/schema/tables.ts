@@ -368,9 +368,31 @@ export const jobs = pgTable(
   (table) => [index('jobs_status_available_idx').on(table.status, table.availableAt)],
 );
 
+/** Pending email invitations to a workspace; accepted implicitly at sign-in. */
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: text('role').notNull(),
+    invitedBy: text('invited_by'),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'date' }),
+    expiresAt: timestampColumn('expires_at'),
+    createdAt: timestampColumn('created_at'),
+  },
+  (table) => [
+    index('invitations_tenant_idx').on(table.tenantId),
+    index('invitations_email_idx').on(table.email),
+  ],
+);
+
 export const schema = {
   workflows,
   jobs,
+  invitations,
   ruleSets,
   files,
   datasets,
