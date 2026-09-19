@@ -10,7 +10,7 @@ import { createClassificationProvider } from '@sheetpilot/ai';
 import { systemClock, fileAssetSchema, newId } from '@sheetpilot/core';
 import { PRIMARY_CSV, EVENTS_CSV } from './fixtures.js';
 
-function makeHarness() {
+function makeHarness(options: { staleLockMs?: number } = {}) {
   const repositories = createInMemoryRepositories();
   const storage = new InMemoryFileStorage();
   const queue = new InMemoryRunQueue();
@@ -36,7 +36,7 @@ function makeHarness() {
     runService,
     logger,
     pollIntervalMs: 50,
-    staleLockMs: 60_000,
+    staleLockMs: options.staleLockMs ?? 60_000,
     retryDelayMs: 10,
   });
   return { repositories, storage, queue, runService, dispatcher, registry };
@@ -143,6 +143,64 @@ describe('durable run queue', () => {
     const cancelled = await repositories.runs.getById(run.id);
     expect(cancelled?.status).toBe('failed');
     expect(cancelled?.error).toMatch(/cancel/i);
+  });
+
+  it('recovers a run stranded by a crashed worker and finishes it', async () => {
+    const { repositories, storage, queue, runService, dispatcher } = makeHarness({
+      staleLockMs: 0,
+    });
+    const { primary, events } = await seedFiles(repositories);
+    await storage.put('uploads/primary.csv', PRIMARY_CSV);
+    await storage.put('uploads/events.csv', EVENTS_CSV);
+
+    const run = await runService.createRun({
+      workflowSlug: 'account-fault-triage',
+      primaryFileId: primary.id,
+      eventsFileId: events.id,
+      config: {},
+    });
+
+    // A worker claims the job and then dies without completing or failing it.
+    expect((await queue.claim('worker-that-died'))?.runId).toBe(run.id);
+    expect((await repositories.runs.getById(run.id))?.status).toBe('queued');
+
+    // The next process requeues the stale lock and drains it to success.
+    expect(await dispatcher.recoverStale()).toBe(1);
+    await dispatcher.tick();
+    await dispatcher.drain();
+
+    expect((await repositories.runs.getById(run.id))?.status).toBe('succeeded');
+    expect(await queue.depth()).toBe(0);
+  });
+
+  it('leaves queued runs for the next process after a graceful stop', async () => {
+    const { repositories, storage, queue, runService, dispatcher } = makeHarness();
+    const { primary, events } = await seedFiles(repositories);
+    await storage.put('uploads/primary.csv', PRIMARY_CSV);
+    await storage.put('uploads/events.csv', EVENTS_CSV);
+
+    const run = await runService.createRun({
+      workflowSlug: 'account-fault-triage',
+      primaryFileId: primary.id,
+      eventsFileId: events.id,
+      config: {},
+    });
+
+    await dispatcher.stop();
+    expect(await dispatcher.tick()).toBe(0);
+
+    // A fresh dispatcher (the restarted process) picks the run up where it was left.
+    const restarted = new RunDispatcher({
+      queue,
+      runService,
+      logger: CapturingLogger.create(),
+      pollIntervalMs: 50,
+      staleLockMs: 60_000,
+      retryDelayMs: 10,
+    });
+    await restarted.tick();
+    await restarted.drain();
+    expect((await repositories.runs.getById(run.id))?.status).toBe('succeeded');
   });
 
   it('prepareForExecution clears partial results so a retry cannot duplicate them', async () => {

@@ -7,6 +7,7 @@ interface Entry {
   maxAttempts: number;
   status: 'queued' | 'running' | 'done' | 'dead';
   availableAt: number;
+  claimedAt: number | null;
   cancelRequested: boolean;
 }
 
@@ -26,6 +27,7 @@ export class InMemoryRunQueue implements RunQueue {
       maxAttempts,
       status: 'queued',
       availableAt: Date.now(),
+      claimedAt: null,
       cancelRequested: false,
     });
     return Promise.resolve();
@@ -37,6 +39,7 @@ export class InMemoryRunQueue implements RunQueue {
       // A cancelled job is still claimed (once) so the dispatcher can mark its run failed.
       if (entry.status === 'queued' && entry.availableAt <= now) {
         entry.status = 'running';
+        entry.claimedAt = now;
         entry.attempts += 1;
         return Promise.resolve({
           runId: entry.runId,
@@ -52,6 +55,7 @@ export class InMemoryRunQueue implements RunQueue {
     const entry = this.entries.get(runId);
     if (entry) {
       entry.status = 'done';
+      entry.claimedAt = null;
     }
     return Promise.resolve();
   }
@@ -61,6 +65,7 @@ export class InMemoryRunQueue implements RunQueue {
     if (!entry) {
       return Promise.resolve('dead');
     }
+    entry.claimedAt = null;
     if (entry.attempts >= entry.maxAttempts) {
       entry.status = 'dead';
       return Promise.resolve('dead');
@@ -87,8 +92,23 @@ export class InMemoryRunQueue implements RunQueue {
     return Promise.resolve(this.entries.get(runId)?.cancelRequested ?? false);
   }
 
-  recoverStale(_staleMs?: number): Promise<number> {
-    return Promise.resolve(0);
+  /** Mirrors the Postgres queue: a running job whose lock is older than `staleMs` is requeued. */
+  recoverStale(staleMs: number): Promise<number> {
+    const now = Date.now();
+    let recovered = 0;
+    for (const entry of this.entries.values()) {
+      if (
+        entry.status === 'running' &&
+        entry.claimedAt !== null &&
+        entry.claimedAt <= now - staleMs
+      ) {
+        entry.status = 'queued';
+        entry.claimedAt = null;
+        entry.availableAt = now;
+        recovered += 1;
+      }
+    }
+    return Promise.resolve(recovered);
   }
 
   depth(): Promise<number> {
