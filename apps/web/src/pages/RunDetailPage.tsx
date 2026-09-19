@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   useRun,
@@ -49,6 +50,21 @@ export function RunDetailPage() {
   const decisions = useRunDecisions(runId);
   const exportStatus = useRunExport(runId);
   const workflow = useWorkflow(run.data?.workflowSlug);
+
+  // The run-scoped queries are fetched while the run is still queued (the page mounts immediately
+  // after creation), so they must be re-read once the dispatcher has produced the results.
+  const finishedAt = run.data?.finishedAt ?? null;
+  const refetchReviewItems = reviewItems.refetch;
+  const refetchDecisions = decisions.refetch;
+  const refetchArtifacts = artifacts.refetch;
+  useEffect(() => {
+    if (!finishedAt) {
+      return;
+    }
+    void refetchReviewItems();
+    void refetchDecisions();
+    void refetchArtifacts();
+  }, [finishedAt, refetchReviewItems, refetchDecisions, refetchArtifacts]);
 
   if (run.isLoading) {
     return (
