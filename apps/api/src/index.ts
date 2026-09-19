@@ -20,6 +20,14 @@ async function main(): Promise<void> {
     logger.warn({ err: error }, 'initial retention sweep failed');
   }
 
+  if (container.inboxService) {
+    try {
+      await container.inboxService.start();
+    } catch (error) {
+      logger.warn({ err: error }, 'inbox watcher failed to start');
+    }
+  }
+
   if (!config.security.apiKey) {
     logger.warn(
       'API_KEY is not set: the API has no authentication and must only be reachable from a trusted network',

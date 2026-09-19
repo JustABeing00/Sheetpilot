@@ -11,6 +11,18 @@ const DESCRIPTION_HINTS = /desc|fault|comment|note|detail|reason|message|symptom
 const TIMESTAMP_HINTS = /date|time|when|occurred|reported|logged/i;
 const IDENTIFIER_HINTS = /account|entity|customer|policy|member|number|^id$| id|ref|code/i;
 
+/**
+ * Result-column roles are optional: they must only auto-map when the primary file already has a
+ * clearly matching column. Guessing an unrelated column would silently overwrite user data, so a miss
+ * returns null and the workflow adds a new column instead.
+ */
+const OUTPUT_TARGET_HINTS: Record<string, RegExp> = {
+  outputRootCauseColumn: /root\s*cause|^cause$/i,
+  outputFaultCategoryColumn: /fault\s*category|^category$/i,
+  outputRecommendedActionColumn: /recommend|action/i,
+  outputPriorityColumn: /priority/i,
+};
+
 export function datasetLabel(dataset: DatasetSummaryDto): string {
   return `${dataset.originalName} · ${dataset.rowCount.toLocaleString()}${
     dataset.rowCountExact ? '' : '+'
@@ -29,6 +41,12 @@ export function suggestColumnName(
   const populated = columns.filter((column) => column.type !== 'empty');
   const available = populated.filter((column) => !used.has(column.name));
   const fallbackPool = available.length > 0 ? available : populated;
+
+  const outputHint = OUTPUT_TARGET_HINTS[role.key];
+  if (outputHint) {
+    const match = populated.find((column) => outputHint.test(column.name));
+    return match?.name ?? null;
+  }
 
   switch (role.semantic) {
     case 'identifier': {

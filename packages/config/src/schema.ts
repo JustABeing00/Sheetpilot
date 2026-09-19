@@ -68,6 +68,16 @@ export const envSourceSchema = z.object({
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(15_000),
   AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
   AI_EXCLUDED_FIELDS: z.string().default(''),
+  INBOX_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  INBOX_DIR: z.string().default(''),
+  INBOX_CONFIGURATION_ID: z.string().default(''),
+  INBOX_PRIMARY_PATTERN: z.string().min(1).default('primary.*'),
+  INBOX_EVENTS_PATTERN: z.string().min(1).default('events.*'),
+  INBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).max(3_600_000).default(15_000),
+  INBOX_SETTLE_MS: z.coerce.number().int().min(0).max(3_600_000).default(3_000),
 });
 export type EnvSource = z.infer<typeof envSourceSchema>;
 
@@ -115,6 +125,19 @@ export interface AppConfig {
     maxAttempts: number;
     excludedFields: string[];
     configured: boolean;
+  };
+  /**
+   * Optional folder inbox: drop a day's files into a folder and a saved workflow runs automatically.
+   * Each job is a subdirectory holding a primary and an events file.
+   */
+  inbox: {
+    enabled: boolean;
+    dir: string;
+    configurationId: string | null;
+    primaryPattern: string;
+    eventsPattern: string;
+    pollIntervalMs: number;
+    settleMs: number;
   };
 }
 
@@ -171,6 +194,20 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     });
   }
 
+  if (source.INBOX_ENABLED) {
+    if (source.INBOX_DIR.trim().length === 0) {
+      throw new ConfigurationError('INBOX_DIR is required when INBOX_ENABLED=true', {
+        variable: 'INBOX_DIR',
+      });
+    }
+    if (source.INBOX_CONFIGURATION_ID.trim().length === 0) {
+      throw new ConfigurationError(
+        'INBOX_CONFIGURATION_ID is required when INBOX_ENABLED=true (the saved workflow to run)',
+        { variable: 'INBOX_CONFIGURATION_ID' },
+      );
+    }
+  }
+
   const corsOrigins = source.CORS_ORIGIN.split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
@@ -221,6 +258,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         .map((field) => field.trim())
         .filter((field) => field.length > 0),
       configured: source.AI_PROVIDER === 'openai' && source.OPENAI_API_KEY.trim().length > 0,
+    },
+    inbox: {
+      enabled: source.INBOX_ENABLED,
+      dir: source.INBOX_DIR.trim(),
+      configurationId:
+        source.INBOX_CONFIGURATION_ID.trim().length > 0
+          ? source.INBOX_CONFIGURATION_ID.trim()
+          : null,
+      primaryPattern: source.INBOX_PRIMARY_PATTERN,
+      eventsPattern: source.INBOX_EVENTS_PATTERN,
+      pollIntervalMs: source.INBOX_POLL_INTERVAL_MS,
+      settleMs: source.INBOX_SETTLE_MS,
     },
   };
 }

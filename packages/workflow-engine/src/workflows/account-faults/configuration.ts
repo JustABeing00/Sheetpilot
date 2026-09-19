@@ -11,6 +11,10 @@ const COLUMN_CONFIG_KEYS = new Set([
   'eventsAccountColumn',
   'eventsTimestampColumn',
   'eventsDescriptionColumn',
+  'outputRootCauseColumn',
+  'outputFaultCategoryColumn',
+  'outputRecommendedActionColumn',
+  'outputPriorityColumn',
 ]);
 
 /**
@@ -63,6 +67,50 @@ export const ACCOUNT_FAULT_CONFIGURATION_DEFINITION: WorkflowConfigurationDefini
       required: false,
       multiple: true,
       configKey: 'primaryOutputColumns',
+    },
+    {
+      key: 'outputRootCauseColumn',
+      label: 'Result column: root cause',
+      description:
+        'Primary-file column that should receive the root cause. Leave unmapped to add a new "RootCause" column.',
+      datasetRole: 'primary',
+      semantic: 'any',
+      required: false,
+      multiple: false,
+      configKey: 'outputRootCauseColumn',
+    },
+    {
+      key: 'outputFaultCategoryColumn',
+      label: 'Result column: fault category',
+      description:
+        'Primary-file column that should receive the fault category. Leave unmapped to add a new "FaultCategory" column.',
+      datasetRole: 'primary',
+      semantic: 'any',
+      required: false,
+      multiple: false,
+      configKey: 'outputFaultCategoryColumn',
+    },
+    {
+      key: 'outputRecommendedActionColumn',
+      label: 'Result column: recommended action',
+      description:
+        'Primary-file column that should receive the recommended action. Leave unmapped to add a new "RecommendedAction" column.',
+      datasetRole: 'primary',
+      semantic: 'any',
+      required: false,
+      multiple: false,
+      configKey: 'outputRecommendedActionColumn',
+    },
+    {
+      key: 'outputPriorityColumn',
+      label: 'Result column: priority',
+      description:
+        'Primary-file column that should receive the priority. Leave unmapped to add a new "Priority" column.',
+      datasetRole: 'primary',
+      semantic: 'any',
+      required: false,
+      multiple: false,
+      configKey: 'outputPriorityColumn',
     },
     {
       key: 'eventsEntityKey',
@@ -148,6 +196,23 @@ export function resolveAccountFaultRunInput(input: {
     eventsDescriptionColumn: columnForRole('eventsDescription'),
     primaryOutputColumns: outputColumns,
   };
+
+  // Optional result-column mappings. Only set when the user actually mapped one, so the resolved
+  // config stays compatible with the flat string/number/boolean run-config contract and defaults to
+  // the canonical column names when omitted.
+  const outputColumnRoles = [
+    'outputRootCauseColumn',
+    'outputFaultCategoryColumn',
+    'outputRecommendedActionColumn',
+    'outputPriorityColumn',
+  ] as const;
+  for (const role of outputColumnRoles) {
+    const mapping = configuration.mappings.find((entry) => entry.role === role);
+    if (mapping) {
+      config[role] = mapping.column;
+    }
+  }
+
   for (const [key, value] of Object.entries(configuration.options)) {
     if (value !== undefined && value !== null) {
       config[key] = value;

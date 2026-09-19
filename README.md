@@ -90,6 +90,37 @@ npm run dev:api                        # terminal 1
 npm run smoke                          # terminal 2: uploads samples, runs the workflow, checks artifacts
 ```
 
+### Drop a file in a folder (no UI)
+
+Set `INBOX_ENABLED=true`, point `INBOX_DIR` at a folder, and set `INBOX_CONFIGURATION_ID` to a saved
+workflow's id (copy it from `/saved-workflows/<id>`). For each day, create a subfolder containing the
+two files and the API runs the workflow automatically:
+
+```
+inbox/
+  2026-09-19/
+    primary.xlsx     # matched by INBOX_PRIMARY_PATTERN (default primary.*)
+    events.xlsx      # matched by INBOX_EVENTS_PATTERN  (default events.*)
+```
+
+The watcher waits until each file stops changing (`INBOX_SETTLE_MS`), ingests it, carries the saved
+column mapping onto the new files by name, runs the workflow, and moves the folder to
+`inbox/_processed/` (or `inbox/_failed/`) so a job is never run twice. Exceptions then wait in the
+Review queue exactly as with a manual run.
+
+### Result columns and the fault summary
+
+The account-fault workflow writes four business results. If your primary file already has its own
+columns, map them in **Setup** under the four "Result column" roles, and the results are written into
+your existing columns instead of new `RootCause`/`FaultCategory`/`RecommendedAction`/`Priority` ones.
+The record identifier column is always kept in the output, so a human review decision can always be
+written back into the generated file.
+
+For accounts with several faults, the latest fault drives classification, and `__FaultSummary`
+combines every distinct fault description (oldest first, ` | `-separated) into one column. The same
+value is exposed to rules as `combinedDescription`, so a rule can match against the whole history.
+
+
 ## Commands
 
 | Command | Purpose |
@@ -132,6 +163,11 @@ Never commit a real `.env` file — `.gitignore` excludes it.
 | `AI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint (point at a gateway/local model) |
 | `AI_TIMEOUT_MS` / `AI_MAX_ATTEMPTS` | `15000` / `2` | Per-request deadline and bounded retries (retryable failures only) |
 | `AI_EXCLUDED_FIELDS` | – | Comma-separated field names that must never be sent to a provider |
+| `INBOX_ENABLED` | `false` | Watch a folder and auto-run a saved workflow on dropped files |
+| `INBOX_DIR` | – | Required when `INBOX_ENABLED=true`; each job is a subdirectory with a primary and events file |
+| `INBOX_CONFIGURATION_ID` | – | Required when `INBOX_ENABLED=true`; the saved workflow to run |
+| `INBOX_PRIMARY_PATTERN` / `INBOX_EVENTS_PATTERN` | `primary.*` / `events.*` | File-name patterns per dataset role |
+| `INBOX_POLL_INTERVAL_MS` / `INBOX_SETTLE_MS` | `15000` / `3000` | Scan cadence and how long a file must stop changing before it is read |
 
 ## Database
 

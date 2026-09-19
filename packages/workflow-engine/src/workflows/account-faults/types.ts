@@ -25,6 +25,15 @@ export const accountFaultConfigSchema = z
     eventsTimestampColumn: z.string().min(1).default('Fault Date'),
     eventsDescriptionColumn: z.string().min(1).default('Fault Description'),
     primaryOutputColumns: z.array(z.string()).default([]),
+    /**
+     * Physical column in the generated output that receives each business result. Defaults keep the
+     * canonical names; a user whose primary file already has its own target columns maps them here so
+     * the results are written into the columns they already use instead of new ones.
+     */
+    outputRootCauseColumn: z.string().min(1).default('RootCause'),
+    outputFaultCategoryColumn: z.string().min(1).default('FaultCategory'),
+    outputRecommendedActionColumn: z.string().min(1).default('RecommendedAction'),
+    outputPriorityColumn: z.string().min(1).default('Priority'),
     reviewBelowConfidence: z.number().min(0).max(1).default(0.8),
     aiMinConfidence: z.number().min(0).max(1).default(0.85),
     aiAutoApprove: z.boolean().default(false),
@@ -132,6 +141,7 @@ export const ACCOUNT_FAULT_BUSINESS_COLUMNS = [
 export const ACCOUNT_FAULT_SYSTEM_COLUMNS = [
   '__FaultCount',
   '__LatestFaultAt',
+  '__FaultSummary',
   '__MatchedRules',
   '__DecisionSource',
   '__DecisionConfidence',
@@ -188,6 +198,8 @@ export interface EntityDecision {
   account: string;
   faultCount: number;
   latestFault: { rowIndex: number; occurredAt: string | null; description: string } | null;
+  /** Every distinct fault description for the account, oldest first, joined by " | ". */
+  combinedDescription: string;
   earlierFaults: EarlierFaultEvidence[];
   matchedRuleIds: string[];
   matchedTerm: string | null;

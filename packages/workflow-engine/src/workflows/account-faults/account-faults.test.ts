@@ -165,6 +165,7 @@ describe('account fault triage workflow', () => {
       'Priority',
       '__FaultCount',
       '__LatestFaultAt',
+      '__FaultSummary',
       '__MatchedRules',
       '__DecisionSource',
       '__DecisionConfidence',
@@ -215,6 +216,37 @@ describe('account fault triage workflow', () => {
     expect(harborPoint?.['RootCause']).toBe('Battery Degraded');
     expect(harborPoint?.['__LatestFaultAt']).toBe('2026-03-02T10:30:00.000Z');
     expect(harborPoint?.['__FaultCount']).toBe(2);
+  });
+
+  it('combines every fault description into a single, deterministic summary', async () => {
+    const { execution } = await runWorkflow();
+    const [harborPoint] = rowsFor(execution, '1002');
+
+    expect(harborPoint?.['__FaultSummary']).toBe(
+      'Sensor fault on channel 2 | Battery low warning repeated',
+    );
+  });
+
+  it('writes results into user-mapped columns instead of new ones', async () => {
+    const { execution } = await runWorkflow({
+      config: { outputFaultCategoryColumn: 'Fault Category' },
+    });
+    const state = execution.state!;
+    const [northRidge] = rowsFor(execution, '1001');
+
+    expect(state.outputColumns).toContain('Fault Category');
+    expect(northRidge?.['Fault Category']).toBe('Power');
+    expect(northRidge?.['RootCause']).toBe('Power Loss');
+  });
+
+  it('always keeps the identifier column even when it is excluded from the result columns', async () => {
+    const { execution } = await runWorkflow({ config: { primaryOutputColumns: ['Site Name'] } });
+    const state = execution.state!;
+    const [northRidge] = rowsFor(execution, '1001');
+
+    expect(state.outputColumns[0]).toBe('Account Number');
+    expect(state.outputColumns).toContain('Site Name');
+    expect(northRidge?.['Account Number']).toBe('1001');
   });
 
   it('auto-approves accounts with multiple consistent faults', async () => {

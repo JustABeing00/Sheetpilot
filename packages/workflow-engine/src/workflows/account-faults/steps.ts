@@ -35,6 +35,7 @@ import {
   REVIEW_REASON_LABELS,
   REVIEW_REASON_ORDER,
   REVIEW_REASON_SEVERITY,
+  type AccountFaultConfig,
   type AccountFaultState,
   type AccountGroup,
   type EarlierFaultEvidence,
@@ -47,6 +48,24 @@ export interface AccountFaultDeps {
   files: FileRepository;
   storage: FileStorage;
   ai: AiClassificationService;
+}
+
+/** Which configuration key holds the physical output column for each canonical business result. */
+const BUSINESS_OUTPUT_CONFIG_KEYS = {
+  RootCause: 'outputRootCauseColumn',
+  FaultCategory: 'outputFaultCategoryColumn',
+  RecommendedAction: 'outputRecommendedActionColumn',
+  Priority: 'outputPriorityColumn',
+} as const;
+
+/** Canonical business result → the real column it is written to (user-mapped, else canonical). */
+export function businessOutputTargets(
+  config: AccountFaultConfig,
+): Array<{ canonical: string; target: string }> {
+  return ACCOUNT_FAULT_BUSINESS_COLUMNS.map((canonical) => ({
+    canonical,
+    target: config[BUSINESS_OUTPUT_CONFIG_KEYS[canonical]],
+  }));
 }
 
 const SEVERITY_RANK: Record<ReviewSeverity, number> = { info: 0, warning: 1, critical: 2 };
@@ -256,15 +275,41 @@ function eventContextFields(
   };
 }
 
+/**
+ * Combines every distinct fault description for an account into one deterministic, human-readable
+ * string (oldest first). This is the "summarise the history" capability: it is exposed to rules as
+ * `combinedDescription` and emitted as the `__FaultSummary` output column, so an account with several
+ * faults still carries its full context even though classification uses the latest fault.
+ */
+export function combineDescriptions(events: EventRecord[]): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const event of [...events].reverse()) {
+    const description = normalizeText(event.description);
+    if (description.length === 0) {
+      continue;
+    }
+    const key = description.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    parts.push(description);
+  }
+  return parts.join(' | ');
+}
+
 export function buildRuleContext(
   account: string,
   latest: EventRecord,
   faultCount: number,
   history: EventRecord[] = [],
 ): Record<string, unknown> {
+  const events = history.length > 0 ? history : [latest];
   return {
     ...eventContextFields(account, latest, faultCount),
-    events: history.map((event) => eventContextFields(account, event, faultCount)),
+    combinedDescription: combineDescriptions(events),
+    events: events.map((event) => eventContextFields(account, event, faultCount)),
   };
 }
 
@@ -477,6 +522,7 @@ export function createClassifyStep(deps: AccountFaultDeps): StepDefinition<Accou
                 description: latest.description,
               }
             : null,
+          combinedDescription: combineDescriptions(sorted),
           earlierFaults,
           matchedRuleIds: evaluation.matchedRuleIds,
           matchedTerm,
@@ -525,6 +571,7 @@ function buildEvidence(decision: EntityDecision): Record<string, unknown> {
   return {
     faultCount: decision.faultCount,
     latestFault: decision.latestFault,
+    combinedDescription: decision.combinedDescription,
     earlierFaults: decision.earlierFaults,
     matchedRuleIds: decision.matchedRuleIds,
     matchedTerm: decision.matchedTerm,
@@ -623,15 +670,26 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
     id: 'build-output',
     name: 'Build output rows and review queue',
     run: (_ctx, state) => {
-      const selectedPrimaryColumns =
-        state.config.primaryOutputColumns.length > 0
-          ? state.primaryColumns.filter((column) =>
-              state.config.primaryOutputColumns.includes(column),
-            )
+      const requestedPrimaryColumns = state.config.primaryOutputColumns;
+      const requested =
+        requestedPrimaryColumns.length > 0
+          ? state.primaryColumns.filter((column) => requestedPrimaryColumns.includes(column))
           : state.primaryColumns;
-      const businessColumns = ACCOUNT_FAULT_BUSINESS_COLUMNS.filter(
-        (column) => !selectedPrimaryColumns.includes(column),
-      );
+      // The record key must always be present: it identifies the row in the report and lets a human
+      // review decision be written back into the generated artifact after the run.
+      const selectedPrimaryColumns =
+        requested.includes(state.config.primaryAccountColumn) ||
+        !state.primaryColumns.includes(state.config.primaryAccountColumn)
+          ? requested
+          : state.primaryColumns.filter(
+              (column) =>
+                column === state.config.primaryAccountColumn || requested.includes(column),
+            );
+
+      const targets = businessOutputTargets(state.config);
+      const businessColumns = targets
+        .map((target) => target.target)
+        .filter((column) => !selectedPrimaryColumns.includes(column));
       const systemColumns = state.config.includeSystemColumns
         ? [...ACCOUNT_FAULT_SYSTEM_COLUMNS]
         : [];
@@ -654,14 +712,15 @@ export function createBuildOutputStep(): StepDefinition<AccountFaultState> {
 
         for (const primary of group.primaries) {
           const row: Row = { ...primary.row };
-          for (const column of ACCOUNT_FAULT_BUSINESS_COLUMNS) {
+          for (const { canonical, target } of targets) {
             // Missing output values are written as true blanks (an empty cell), never as the string
             // "undefined", an empty string or a coerced 0.
-            row[column] = decision.outputValues[column] ?? null;
+            row[target] = decision.outputValues[canonical] ?? null;
           }
           if (state.config.includeSystemColumns) {
             row['__FaultCount'] = decision.faultCount;
             row['__LatestFaultAt'] = decision.latestFault?.occurredAt ?? null;
+            row['__FaultSummary'] = decision.combinedDescription;
             row['__MatchedRules'] = decision.matchedRuleIds.join(', ');
             row['__DecisionSource'] = decision.decisionSource;
             row['__DecisionConfidence'] = Number(decision.confidence.toFixed(2));

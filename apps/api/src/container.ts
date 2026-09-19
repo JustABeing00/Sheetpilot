@@ -20,6 +20,7 @@ import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
+import { InboxService } from './services/inbox-service.js';
 import { RetentionService } from './services/retention-service.js';
 import { ReviewService } from './services/review-service.js';
 import { RuleSetService } from './services/rule-set-service.js';
@@ -46,6 +47,7 @@ export interface AppContainer {
   exportService: ExportService;
   savedWorkflowService: SavedWorkflowService;
   retentionService: RetentionService;
+  inboxService: InboxService | null;
   idempotency: IdempotencyService;
   close(): Promise<void>;
 }
@@ -203,6 +205,23 @@ export async function createContainer(
     exportService,
   });
 
+  const inboxService =
+    config.inbox.enabled && config.inbox.configurationId
+      ? new InboxService({
+          dir: path.resolve(config.inbox.dir),
+          configurationId: config.inbox.configurationId,
+          primaryPattern: config.inbox.primaryPattern,
+          eventsPattern: config.inbox.eventsPattern,
+          pollIntervalMs: config.inbox.pollIntervalMs,
+          settleMs: config.inbox.settleMs,
+          datasetService,
+          savedWorkflowService,
+          repositories,
+          clock,
+          logger,
+        })
+      : null;
+
   return {
     config,
     logger,
@@ -220,9 +239,11 @@ export async function createContainer(
     exportService,
     savedWorkflowService,
     retentionService,
+    inboxService,
     idempotency,
     async close() {
       retentionService.stop();
+      inboxService?.stop();
       await databaseHandle?.close();
     },
   };

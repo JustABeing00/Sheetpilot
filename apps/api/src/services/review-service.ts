@@ -38,6 +38,32 @@ export interface ReviewServiceDeps {
   logger: Logger;
 }
 
+/** Canonical business result → the run-config key that holds its physical output column. */
+const BUSINESS_OUTPUT_CONFIG_KEYS: Record<string, string> = {
+  RootCause: 'outputRootCauseColumn',
+  FaultCategory: 'outputFaultCategoryColumn',
+  RecommendedAction: 'outputRecommendedActionColumn',
+  Priority: 'outputPriorityColumn',
+};
+
+/**
+ * Translates canonical decision values (RootCause, …) into the real column names the generated
+ * artifact uses. When a saved workflow maps a business result onto an existing primary-file column,
+ * the artifact has that column, not the canonical name.
+ */
+function toArtifactValues(
+  config: Record<string, unknown>,
+  values: Record<string, OutputValue>,
+): Record<string, OutputValue> {
+  const mapped: Record<string, OutputValue> = {};
+  for (const [field, value] of Object.entries(values)) {
+    const configKey = BUSINESS_OUTPUT_CONFIG_KEYS[field];
+    const target = configKey ? config[configKey] : undefined;
+    mapped[typeof target === 'string' && target.length > 0 ? target : field] = value;
+  }
+  return mapped;
+}
+
 export class ReviewService {
   constructor(private readonly deps: ReviewServiceDeps) {}
 
@@ -176,8 +202,9 @@ export class ReviewService {
       (artifact) => artifact.kind === 'output_csv' || artifact.kind === 'output_xlsx',
     );
 
+    const artifactValues = toArtifactValues(run.config, values);
     for (const artifact of outputs) {
-      await this.patchArtifact(artifact, accountColumn, entityKey, values, stateLabel);
+      await this.patchArtifact(artifact, accountColumn, entityKey, artifactValues, stateLabel);
     }
   }
 
@@ -211,6 +238,10 @@ export class ReviewService {
     });
 
     if (!patched) {
+      this.deps.logger.warn(
+        { artifactId: artifact.id, entityKey, accountColumn },
+        'review decision could not be written back: the output artifact has no row for the mapped account column',
+      );
       return;
     }
 
