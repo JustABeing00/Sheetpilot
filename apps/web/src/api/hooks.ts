@@ -471,6 +471,18 @@ export function useCreateWorkspace() {
   });
 }
 
+export function useActivateWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      apiSend(`/api/v1/workspaces/${workspaceId}/activate`, 'POST'),
+    onSuccess: () => {
+      // Every cached query is scoped to the active workspace, so none of it may survive a switch.
+      void queryClient.resetQueries();
+    },
+  });
+}
+
 export function useRenameWorkspace() {
   const queryClient = useQueryClient();
   return useMutation({

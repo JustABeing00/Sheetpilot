@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { signOut } from '../api/auth.js';
 import { useHealth, useMeta, useReviewQueue, useSession } from '../api/hooks.js';
 import { useScrollReveal } from '../lib/useScrollReveal.js';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 
 const navigation = [
   { to: '/dashboard', label: 'Dashboard', end: true },
@@ -28,6 +29,9 @@ export function AppShell() {
   const online = health.isSuccess;
   const authEnabled = meta.data?.capabilities.authEnabled === true;
   const user = session.data?.user ?? null;
+  const navigationItems = authEnabled
+    ? [...navigation, { to: '/workspace', label: 'Workspace' }]
+    : navigation;
 
   useScrollReveal(pathname);
 
@@ -54,8 +58,10 @@ export function AppShell() {
           </span>
         </Link>
 
+        <WorkspaceSwitcher />
+
         <nav className="sidebar-nav" aria-label="Primary">
-          {navigation.map((item) => (
+          {navigationItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

@@ -3677,3 +3677,94 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* =========================================================================
+   Workspace management
+   ========================================================================= */
+
+.workspace-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-switcher .field-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+}
+
+.workspace-manage-link {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.workspace-manage-link:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.workspace-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.workspace-form-row .field {
+  flex: 1 1 260px;
+}
+
+.workspace-form-row .button {
+  flex: 0 0 auto;
+}
+
+.member-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.member-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.member-role {
+  min-width: 110px;
+  width: auto;
+}
+
+.invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.invite-form .field {
+  flex: 1 1 240px;
+}
+
+.invite-form .invite-role {
+  flex: 0 1 150px;
+}
+
+.invite-form .button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .workspace-switcher {
+    flex: 0 0 auto;
+    min-width: 160px;
+  }
+
+  .workspace-manage-link {
+    display: none;
+  }
+}

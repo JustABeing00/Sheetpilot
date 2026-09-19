@@ -118,6 +118,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: 'workspace',
+        element: page(() =>
+          import('../pages/WorkspaceSettingsPage.js').then((m) => ({
+            default: m.WorkspaceSettingsPage,
+          })),
+        ),
+      },
+      {
         path: 'workflows',
         element: page(() =>
           import('../pages/WorkflowsPage.js').then((m) => ({ default: m.WorkflowsPage })),

@@ -114,7 +114,7 @@ export async function apiUpload<T>(path: string, form: FormData, schema: ZodType
 /** Sends a request whose response body is not needed (204-style actions). */
 export async function apiSend(
   path: string,
-  method: 'PUT' | 'DELETE',
+  method: 'PUT' | 'POST' | 'DELETE',
   body?: unknown,
 ): Promise<void> {
   const response = await fetch(`${baseUrl}${path}`, {
