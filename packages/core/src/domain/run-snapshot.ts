@@ -16,6 +16,7 @@ export type RunSnapshotId = z.infer<typeof runSnapshotIdSchema>;
  */
 export const runSnapshotSchema = z.object({
   id: runSnapshotIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   runId: z.string().min(1),
   workflowSlug: z.string().min(1),
   workflowVersion: z.number().int().positive(),

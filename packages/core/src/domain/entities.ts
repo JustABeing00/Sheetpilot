@@ -74,6 +74,7 @@ export type Workflow = z.infer<typeof workflowSchema>;
 
 export const fileAssetSchema = z.object({
   id: fileIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   kind: fileKindSchema,
   originalName: z.string().min(1),
   format: tabularFormatSchema,
@@ -89,6 +90,7 @@ export type FileAsset = z.infer<typeof fileAssetSchema>;
 
 export const workflowRunSchema = z.object({
   id: runIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   workflowId: workflowIdSchema,
   workflowSlug: z.string().min(1),
   workflowVersion: z.number().int().positive(),
@@ -107,6 +109,7 @@ export type WorkflowRun = z.infer<typeof workflowRunSchema>;
 
 export const stepRunSchema = z.object({
   id: stepRunIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   runId: runIdSchema,
   stepId: z.string().min(1),
   name: z.string().min(1),
@@ -122,6 +125,7 @@ export type StepRun = z.infer<typeof stepRunSchema>;
 
 export const decisionRecordSchema = z.object({
   id: decisionIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   runId: runIdSchema,
   entityKey: z.string().min(1),
   matchedRuleIds: z.array(z.string()).default([]),
@@ -145,6 +149,7 @@ export type ReviewResolution = z.infer<typeof reviewResolutionSchema>;
 
 export const reviewItemSchema = z.object({
   id: reviewItemIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   runId: runIdSchema,
   entityKey: z.string().min(1),
   reason: reviewReasonSchema,
@@ -162,6 +167,7 @@ export type ReviewItem = z.infer<typeof reviewItemSchema>;
 
 export const artifactSchema = z.object({
   id: artifactIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   runId: runIdSchema,
   kind: artifactKindSchema,
   format: tabularFormatSchema,

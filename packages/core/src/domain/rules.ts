@@ -99,6 +99,7 @@ export type RuleSet = z.infer<typeof ruleSetSchema>;
 
 export const storedRuleSetSchema = ruleSetSchema.extend({
   id: z.string().min(1),
+  tenantId: z.string().min(1).nullable().default(null),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

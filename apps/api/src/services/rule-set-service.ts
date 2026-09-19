@@ -31,22 +31,25 @@ export interface RuleSetServiceDeps {
 export class RuleSetService {
   constructor(private readonly deps: RuleSetServiceDeps) {}
 
-  async list(workflowSlug?: string): Promise<StoredRuleSet[]> {
+  async list(workflowSlug?: string, tenantId: string | null = null): Promise<StoredRuleSet[]> {
     return workflowSlug
-      ? this.deps.repositories.ruleSets.listByWorkflowSlug(workflowSlug)
-      : this.deps.repositories.ruleSets.list();
+      ? this.deps.repositories.ruleSets.listByWorkflowSlug(workflowSlug, tenantId)
+      : this.deps.repositories.ruleSets.list(tenantId);
   }
 
-  async getById(id: string): Promise<StoredRuleSet> {
+  async getById(id: string, tenantId: string | null = null): Promise<StoredRuleSet> {
     const ruleSet = await this.deps.repositories.ruleSets.getById(id);
-    if (!ruleSet) {
+    if (!ruleSet || (tenantId != null && ruleSet.tenantId !== tenantId)) {
       throw new NotFoundError('Rule set', id);
     }
     return ruleSet;
   }
 
-  async getActiveForWorkflow(workflowSlug: string): Promise<StoredRuleSet | null> {
-    return this.deps.repositories.ruleSets.getActiveByWorkflowSlug(workflowSlug);
+  async getActiveForWorkflow(
+    workflowSlug: string,
+    tenantId: string | null = null,
+  ): Promise<StoredRuleSet | null> {
+    return this.deps.repositories.ruleSets.getActiveByWorkflowSlug(workflowSlug, tenantId);
   }
 
   validate(input: ValidateRuleSetRequest): Promise<RuleSetValidationResponse> {
@@ -55,7 +58,10 @@ export class RuleSetService {
     return Promise.resolve({ valid: !hasErrors(issues), issues });
   }
 
-  async create(input: CreateRuleSetRequest): Promise<StoredRuleSet> {
+  async create(
+    input: CreateRuleSetRequest,
+    tenantId: string | null = null,
+  ): Promise<StoredRuleSet> {
     const workflow = this.deps.registry.require(input.workflowSlug);
     const issues = validateRuleSet({ rules: input.rules });
     this.assertValid(issues);
@@ -63,6 +69,7 @@ export class RuleSetService {
     const now = this.deps.clock.now();
     const ruleSet = storedRuleSetSchema.parse({
       id: newId(),
+      tenantId,
       slug: `${workflow.slug}-custom`,
       workflowSlug: workflow.slug,
       name: input.name,
@@ -74,7 +81,7 @@ export class RuleSetService {
     });
 
     if (ruleSet.active) {
-      await this.deactivateOthers(ruleSet.workflowSlug, ruleSet.id);
+      await this.deactivateOthers(ruleSet.workflowSlug, ruleSet.id, tenantId);
     }
     const saved = await this.deps.repositories.ruleSets.upsert(ruleSet);
     this.deps.logger.info(
@@ -84,8 +91,12 @@ export class RuleSetService {
     return saved;
   }
 
-  async update(id: string, input: UpdateRuleSetRequest): Promise<StoredRuleSet> {
-    const existing = await this.getById(id);
+  async update(
+    id: string,
+    input: UpdateRuleSetRequest,
+    tenantId: string | null = null,
+  ): Promise<StoredRuleSet> {
+    const existing = await this.getById(id, tenantId);
     const rules = input.rules ?? existing.rules;
     const issues = validateRuleSet({ rules });
     this.assertValid(issues);
@@ -101,7 +112,7 @@ export class RuleSetService {
     });
 
     if (updated.active) {
-      await this.deactivateOthers(updated.workflowSlug, updated.id);
+      await this.deactivateOthers(updated.workflowSlug, updated.id, tenantId);
     }
     const saved = await this.deps.repositories.ruleSets.upsert(updated);
     this.deps.logger.info(
@@ -120,8 +131,15 @@ export class RuleSetService {
     }
   }
 
-  private async deactivateOthers(workflowSlug: string, keepId: string): Promise<void> {
-    const siblings = await this.deps.repositories.ruleSets.listByWorkflowSlug(workflowSlug);
+  private async deactivateOthers(
+    workflowSlug: string,
+    keepId: string,
+    tenantId: string | null,
+  ): Promise<void> {
+    const siblings = await this.deps.repositories.ruleSets.listByWorkflowSlug(
+      workflowSlug,
+      tenantId,
+    );
     for (const sibling of siblings) {
       if (sibling.id !== keepId && sibling.active) {
         await this.deps.repositories.ruleSets.upsert({

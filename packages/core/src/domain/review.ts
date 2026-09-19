@@ -178,6 +178,7 @@ export type ReviewEvent = z.infer<typeof reviewEventSchema>;
  */
 export const reviewResolutionLogSchema = z.object({
   id: z.string().min(1),
+  tenantId: z.string().min(1).nullable().default(null),
   reviewItemId: z.string().min(1),
   runId: z.string().min(1),
   entityKey: z.string().min(1),

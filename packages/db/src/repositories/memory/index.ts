@@ -64,10 +64,19 @@ const CONFLICT_REASONS = new Set([
 const LOW_CONFIDENCE_REASONS = new Set(['low_confidence', 'ai_low_confidence']);
 
 function matchesReviewOptions(
-  item: { runId: string; status: string; reason: string; severity: string },
+  item: {
+    runId: string;
+    status: string;
+    reason: string;
+    severity: string;
+    tenantId: string | null;
+  },
   options?: ReviewListOptions,
 ): boolean {
   const statuses = options?.statuses ?? (options?.status ? [options.status] : undefined);
+  if (options?.tenantId != null && item.tenantId !== options.tenantId) {
+    return false;
+  }
   if (options?.runId !== undefined && item.runId !== options.runId) {
     return false;
   }
@@ -218,13 +227,17 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(asset);
     },
     getById: (id) => Promise.resolve(fileStore.get(id) ?? null),
-    list: (limit) =>
-      Promise.resolve(
+    list: (options) => {
+      const filtered = [...fileStore.values()].filter(
+        (asset) => options?.tenantId == null || asset.tenantId === options.tenantId,
+      );
+      return Promise.resolve(
         paginate(
-          byDateDesc([...fileStore.values()], (asset) => asset.uploadedAt),
-          { limit },
+          byDateDesc(filtered, (asset) => asset.uploadedAt),
+          { limit: options?.limit },
         ),
-      ),
+      );
+    },
   };
 
   const datasets: DatasetRepository = {
@@ -233,13 +246,17 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(dataset);
     },
     getById: (id) => Promise.resolve(datasetStore.get(id) ?? null),
-    list: (options?: DatasetListOptions) =>
-      Promise.resolve(
+    list: (options?: DatasetListOptions) => {
+      const filtered = [...datasetStore.values()].filter(
+        (dataset) => options?.tenantId == null || dataset.tenantId === options.tenantId,
+      );
+      return Promise.resolve(
         paginate(
-          byDateDesc([...datasetStore.values()], (dataset) => dataset.inspectedAt),
+          byDateDesc(filtered, (dataset) => dataset.inspectedAt),
           options,
         ),
-      ),
+      );
+    },
   };
 
   const workflowConfigurations: WorkflowConfigurationRepository = {
@@ -255,8 +272,9 @@ export function createInMemoryRepositories(): Repositories {
     list: (options?: WorkflowConfigurationListOptions) => {
       const filtered = [...configurationStore.values()].filter(
         (configuration) =>
-          options?.workflowSlug === undefined ||
-          configuration.workflowSlug === options.workflowSlug,
+          (options?.workflowSlug === undefined ||
+            configuration.workflowSlug === options.workflowSlug) &&
+          (options?.tenantId == null || configuration.tenantId === options.tenantId),
       );
       return Promise.resolve(
         paginate(
@@ -292,7 +310,9 @@ export function createInMemoryRepositories(): Repositories {
     getById: (id) => Promise.resolve(runStore.get(id) ?? null),
     list: (options?: RunListOptions) => {
       const filtered = [...runStore.values()].filter(
-        (run) => options?.status === undefined || run.status === options.status,
+        (run) =>
+          (options?.status === undefined || run.status === options.status) &&
+          (options?.tenantId == null || run.tenantId === options.tenantId),
       );
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
@@ -371,8 +391,12 @@ export function createInMemoryRepositories(): Repositories {
       );
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
-    countOpen: () =>
-      Promise.resolve([...reviewStore.values()].filter((item) => item.status === 'open').length),
+    countOpen: (tenantId) =>
+      Promise.resolve(
+        [...reviewStore.values()].filter(
+          (item) => item.status === 'open' && (tenantId == null || item.tenantId === tenantId),
+        ).length,
+      ),
     countByRun: (runId) =>
       Promise.resolve([...reviewStore.values()].filter((item) => item.runId === runId).length),
     countOpenByRun: (runId) =>
@@ -380,7 +404,14 @@ export function createInMemoryRepositories(): Repositories {
         [...reviewStore.values()].filter((item) => item.runId === runId && item.status === 'open')
           .length,
       ),
-    counts: () => Promise.resolve(reviewCounts([...reviewStore.values()])),
+    counts: (tenantId) =>
+      Promise.resolve(
+        reviewCounts(
+          [...reviewStore.values()].filter(
+            (item) => tenantId == null || item.tenantId === tenantId,
+          ),
+        ),
+      ),
   };
 
   const reviewResolutions: ReviewResolutionRepository = {
@@ -427,21 +458,35 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(ruleSet);
     },
     getById: (id) => Promise.resolve(ruleSetStore.get(id) ?? null),
-    getActiveByWorkflowSlug: (workflowSlug) =>
+    getActiveByWorkflowSlug: (workflowSlug, tenantId) =>
       Promise.resolve(
         [...ruleSetStore.values()].find(
-          (ruleSet) => ruleSet.workflowSlug === workflowSlug && ruleSet.active,
+          (ruleSet) =>
+            ruleSet.workflowSlug === workflowSlug &&
+            ruleSet.active &&
+            (tenantId == null || ruleSet.tenantId === tenantId),
         ) ?? null,
       ),
-    listByWorkflowSlug: (workflowSlug) =>
+    listByWorkflowSlug: (workflowSlug, tenantId) =>
       Promise.resolve(
         byDateDesc(
-          [...ruleSetStore.values()].filter((ruleSet) => ruleSet.workflowSlug === workflowSlug),
+          [...ruleSetStore.values()].filter(
+            (ruleSet) =>
+              ruleSet.workflowSlug === workflowSlug &&
+              (tenantId == null || ruleSet.tenantId === tenantId),
+          ),
           (ruleSet) => ruleSet.updatedAt,
         ),
       ),
-    list: () =>
-      Promise.resolve(byDateDesc([...ruleSetStore.values()], (ruleSet) => ruleSet.updatedAt)),
+    list: (tenantId) =>
+      Promise.resolve(
+        byDateDesc(
+          [...ruleSetStore.values()].filter(
+            (ruleSet) => tenantId == null || ruleSet.tenantId === tenantId,
+          ),
+          (ruleSet) => ruleSet.updatedAt,
+        ),
+      ),
   };
 
   return {

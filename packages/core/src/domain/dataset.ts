@@ -82,6 +82,7 @@ export type DatasetAnalysis = z.infer<typeof datasetAnalysisSchema>;
  */
 export const datasetProfileSchema = datasetAnalysisSchema.extend({
   id: datasetIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   fileId: z.string().min(1),
   kind: fileKindSchema,
   originalName: z.string().min(1),

@@ -53,32 +53,38 @@ export class WorkflowConfigurationService {
     workflowSlug?: string,
     limit = 100,
     offset = 0,
+    tenantId: string | null = null,
   ): Promise<WorkflowConfigurationSummary[]> {
     const configurations = await this.deps.repositories.workflowConfigurations.list({
       workflowSlug,
+      tenantId,
       limit,
       offset,
     });
     return configurations.map(toWorkflowConfigurationSummary);
   }
 
-  async getById(id: string): Promise<WorkflowConfiguration> {
+  async getById(id: string, tenantId: string | null = null): Promise<WorkflowConfiguration> {
     const configuration = await this.deps.repositories.workflowConfigurations.getById(id);
-    if (!configuration) {
+    if (!configuration || (tenantId != null && configuration.tenantId !== tenantId)) {
       throw new NotFoundError('Workflow configuration', id);
     }
     return configuration;
   }
 
-  async create(input: CreateWorkflowConfigurationRequest): Promise<WorkflowConfiguration> {
+  async create(
+    input: CreateWorkflowConfigurationRequest,
+    tenantId: string | null = null,
+  ): Promise<WorkflowConfiguration> {
     const workflow = this.deps.registry.require(input.workflowSlug);
-    const datasets = await this.loadDatasets(input.assignments, input.mappings);
+    const datasets = await this.loadDatasets(input.assignments, input.mappings, tenantId);
     const validation = this.validateMapping(workflow, input, datasets);
     this.assertValid(validation);
 
     const now = this.deps.clock.now();
     const configuration = workflowConfigurationSchema.parse({
       id: newId(),
+      tenantId,
       workflowSlug: workflow.slug,
       workflowVersion: workflow.version,
       name: input.name,
@@ -107,8 +113,9 @@ export class WorkflowConfigurationService {
   async update(
     id: string,
     input: UpdateWorkflowConfigurationRequest,
+    tenantId: string | null = null,
   ): Promise<WorkflowConfiguration> {
-    const existing = await this.getById(id);
+    const existing = await this.getById(id, tenantId);
     const workflow = this.deps.registry.require(existing.workflowSlug);
 
     const merged = {
@@ -116,7 +123,7 @@ export class WorkflowConfigurationService {
       mappings: input.mappings ?? existing.mappings,
       options: input.options ?? existing.options,
     };
-    const datasets = await this.loadDatasets(merged.assignments, merged.mappings);
+    const datasets = await this.loadDatasets(merged.assignments, merged.mappings, tenantId);
     const validation = this.validateMapping(workflow, merged, datasets);
     this.assertValid(validation);
 
@@ -141,9 +148,10 @@ export class WorkflowConfigurationService {
 
   async validate(
     input: ValidateWorkflowConfigurationRequest,
+    tenantId: string | null = null,
   ): Promise<ConfigurationValidationResult> {
     const workflow = this.deps.registry.require(input.workflowSlug);
-    const datasets = await this.loadDatasets(input.assignments, input.mappings);
+    const datasets = await this.loadDatasets(input.assignments, input.mappings, tenantId);
     const validation = this.validateMapping(workflow, input, datasets);
 
     let resolvedConfig: ResolvedRunConfig | null = null;
@@ -166,8 +174,11 @@ export class WorkflowConfigurationService {
    * Resolves a saved configuration into the concrete run input, re-validating first so an invalid
    * configuration can never be started.
    */
-  async buildRunInput(configurationId: string): Promise<BuiltRunInput> {
-    const configuration = await this.getById(configurationId);
+  async buildRunInput(
+    configurationId: string,
+    tenantId: string | null = null,
+  ): Promise<BuiltRunInput> {
+    const configuration = await this.getById(configurationId, tenantId);
     const workflow = this.deps.registry.require(configuration.workflowSlug);
     if (!workflow.resolveRunInput) {
       throw new InvalidConfigurationError(
@@ -175,7 +186,11 @@ export class WorkflowConfigurationService {
       );
     }
 
-    const datasets = await this.loadDatasets(configuration.assignments, configuration.mappings);
+    const datasets = await this.loadDatasets(
+      configuration.assignments,
+      configuration.mappings,
+      tenantId,
+    );
     const validation = this.validateMapping(workflow, configuration, datasets);
     this.assertValid(validation);
 
@@ -225,6 +240,7 @@ export class WorkflowConfigurationService {
     const now = this.deps.clock.now();
     return {
       id: 'preview',
+      tenantId: null,
       workflowSlug: workflow.slug,
       workflowVersion: workflow.version,
       name: 'preview',
@@ -241,6 +257,7 @@ export class WorkflowConfigurationService {
   async loadDatasets(
     assignments: DatasetAssignment[],
     mappings: WorkflowConfiguration['mappings'],
+    tenantId: string | null = null,
   ): Promise<DatasetProfile[]> {
     const ids = new Set<string>();
     for (const assignment of assignments) {
@@ -253,7 +270,7 @@ export class WorkflowConfigurationService {
     const datasets: DatasetProfile[] = [];
     for (const id of ids) {
       const dataset = await this.deps.repositories.datasets.getById(id);
-      if (dataset) {
+      if (dataset && (tenantId == null || dataset.tenantId === tenantId)) {
         datasets.push(dataset);
       }
     }

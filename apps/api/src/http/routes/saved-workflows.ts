@@ -9,12 +9,12 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { AppContainer } from '../../container.js';
 import { toSavedWorkflowDetailDto, toSavedWorkflowSummaryDto } from '../dto.js';
-import { parseOrThrow } from '../http-utils.js';
+import { parseOrThrow, tenantOf } from '../http-utils.js';
 import { describeRun } from './runs.js';
 
 export function registerSavedWorkflowRoutes(app: FastifyInstance, container: AppContainer): void {
-  app.get('/api/v1/saved-workflows', async () => {
-    const items = await container.savedWorkflowService.list();
+  app.get('/api/v1/saved-workflows', async (request) => {
+    const items = await container.savedWorkflowService.list(200, tenantOf(request));
     return savedWorkflowListResponseSchema.parse({
       items: items.map(toSavedWorkflowSummaryDto),
     });
@@ -22,7 +22,7 @@ export function registerSavedWorkflowRoutes(app: FastifyInstance, container: App
 
   app.get('/api/v1/saved-workflows/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const detail = await container.savedWorkflowService.getById(id);
+    const detail = await container.savedWorkflowService.getById(id, tenantOf(request));
     return savedWorkflowDetailDtoSchema.parse(toSavedWorkflowDetailDto(detail));
   });
 
@@ -33,7 +33,11 @@ export function registerSavedWorkflowRoutes(app: FastifyInstance, container: App
       request.body,
       'prepare saved workflow run request',
     );
-    const result = await container.savedWorkflowService.prepare(id, body.assignments);
+    const result = await container.savedWorkflowService.prepare(
+      id,
+      body.assignments,
+      tenantOf(request),
+    );
     return prepareSavedWorkflowRunResponseSchema.parse(result);
   });
 
@@ -44,7 +48,7 @@ export function registerSavedWorkflowRoutes(app: FastifyInstance, container: App
       request.body,
       'run saved workflow request',
     );
-    const run = await container.savedWorkflowService.run(id, body);
+    const run = await container.savedWorkflowService.run(id, body, tenantOf(request));
     reply.status(202);
     return runDtoSchema.parse(await describeRun(container, run, true));
   });

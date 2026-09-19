@@ -44,10 +44,10 @@ const RUN_SCAN_LIMIT = 1000;
 export class SavedWorkflowService {
   constructor(private readonly deps: SavedWorkflowServiceDeps) {}
 
-  async list(limit = 200): Promise<SavedWorkflowSummary[]> {
+  async list(limit = 200, tenantId: string | null = null): Promise<SavedWorkflowSummary[]> {
     const [configurations, runs] = await Promise.all([
-      this.deps.repositories.workflowConfigurations.list({ limit: 500 }),
-      this.deps.repositories.runs.list({ limit: RUN_SCAN_LIMIT }),
+      this.deps.repositories.workflowConfigurations.list({ limit: 500, tenantId }),
+      this.deps.repositories.runs.list({ limit: RUN_SCAN_LIMIT, tenantId }),
     ]);
     const runsByConfigurationId = runsByConfiguration(runs);
 
@@ -60,14 +60,15 @@ export class SavedWorkflowService {
     return summaries;
   }
 
-  async getById(id: string): Promise<SavedWorkflowDetail> {
-    const configuration = await this.deps.configurationService.getById(id);
-    const runs = await this.deps.repositories.runs.list({ limit: RUN_SCAN_LIMIT });
+  async getById(id: string, tenantId: string | null = null): Promise<SavedWorkflowDetail> {
+    const configuration = await this.deps.configurationService.getById(id, tenantId);
+    const runs = await this.deps.repositories.runs.list({ limit: RUN_SCAN_LIMIT, tenantId });
     const configurationRuns = runsByConfiguration(runs).get(id) ?? [];
     const summary = await this.summarise(configuration, configurationRuns);
 
     const ruleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(
       configuration.workflowSlug,
+      configuration.tenantId,
     );
 
     return {
@@ -86,10 +87,11 @@ export class SavedWorkflowService {
   async prepare(
     id: string,
     assignments: RunSavedWorkflowRequest['assignments'],
+    tenantId: string | null = null,
   ): Promise<PrepareSavedWorkflowRunResponse> {
-    const configuration = await this.deps.configurationService.getById(id);
+    const configuration = await this.deps.configurationService.getById(id, tenantId);
     const workflow = this.deps.registry.require(configuration.workflowSlug);
-    const datasets = await this.deps.configurationService.loadDatasets(assignments, []);
+    const datasets = await this.deps.configurationService.loadDatasets(assignments, [], tenantId);
     const plan = rebindConfiguration({ configuration, requested: assignments, datasets });
 
     const validation = validateWorkflowConfiguration({
@@ -115,10 +117,18 @@ export class SavedWorkflowService {
    * version, then create a run. The run still freezes its own snapshot, so reproducibility is
    * unaffected by whether the re-pointed mapping is saved.
    */
-  async run(id: string, input: RunSavedWorkflowRequest): Promise<WorkflowRun> {
-    const configuration = await this.deps.configurationService.getById(id);
+  async run(
+    id: string,
+    input: RunSavedWorkflowRequest,
+    tenantId: string | null = null,
+  ): Promise<WorkflowRun> {
+    const configuration = await this.deps.configurationService.getById(id, tenantId);
     const workflow = this.deps.registry.require(configuration.workflowSlug);
-    const datasets = await this.deps.configurationService.loadDatasets(input.assignments, []);
+    const datasets = await this.deps.configurationService.loadDatasets(
+      input.assignments,
+      [],
+      tenantId,
+    );
     const plan = rebindConfiguration({ configuration, requested: input.assignments, datasets });
 
     const validation = validateWorkflowConfiguration({
@@ -138,11 +148,15 @@ export class SavedWorkflowService {
     }
 
     const effective = input.saveConfiguration
-      ? await this.deps.configurationService.update(id, {
-          assignments: plan.assignments,
-          mappings: plan.mappings,
-          ...(input.name ? { name: input.name } : {}),
-        })
+      ? await this.deps.configurationService.update(
+          id,
+          {
+            assignments: plan.assignments,
+            mappings: plan.mappings,
+            ...(input.name ? { name: input.name } : {}),
+          },
+          tenantId,
+        )
       : withRebind(configuration, plan);
 
     const resolved = this.resolveRunInput(workflow, effective, datasets);
@@ -151,6 +165,7 @@ export class SavedWorkflowService {
       primaryFileId: resolved.primaryFileId,
       eventsFileId: resolved.eventsFileId,
       configurationId: id,
+      tenantId: tenantId ?? configuration.tenantId,
       // Freeze exactly what the run used — for a one-off re-point this differs from the saved row.
       configurationOverride: effective,
       config: { ...resolved.config, ...input.config },
@@ -202,6 +217,7 @@ export class SavedWorkflowService {
     const workflow = this.deps.registry.get(configuration.workflowSlug);
     const ruleSet = await this.deps.repositories.ruleSets.getActiveByWorkflowSlug(
       configuration.workflowSlug,
+      configuration.tenantId,
     );
 
     const lastRun = runs[0] ? await this.describeRun(runs[0]) : null;

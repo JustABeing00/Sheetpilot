@@ -26,17 +26,21 @@ export interface UploadFileInput {
 export class FileService {
   constructor(private readonly deps: FileServiceDeps) {}
 
-  async upload(input: UploadFileInput): Promise<FileAsset> {
-    const { file } = await this.deps.datasetService.ingest(input);
+  async upload(input: UploadFileInput, tenantId: string | null = null): Promise<FileAsset> {
+    const { file } = await this.deps.datasetService.ingest(input, tenantId);
     return file;
   }
 
-  async getById(id: string): Promise<FileAsset | null> {
-    return this.deps.repositories.files.getById(id);
+  async getById(id: string, tenantId: string | null = null): Promise<FileAsset | null> {
+    const file = await this.deps.repositories.files.getById(id);
+    if (!file || (tenantId != null && file.tenantId !== tenantId)) {
+      return null;
+    }
+    return file;
   }
 
-  async list(limit = 100): Promise<FileAsset[]> {
-    return this.deps.repositories.files.list(limit);
+  async list(limit = 100, tenantId: string | null = null): Promise<FileAsset[]> {
+    return this.deps.repositories.files.list({ limit, tenantId });
   }
 }
 

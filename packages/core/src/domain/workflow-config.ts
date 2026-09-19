@@ -91,6 +91,7 @@ export type ConfigurationOptionValue = z.infer<typeof configurationOptionValueSc
  */
 export const workflowConfigurationSchema = z.object({
   id: workflowConfigurationIdSchema,
+  tenantId: z.string().min(1).nullable().default(null),
   workflowSlug: z.string().min(1),
   workflowVersion: z.number().int().positive(),
   name: z.string().min(1),

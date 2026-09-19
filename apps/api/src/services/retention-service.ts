@@ -35,7 +35,7 @@ export class RetentionService {
 
   async sweep(): Promise<RetentionSweepResult> {
     const objects = await this.deps.storage.list(UPLOAD_PREFIX);
-    const files = await this.deps.repositories.files.list(1_000_000);
+    const files = await this.deps.repositories.files.list({ limit: 1_000_000 });
     const referenced = new Set(files.map((file) => file.storageKey));
     const now = this.deps.clock.now().getTime();
 

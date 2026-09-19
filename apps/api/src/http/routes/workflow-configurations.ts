@@ -9,7 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { AppContainer } from '../../container.js';
 import { toWorkflowConfigurationDto, toWorkflowConfigurationSummaryDto } from '../dto.js';
-import { clampLimit, parseOffset, parseOrThrow } from '../http-utils.js';
+import { clampLimit, parseOffset, parseOrThrow, tenantOf } from '../http-utils.js';
 
 export function registerWorkflowConfigurationRoutes(
   app: FastifyInstance,
@@ -25,6 +25,7 @@ export function registerWorkflowConfigurationRoutes(
       workflowSlug,
       clampLimit(query['limit'], 100),
       parseOffset(query['offset']),
+      tenantOf(request),
     );
     return workflowConfigurationListResponseSchema.parse({
       items: configurations.map(toWorkflowConfigurationSummaryDto),
@@ -37,7 +38,10 @@ export function registerWorkflowConfigurationRoutes(
       request.body,
       'workflow configuration',
     );
-    const configuration = await container.workflowConfigurationService.create(body);
+    const configuration = await container.workflowConfigurationService.create(
+      body,
+      tenantOf(request),
+    );
     reply.status(201);
     return workflowConfigurationDtoSchema.parse(toWorkflowConfigurationDto(configuration));
   });
@@ -48,13 +52,16 @@ export function registerWorkflowConfigurationRoutes(
       request.body,
       'workflow configuration validation request',
     );
-    const result = await container.workflowConfigurationService.validate(body);
+    const result = await container.workflowConfigurationService.validate(body, tenantOf(request));
     return configurationValidationResponseSchema.parse(result);
   });
 
   app.get('/api/v1/workflow-configurations/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const configuration = await container.workflowConfigurationService.getById(id);
+    const configuration = await container.workflowConfigurationService.getById(
+      id,
+      tenantOf(request),
+    );
     return workflowConfigurationDtoSchema.parse(toWorkflowConfigurationDto(configuration));
   });
 
@@ -65,7 +72,11 @@ export function registerWorkflowConfigurationRoutes(
       request.body,
       'workflow configuration update',
     );
-    const configuration = await container.workflowConfigurationService.update(id, body);
+    const configuration = await container.workflowConfigurationService.update(
+      id,
+      body,
+      tenantOf(request),
+    );
     return workflowConfigurationDtoSchema.parse(toWorkflowConfigurationDto(configuration));
   });
 }

@@ -24,7 +24,7 @@ import {
   toRunSnapshotSummaryDto,
   toRunSummaryDto,
 } from '../dto.js';
-import { clampLimit, parseOffset, parseOrThrow } from '../http-utils.js';
+import { clampLimit, parseOffset, parseOrThrow, tenantOf } from '../http-utils.js';
 
 export async function describeRun(
   container: AppContainer,
@@ -57,9 +57,13 @@ export async function describeRun(
   return toRunDto(run, steps, description);
 }
 
-async function requireRun(container: AppContainer, runId: string): Promise<WorkflowRun> {
+async function requireRun(
+  container: AppContainer,
+  runId: string,
+  tenantId: string | null = null,
+): Promise<WorkflowRun> {
   const run = await container.repositories.runs.getById(runId);
-  if (!run) {
+  if (!run || (tenantId != null && run.tenantId !== tenantId)) {
     throw new NotFoundError('Run', runId);
   }
   return run;
@@ -73,13 +77,15 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
     // A client may safely retry a timed-out POST /runs with the same key: the second request returns
     // the original run instead of starting a duplicate execution.
+    const tenantId = tenantOf(request);
     const { replayed, result } = await container.idempotency.run(idempotencyKey, async () => {
       let run: WorkflowRun;
       if (body.configurationId) {
         const resolved = await container.workflowConfigurationService.buildRunInput(
           body.configurationId,
+          tenantId,
         );
-        run = await container.runService.createRun(resolved);
+        run = await container.runService.createRun({ ...resolved, tenantId });
       } else {
         const { workflowSlug, primaryFileId, eventsFileId } = body;
         if (!workflowSlug || !primaryFileId || !eventsFileId) {
@@ -93,6 +99,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
           eventsFileId,
           configurationId: null,
           config: body.config,
+          tenantId,
         });
       }
 
@@ -113,6 +120,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
       limit: clampLimit(query['limit'], 50),
       offset: parseOffset(query['offset']),
       status: status.success ? status.data : undefined,
+      tenantId: tenantOf(request),
     });
 
     const items = await Promise.all(runs.map((run) => describeRun(container, run, false)));
@@ -121,13 +129,13 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
   app.get('/api/v1/runs/:id', async (request) => {
     const { id } = request.params as { id: string };
-    const run = await requireRun(container, id);
+    const run = await requireRun(container, id, tenantOf(request));
     return describeRun(container, run, true);
   });
 
   app.get('/api/v1/runs/:id/snapshot', async (request) => {
     const { id } = request.params as { id: string };
-    await requireRun(container, id);
+    await requireRun(container, id, tenantOf(request));
     const snapshot = await container.runService.getSnapshot(id);
     if (!snapshot) {
       throw new NotFoundError('Run snapshot', id);
@@ -138,7 +146,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
   app.get('/api/v1/runs/:id/decisions', async (request) => {
     const { id } = request.params as { id: string };
     const query = request.query as Record<string, unknown>;
-    await requireRun(container, id);
+    await requireRun(container, id, tenantOf(request));
 
     const limit = clampLimit(query['limit'], 100);
     const offset = parseOffset(query['offset']);
@@ -160,7 +168,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
   app.get('/api/v1/runs/:id/review-items', async (request) => {
     const { id } = request.params as { id: string };
-    await requireRun(container, id);
+    await requireRun(container, id, tenantOf(request));
 
     const [items, openCount] = await Promise.all([
       container.repositories.reviewItems.listByRun(id),
@@ -175,7 +183,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
   app.get('/api/v1/runs/:id/artifacts', async (request) => {
     const { id } = request.params as { id: string };
-    await requireRun(container, id);
+    await requireRun(container, id, tenantOf(request));
 
     const artifacts = await container.repositories.artifacts.listByRun(id);
     return { items: artifacts.map(toArtifactDto) };
@@ -183,6 +191,7 @@ export function registerRunRoutes(app: FastifyInstance, container: AppContainer)
 
   app.get('/api/v1/runs/:id/export', async (request) => {
     const { id } = request.params as { id: string };
+    await requireRun(container, id, tenantOf(request));
     const status = await container.exportService.status(id);
 
     return exportStatusResponseSchema.parse({

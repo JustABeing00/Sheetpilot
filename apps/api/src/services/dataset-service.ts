@@ -99,7 +99,10 @@ function stringifyRow(row: Row, columns: string[]): Record<string, string> {
 export class DatasetService {
   constructor(private readonly deps: DatasetServiceDeps) {}
 
-  async ingest(input: IngestDatasetInput): Promise<IngestedDataset> {
+  async ingest(
+    input: IngestDatasetInput,
+    tenantId: string | null = null,
+  ): Promise<IngestedDataset> {
     const validated = validateUpload(
       {
         fileName: input.originalName,
@@ -139,6 +142,7 @@ export class DatasetService {
       const file = await this.deps.repositories.files.create(
         fileAssetSchema.parse({
           id: newId(),
+          tenantId,
           kind: input.kind,
           originalName: validated.fileName,
           format: validated.format,
@@ -155,6 +159,7 @@ export class DatasetService {
       const dataset = await this.deps.repositories.datasets.create(
         datasetProfileSchema.parse({
           id: datasetId,
+          tenantId,
           fileId: file.id,
           kind: input.kind,
           originalName: validated.fileName,
@@ -199,21 +204,25 @@ export class DatasetService {
     }
   }
 
-  async getById(id: string): Promise<DatasetProfile> {
+  async getById(id: string, tenantId: string | null = null): Promise<DatasetProfile> {
     const dataset = await this.deps.repositories.datasets.getById(id);
-    if (!dataset) {
+    if (!dataset || (tenantId != null && dataset.tenantId !== tenantId)) {
       throw new NotFoundError('Dataset', id);
     }
     return dataset;
   }
 
-  async list(limit = 100, offset = 0): Promise<DatasetSummary[]> {
-    const datasets = await this.deps.repositories.datasets.list({ limit, offset });
+  async list(limit = 100, offset = 0, tenantId: string | null = null): Promise<DatasetSummary[]> {
+    const datasets = await this.deps.repositories.datasets.list({ limit, offset, tenantId });
     return datasets.map(toDatasetSummary);
   }
 
-  async analyze(datasetId: string, sheetName?: string): Promise<DatasetAnalysis> {
-    const dataset = await this.getById(datasetId);
+  async analyze(
+    datasetId: string,
+    sheetName?: string,
+    tenantId: string | null = null,
+  ): Promise<DatasetAnalysis> {
+    const dataset = await this.getById(datasetId, tenantId);
     const file = await this.requireFile(dataset);
 
     return inspectDataset({
@@ -225,8 +234,11 @@ export class DatasetService {
     });
   }
 
-  async readRows(input: ReadDatasetRowsInput): Promise<DatasetRowPage> {
-    const dataset = await this.getById(input.datasetId);
+  async readRows(
+    input: ReadDatasetRowsInput,
+    tenantId: string | null = null,
+  ): Promise<DatasetRowPage> {
+    const dataset = await this.getById(input.datasetId, tenantId);
     const file = await this.requireFile(dataset);
     const sheetName = input.sheetName ?? dataset.sheetName ?? undefined;
     const reader = createTabularReader(dataset.format);

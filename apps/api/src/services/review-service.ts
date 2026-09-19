@@ -68,17 +68,22 @@ export class ReviewService {
   constructor(private readonly deps: ReviewServiceDeps) {}
 
   /** Append-only history of what a human decided for an item and how it differed from automation. */
-  async history(itemId: string): Promise<ReviewResolutionLog[]> {
+  async history(itemId: string, tenantId: string | null = null): Promise<ReviewResolutionLog[]> {
     const item = await this.deps.repositories.reviewItems.getById(itemId);
-    if (!item) {
+    if (!item || (tenantId != null && item.tenantId !== tenantId)) {
       throw new NotFoundError('Review item', itemId);
     }
     return this.deps.repositories.reviewResolutions.listByItem(itemId);
   }
 
-  async resolve(id: string, input: ResolveReviewItemRequest): Promise<ReviewItem> {
+  async resolve(
+    id: string,
+    input: ResolveReviewItemRequest,
+    actor: string | null = null,
+    tenantId: string | null = null,
+  ): Promise<ReviewItem> {
     const item = await this.deps.repositories.reviewItems.getById(id);
-    if (!item) {
+    if (!item || (tenantId != null && item.tenantId !== tenantId)) {
       throw new NotFoundError('Review item', id);
     }
     if (item.status !== 'open') {
@@ -132,7 +137,7 @@ export class ReviewService {
         action: input.action,
         values: appliedValues,
         note: input.note,
-        resolvedBy: null,
+        resolvedBy: actor,
       },
       resolvedAt: now,
     });
@@ -141,6 +146,7 @@ export class ReviewService {
     await this.deps.repositories.reviewResolutions.create(
       reviewResolutionLogSchema.parse({
         id: newId(),
+        tenantId: item.tenantId,
         reviewItemId: item.id,
         runId: item.runId,
         entityKey: item.entityKey,
@@ -152,7 +158,7 @@ export class ReviewService {
         appliedValues,
         changedFields: changedFields(automationValues, appliedValues),
         note: input.note,
-        resolvedBy: null,
+        resolvedBy: actor,
         createdAt: now,
       }),
     );

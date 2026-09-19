@@ -42,6 +42,7 @@ export const ruleSets = pgTable(
   'rule_sets',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     slug: text('slug').notNull(),
     workflowSlug: text('workflow_slug').notNull(),
     name: text('name').notNull(),
@@ -58,6 +59,7 @@ export const files = pgTable(
   'files',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     kind: text('kind').notNull(),
     originalName: text('original_name').notNull(),
     format: text('format').notNull(),
@@ -76,6 +78,7 @@ export const datasets = pgTable(
   'datasets',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     fileId: text('file_id').notNull(),
     kind: text('kind').notNull(),
     originalName: text('original_name').notNull(),
@@ -101,6 +104,7 @@ export const workflowConfigurations = pgTable(
   'workflow_configurations',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     workflowSlug: text('workflow_slug').notNull(),
     workflowVersion: integer('workflow_version').notNull(),
     name: text('name').notNull(),
@@ -119,6 +123,7 @@ export const runs = pgTable(
   'runs',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     workflowId: text('workflow_id').notNull(),
     workflowSlug: text('workflow_slug').notNull(),
     workflowVersion: integer('workflow_version').notNull(),
@@ -140,6 +145,7 @@ export const runSnapshots = pgTable(
   'run_snapshots',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     runId: text('run_id').notNull().unique(),
     workflowSlug: text('workflow_slug').notNull(),
     workflowVersion: integer('workflow_version').notNull(),
@@ -156,6 +162,7 @@ export const runSteps = pgTable(
   'run_steps',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     runId: text('run_id').notNull(),
     stepId: text('step_id').notNull(),
     name: text('name').notNull(),
@@ -174,6 +181,7 @@ export const runDecisions = pgTable(
   'run_decisions',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     runId: text('run_id').notNull(),
     entityKey: text('entity_key').notNull(),
     matchedRuleIds: jsonb('matched_rule_ids').$type<string[]>().notNull(),
@@ -192,6 +200,7 @@ export const reviewItems = pgTable(
   'review_items',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     runId: text('run_id').notNull(),
     entityKey: text('entity_key').notNull(),
     reason: text('reason').notNull(),
@@ -212,6 +221,7 @@ export const reviewResolutions = pgTable(
   'review_resolutions',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     reviewItemId: text('review_item_id').notNull(),
     runId: text('run_id').notNull(),
     entityKey: text('entity_key').notNull(),
@@ -236,6 +246,7 @@ export const artifacts = pgTable(
   'artifacts',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id'),
     runId: text('run_id').notNull(),
     kind: text('kind').notNull(),
     format: text('format').notNull(),

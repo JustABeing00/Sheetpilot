@@ -62,9 +62,9 @@ export interface WorkflowExecution<TState> {
   finishedAt: Date;
 }
 
-export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'runId' | 'createdAt'>;
+export type NewDecisionRecord = Omit<DecisionRecord, 'id' | 'tenantId' | 'runId' | 'createdAt'>;
 
 export type NewReviewItem = Omit<
   ReviewItem,
-  'id' | 'runId' | 'createdAt' | 'resolvedAt' | 'status' | 'resolution'
+  'id' | 'tenantId' | 'runId' | 'createdAt' | 'resolvedAt' | 'status' | 'resolution'
 >;

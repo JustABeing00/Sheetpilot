@@ -24,7 +24,7 @@ import type { WorkflowConfigurationRepository } from './workflow-configurations.
 export interface FileRepository {
   create(asset: FileAsset): Promise<FileAsset>;
   getById(id: FileId): Promise<FileAsset | null>;
-  list(limit?: number): Promise<FileAsset[]>;
+  list(options?: { limit?: number; tenantId?: string | null }): Promise<FileAsset[]>;
 }
 
 export interface WorkflowRepository {
@@ -38,6 +38,8 @@ export interface RunListOptions {
   limit?: number;
   offset?: number;
   status?: RunStatus;
+  /** Restrict to one tenant. Omitted only for legacy/single-tenant (auth disabled) callers. */
+  tenantId?: string | null;
 }
 
 export interface RunRepository {
@@ -85,6 +87,8 @@ export interface ReviewListOptions {
   severities?: ReviewSeverity[];
   /** Restrict to a single run. */
   runId?: RunId;
+  /** Restrict to one tenant. Omitted only for legacy/single-tenant (auth disabled) callers. */
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }
@@ -106,10 +110,10 @@ export interface ReviewItemRepository {
   update(item: ReviewItem): Promise<ReviewItem>;
   listByRun(runId: RunId, options?: ReviewListOptions): Promise<ReviewItem[]>;
   list(options?: ReviewListOptions): Promise<ReviewItem[]>;
-  countOpen(): Promise<number>;
+  countOpen(tenantId?: string | null): Promise<number>;
   countByRun(runId: RunId): Promise<number>;
   countOpenByRun(runId: RunId): Promise<number>;
-  counts(): Promise<ReviewCounts>;
+  counts(tenantId?: string | null): Promise<ReviewCounts>;
 }
 
 export interface ReviewHistoryListOptions {
@@ -134,9 +138,13 @@ export interface ArtifactRepository {
 export interface RuleSetRepository {
   upsert(ruleSet: StoredRuleSet): Promise<StoredRuleSet>;
   getById(id: string): Promise<StoredRuleSet | null>;
-  getActiveByWorkflowSlug(workflowSlug: string): Promise<StoredRuleSet | null>;
-  listByWorkflowSlug(workflowSlug: string): Promise<StoredRuleSet[]>;
-  list(): Promise<StoredRuleSet[]>;
+  /** The active set for a workflow within a tenant (tenant omitted only when auth is disabled). */
+  getActiveByWorkflowSlug(
+    workflowSlug: string,
+    tenantId?: string | null,
+  ): Promise<StoredRuleSet | null>;
+  listByWorkflowSlug(workflowSlug: string, tenantId?: string | null): Promise<StoredRuleSet[]>;
+  list(tenantId?: string | null): Promise<StoredRuleSet[]>;
 }
 
 export interface Repositories {

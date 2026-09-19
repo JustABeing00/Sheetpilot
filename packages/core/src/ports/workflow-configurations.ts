@@ -2,6 +2,8 @@ import type { WorkflowConfiguration, WorkflowConfigurationId } from '../domain/w
 
 export interface WorkflowConfigurationListOptions {
   workflowSlug?: string;
+  /** Restrict to one tenant. Omitted only for legacy/single-tenant (auth disabled) callers. */
+  tenantId?: string | null;
   limit?: number;
   offset?: number;
 }

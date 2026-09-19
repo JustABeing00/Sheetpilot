@@ -65,6 +65,9 @@ function reviewCondition(options?: ReviewListOptions, runId?: string): SQL | und
   if (scope) {
     conditions.push(eq(reviewItems.runId, scope));
   }
+  if (options?.tenantId != null) {
+    conditions.push(eq(reviewItems.tenantId, options.tenantId));
+  }
   if (options?.statuses && options.statuses.length > 0) {
     conditions.push(inArray(reviewItems.status, options.statuses));
   } else if (options?.status) {
@@ -237,9 +240,13 @@ export function createPostgresRepositories(db: Database): Repositories {
         const [row] = await db.select().from(files).where(eq(files.id, id)).limit(1);
         return row ? toFileAsset(row) : null;
       },
-      async list(limit) {
-        const query = db.select().from(files).orderBy(desc(files.uploadedAt));
-        const rows = limit === undefined ? await query : await query.limit(limit);
+      async list(options) {
+        const query = db
+          .select()
+          .from(files)
+          .where(options?.tenantId != null ? eq(files.tenantId, options.tenantId) : undefined)
+          .orderBy(desc(files.uploadedAt));
+        const rows = options?.limit === undefined ? await query : await query.limit(options.limit);
         return rows.map(toFileAsset);
       },
     },
@@ -257,6 +264,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         const rows = await db
           .select()
           .from(datasets)
+          .where(options?.tenantId != null ? eq(datasets.tenantId, options.tenantId) : undefined)
           .orderBy(desc(datasets.inspectedAt))
           .limit(options?.limit ?? 100)
           .offset(options?.offset ?? 0);
@@ -298,9 +306,14 @@ export function createPostgresRepositories(db: Database): Repositories {
           .select()
           .from(workflowConfigurations)
           .where(
-            options?.workflowSlug
-              ? eq(workflowConfigurations.workflowSlug, options.workflowSlug)
-              : undefined,
+            and(
+              options?.workflowSlug
+                ? eq(workflowConfigurations.workflowSlug, options.workflowSlug)
+                : undefined,
+              options?.tenantId != null
+                ? eq(workflowConfigurations.tenantId, options.tenantId)
+                : undefined,
+            ),
           )
           .orderBy(desc(workflowConfigurations.updatedAt))
           .limit(options?.limit ?? 100)
@@ -359,7 +372,12 @@ export function createPostgresRepositories(db: Database): Repositories {
         const rows = await db
           .select()
           .from(runs)
-          .where(options?.status ? eq(runs.status, options.status) : undefined)
+          .where(
+            and(
+              options?.status ? eq(runs.status, options.status) : undefined,
+              options?.tenantId != null ? eq(runs.tenantId, options.tenantId) : undefined,
+            ),
+          )
           .orderBy(desc(runs.createdAt))
           .limit(options?.limit ?? 50)
           .offset(options?.offset ?? 0);
@@ -377,6 +395,7 @@ export function createPostgresRepositories(db: Database): Repositories {
           .insert(runSnapshots)
           .values({
             id: snapshot.id,
+            tenantId: snapshot.tenantId,
             runId: snapshot.runId,
             workflowSlug: snapshot.workflowSlug,
             workflowVersion: snapshot.workflowVersion,
@@ -407,6 +426,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         await db.insert(runSteps).values(
           records.map((record) => ({
             id: record.id,
+            tenantId: record.tenantId,
             runId: record.runId,
             stepId: record.stepId,
             name: record.name,
@@ -453,6 +473,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         await db.insert(runDecisions).values(
           records.map((record) => ({
             id: record.id,
+            tenantId: record.tenantId,
             runId: record.runId,
             entityKey: record.entityKey,
             matchedRuleIds: record.matchedRuleIds,
@@ -497,6 +518,7 @@ export function createPostgresRepositories(db: Database): Repositories {
         await db.insert(reviewItems).values(
           items.map((item) => ({
             id: item.id,
+            tenantId: item.tenantId,
             runId: item.runId,
             entityKey: item.entityKey,
             reason: item.reason,
@@ -554,11 +576,16 @@ export function createPostgresRepositories(db: Database): Repositories {
             : await base.limit(options.limit).offset(options?.offset ?? 0);
         return rows.map(toReviewItem);
       },
-      async countOpen() {
+      async countOpen(tenantId) {
         const [row] = await db
           .select({ value: count() })
           .from(reviewItems)
-          .where(eq(reviewItems.status, 'open'));
+          .where(
+            and(
+              eq(reviewItems.status, 'open'),
+              tenantId != null ? eq(reviewItems.tenantId, tenantId) : undefined,
+            ),
+          );
         return row?.value ?? 0;
       },
       async countByRun(runId) {
@@ -575,10 +602,11 @@ export function createPostgresRepositories(db: Database): Repositories {
           .where(and(eq(reviewItems.runId, runId), eq(reviewItems.status, 'open')));
         return row?.value ?? 0;
       },
-      async counts() {
+      async counts(tenantId) {
         const rows = await db
           .select({ status: reviewItems.status, reason: reviewItems.reason })
-          .from(reviewItems);
+          .from(reviewItems)
+          .where(tenantId != null ? eq(reviewItems.tenantId, tenantId) : undefined);
         const result: ReviewCounts = {
           total: rows.length,
           open: 0,
@@ -618,6 +646,7 @@ export function createPostgresRepositories(db: Database): Repositories {
           .insert(reviewResolutions)
           .values({
             id: entry.id,
+            tenantId: entry.tenantId,
             reviewItemId: entry.reviewItemId,
             runId: entry.runId,
             entityKey: entry.entityKey,
@@ -695,26 +724,41 @@ export function createPostgresRepositories(db: Database): Repositories {
         const [row] = await db.select().from(ruleSets).where(eq(ruleSets.id, id)).limit(1);
         return row ? toRuleSet(row) : null;
       },
-      async getActiveByWorkflowSlug(workflowSlug) {
+      async getActiveByWorkflowSlug(workflowSlug, tenantId) {
         // Deterministic winner if two rows ever coexist as active: the most recently updated set.
         const [row] = await db
           .select()
           .from(ruleSets)
-          .where(and(eq(ruleSets.workflowSlug, workflowSlug), eq(ruleSets.active, true)))
+          .where(
+            and(
+              eq(ruleSets.workflowSlug, workflowSlug),
+              eq(ruleSets.active, true),
+              tenantId != null ? eq(ruleSets.tenantId, tenantId) : undefined,
+            ),
+          )
           .orderBy(desc(ruleSets.updatedAt))
           .limit(1);
         return row ? toRuleSet(row) : null;
       },
-      async listByWorkflowSlug(workflowSlug) {
+      async listByWorkflowSlug(workflowSlug, tenantId) {
         const rows = await db
           .select()
           .from(ruleSets)
-          .where(eq(ruleSets.workflowSlug, workflowSlug))
+          .where(
+            and(
+              eq(ruleSets.workflowSlug, workflowSlug),
+              tenantId != null ? eq(ruleSets.tenantId, tenantId) : undefined,
+            ),
+          )
           .orderBy(desc(ruleSets.updatedAt));
         return rows.map(toRuleSet);
       },
-      async list() {
-        const rows = await db.select().from(ruleSets).orderBy(asc(ruleSets.slug));
+      async list(tenantId) {
+        const rows = await db
+          .select()
+          .from(ruleSets)
+          .where(tenantId != null ? eq(ruleSets.tenantId, tenantId) : undefined)
+          .orderBy(asc(ruleSets.slug));
         return rows.map(toRuleSet);
       },
     },

@@ -50,6 +50,13 @@
       "when": 1789799380361,
       "tag": "0006_nostalgic_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789802199567,
+      "tag": "0007_first_stone_men",
+      "breakpoints": true
     }
   ]
 }

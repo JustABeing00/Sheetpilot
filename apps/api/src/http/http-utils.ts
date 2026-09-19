@@ -1,5 +1,16 @@
 import { ValidationError, formatZodError } from '@sheetpilot/core';
+import type { FastifyRequest } from 'fastify';
 import type { ZodType } from 'zod';
+
+/** The active tenant for the request (null only when authentication is disabled). */
+export function tenantOf(request: FastifyRequest): string | null {
+  return request.authUser?.tenantId ?? null;
+}
+
+/** A human-readable identity for audit fields (email preferred, then id). */
+export function actorOf(request: FastifyRequest): string | null {
+  return request.authUser?.email ?? request.authUser?.id ?? null;
+}
 
 export function parseOrThrow<T>(schema: ZodType<T>, value: unknown, label: string): T {
   const result = schema.safeParse(value);

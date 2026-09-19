@@ -58,6 +58,8 @@ export interface CreateRunInput {
    */
   configurationOverride?: WorkflowConfiguration | null;
   config: Record<string, unknown>;
+  /** The owning tenant (workspace). Null only for legacy/single-tenant (auth disabled) runs. */
+  tenantId?: string | null;
 }
 
 function describeError(error: unknown): string {
@@ -110,6 +112,7 @@ export class RunService {
 
     const run = workflowRunSchema.parse({
       id: newId(),
+      tenantId: input.tenantId ?? null,
       workflowId: `wf-${workflow.slug}`,
       workflowSlug: workflow.slug,
       workflowVersion: workflow.version,
@@ -158,6 +161,7 @@ export class RunService {
 
     const snapshot = runSnapshotSchema.parse({
       id: newId(),
+      tenantId: run.tenantId,
       runId: run.id,
       workflowSlug: run.workflowSlug,
       workflowVersion: run.workflowVersion,
@@ -239,7 +243,7 @@ export class RunService {
         ctx,
       );
 
-      await this.persistSteps(runId, execution.steps);
+      await this.persistSteps(run.id, run.tenantId, execution.steps);
 
       if (execution.status === 'failed' || !execution.state) {
         await this.fail(run, execution.error?.message ?? 'Workflow execution failed', startedAt);
@@ -294,6 +298,7 @@ export class RunService {
 
   private async persistSteps(
     runId: string,
+    tenantId: string | null,
     steps: Array<{
       stepId: string;
       name: string;
@@ -309,6 +314,7 @@ export class RunService {
     const records = steps.map((step) =>
       stepRunSchema.parse({
         id: stepRunIds.forRun(runId, step.stepId),
+        tenantId,
         runId,
         stepId: step.stepId,
         name: step.name,
@@ -392,7 +398,13 @@ export class RunService {
 
     await this.deps.repositories.decisions.createMany(
       outputs.decisionRecords.map((record) =>
-        decisionRecordSchema.parse({ ...record, id: newId(), runId: run.id, createdAt: now }),
+        decisionRecordSchema.parse({
+          ...record,
+          id: newId(),
+          tenantId: run.tenantId,
+          runId: run.id,
+          createdAt: now,
+        }),
       ),
     );
 
@@ -401,6 +413,7 @@ export class RunService {
         reviewItemSchema.parse({
           ...item,
           id: newId(),
+          tenantId: run.tenantId,
           runId: run.id,
           status: 'open',
           resolution: null,
@@ -459,6 +472,7 @@ export class RunService {
 
     const artifact = artifactSchema.parse({
       id: newId(),
+      tenantId: run.tenantId,
       runId: run.id,
       kind,
       format,

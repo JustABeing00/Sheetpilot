@@ -13,7 +13,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import type { AppContainer } from '../../container.js';
 import { toReviewItemDto, toReviewResolutionLogDto } from '../dto.js';
-import { clampLimit, parseOffset, parseOrThrow } from '../http-utils.js';
+import { actorOf, clampLimit, parseOffset, parseOrThrow, tenantOf } from '../http-utils.js';
 
 function parseList(value: unknown): string[] | undefined {
   if (typeof value !== 'string' || value.length === 0) {
@@ -37,19 +37,21 @@ export function registerReviewItemRoutes(app: FastifyInstance, container: AppCon
       ?.map((entry) => reviewReasonSchema.safeParse(entry))
       .flatMap((parsed) => (parsed.success ? [parsed.data] : []));
 
+    const tenantId = tenantOf(request);
     const options: ReviewListOptions = {
       statuses: status.success ? [status.data] : definition?.statuses,
       reasons: reasons && reasons.length > 0 ? reasons : definition?.reasons,
       severities: severity.success ? [severity.data] : definition?.severities,
       runId: typeof query['runId'] === 'string' ? query['runId'] : undefined,
+      tenantId,
       limit: clampLimit(query['limit'], 100),
       offset: parseOffset(query['offset']),
     };
 
     const [items, openCount, counts] = await Promise.all([
       container.repositories.reviewItems.list(options),
-      container.repositories.reviewItems.countOpen(),
-      container.repositories.reviewItems.counts(),
+      container.repositories.reviewItems.countOpen(tenantId),
+      container.repositories.reviewItems.counts(tenantId),
     ]);
 
     const runIds = [...new Set(items.map((item) => item.runId))];
@@ -70,7 +72,7 @@ export function registerReviewItemRoutes(app: FastifyInstance, container: AppCon
   app.get('/api/v1/review-items/:id', async (request) => {
     const { id } = request.params as { id: string };
     const item = await container.repositories.reviewItems.getById(id);
-    if (!item) {
+    if (!item || (tenantOf(request) != null && item.tenantId !== tenantOf(request))) {
       throw new NotFoundError('Review item', id);
     }
     const run = await container.repositories.runs.getById(item.runId);
@@ -79,7 +81,7 @@ export function registerReviewItemRoutes(app: FastifyInstance, container: AppCon
 
   app.get('/api/v1/review-items/:id/history', async (request) => {
     const { id } = request.params as { id: string };
-    const history = await container.reviewService.history(id);
+    const history = await container.reviewService.history(id, tenantOf(request));
     return reviewHistoryResponseSchema.parse({
       items: history.map(toReviewResolutionLogDto),
     });
@@ -93,7 +95,12 @@ export function registerReviewItemRoutes(app: FastifyInstance, container: AppCon
       'resolve review item request',
     );
 
-    const item = await container.reviewService.resolve(id, body);
+    const item = await container.reviewService.resolve(
+      id,
+      body,
+      actorOf(request),
+      tenantOf(request),
+    );
     const run = await container.repositories.runs.getById(item.runId);
     return toReviewItemDto(item, run?.workflowSlug ?? null);
   });
