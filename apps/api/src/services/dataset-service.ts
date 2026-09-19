@@ -24,12 +24,15 @@ import {
   validateUpload,
   type Row,
 } from '@sheetpilot/file-processing';
+import type { QuotaService } from './quota-service.js';
 
 export interface DatasetServiceDeps {
   repositories: Repositories;
   storage: FileStorage;
   clock: Clock;
   logger: Logger;
+  /** Plan-quota gate; omitted in unit tests and when enforcement is disabled. */
+  quotas?: QuotaService;
   limits: {
     maxUploadBytes: number;
     maxXlsxUncompressedBytes: number;
@@ -122,6 +125,8 @@ export class DatasetService {
         maxUncompressedBytes: this.deps.limits.maxXlsxUncompressedBytes,
       });
     }
+
+    await this.deps.quotas?.assertCanUploadDataset(tenantId);
 
     const datasetId = newId();
     const storageKey = `uploads/${validated.format}/${datasetId}.${validated.format}`;

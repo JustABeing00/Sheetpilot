@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { membershipRoleSchema } from '../domain/tenancy.js';
+import { planIdSchema } from '../domain/plans.js';
 
 export const workspaceDtoSchema = z.object({
   id: z.string(),
@@ -61,3 +62,20 @@ export const invitationDtoSchema = z.object({
 export type InvitationDto = z.infer<typeof invitationDtoSchema>;
 
 export const invitationListResponseSchema = z.object({ items: z.array(invitationDtoSchema) });
+
+export const planUsageDtoSchema = z.object({
+  plan: planIdSchema,
+  planName: z.string(),
+  limits: z.object({
+    maxMembers: z.number().int().positive().nullable(),
+    maxDatasets: z.number().int().positive().nullable(),
+    maxRunsPerMonth: z.number().int().positive().nullable(),
+  }),
+  usage: z.object({
+    members: z.number().int().nonnegative(),
+    datasets: z.number().int().nonnegative(),
+    runsThisMonth: z.number().int().nonnegative(),
+  }),
+  periodStart: z.string(),
+});
+export type PlanUsageDto = z.infer<typeof planUsageDtoSchema>;

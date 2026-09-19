@@ -1,4 +1,4 @@
-import { NotFoundError } from '@sheetpilot/core';
+import { NotFoundError, tenantSchema } from '@sheetpilot/core';
 import type {
   Artifact,
   ArtifactRepository,
@@ -180,12 +180,14 @@ export function createInMemoryRepositories(): Repositories {
 
   const tenants: TenantRepository = {
     create: (tenant) => {
-      tenantStore.set(tenant.id, tenant);
-      return Promise.resolve(tenant);
+      const parsed = tenantSchema.parse(tenant);
+      tenantStore.set(parsed.id, parsed);
+      return Promise.resolve(parsed);
     },
     update: (tenant) => {
-      tenantStore.set(tenant.id, tenant);
-      return Promise.resolve(tenant);
+      const parsed = tenantSchema.parse(tenant);
+      tenantStore.set(parsed.id, parsed);
+      return Promise.resolve(parsed);
     },
     getById: (id) => Promise.resolve(tenantStore.get(id) ?? null),
     getBySlug: (slug) =>
@@ -302,6 +304,10 @@ export function createInMemoryRepositories(): Repositories {
         ),
       );
     },
+    countForTenant: (tenantId) =>
+      Promise.resolve(
+        [...datasetStore.values()].filter((dataset) => dataset.tenantId === tenantId).length,
+      ),
   };
 
   const workflowConfigurations: WorkflowConfigurationRepository = {
@@ -370,6 +376,12 @@ export function createInMemoryRepositories(): Repositories {
       return Promise.resolve(paginate(byDateDesc(filtered, createdAt), options));
     },
     count: () => Promise.resolve(runStore.size),
+    countForTenantSince: (tenantId, since) =>
+      Promise.resolve(
+        [...runStore.values()].filter(
+          (run) => run.tenantId === tenantId && run.createdAt.getTime() >= since.getTime(),
+        ).length,
+      ),
   };
 
   const runSnapshots: RunSnapshotRepository = {

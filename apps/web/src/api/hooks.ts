@@ -26,6 +26,7 @@ import {
   prepareSavedWorkflowRunResponseSchema,
   invitationDtoSchema,
   invitationListResponseSchema,
+  planUsageDtoSchema,
   workspaceDetailDtoSchema,
   workspaceDtoSchema,
   workspaceListResponseSchema,
@@ -80,6 +81,7 @@ export const queryKeys = {
   savedWorkflow: (id: string) => ['saved-workflows', id] as const,
   workspaces: ['workspaces'] as const,
   currentWorkspace: ['workspaces', 'current'] as const,
+  usage: ['usage'] as const,
 };
 
 export function useSession() {
@@ -461,6 +463,14 @@ export function useCurrentWorkspace(enabled: boolean) {
   });
 }
 
+export function useUsage(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.usage,
+    queryFn: () => apiGet('/api/v1/usage', planUsageDtoSchema),
+    enabled,
+  });
+}
+
 export function useCreateWorkspace() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -514,6 +524,7 @@ export function useRemoveMember() {
       apiSend(`/api/v1/workspaces/current/members/${membershipId}`, 'DELETE'),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     },
   });
 }
@@ -533,6 +544,7 @@ export function useInviteMember() {
       apiPost('/api/v1/workspaces/current/invitations', input, invitationDtoSchema),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     },
   });
 }

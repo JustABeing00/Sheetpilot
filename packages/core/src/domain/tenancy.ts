@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { planIdSchema } from './plans.js';
 
 /**
  * A tenant is the isolation boundary: an organization (or a solo user's personal workspace) whose
@@ -17,6 +18,8 @@ export const tenantSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   slug: z.string().min(1),
+  /** The commercial plan governing quotas. Billing (or an operator) may change it. */
+  plan: planIdSchema.default('free'),
   createdAt: z.date(),
   updatedAt: z.date(),
 });

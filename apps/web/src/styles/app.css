@@ -3706,6 +3706,31 @@ kbd {
   text-decoration: none;
 }
 
+.workspace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.usage-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
 .workspace-form-row {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNull } from 'drizzle-orm';
 import {
   artifactSchema,
   datasetProfileSchema,
@@ -325,6 +325,13 @@ export function createPostgresRepositories(db: Database): Repositories {
           .offset(options?.offset ?? 0);
         return rows.map(toDataset);
       },
+      async countForTenant(tenantId) {
+        const [row] = await db
+          .select({ value: count() })
+          .from(datasets)
+          .where(tenantId === null ? isNull(datasets.tenantId) : eq(datasets.tenantId, tenantId));
+        return row?.value ?? 0;
+      },
       async delete(id) {
         await db.delete(datasets).where(eq(datasets.id, id));
       },
@@ -446,6 +453,18 @@ export function createPostgresRepositories(db: Database): Repositories {
       },
       async count() {
         const [row] = await db.select({ value: count() }).from(runs);
+        return row?.value ?? 0;
+      },
+      async countForTenantSince(tenantId, since) {
+        const [row] = await db
+          .select({ value: count() })
+          .from(runs)
+          .where(
+            and(
+              tenantId === null ? isNull(runs.tenantId) : eq(runs.tenantId, tenantId),
+              gte(runs.createdAt, since),
+            ),
+          );
         return row?.value ?? 0;
       },
       async delete(id) {

@@ -320,6 +320,7 @@ export const tenants = pgTable('tenants', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  plan: text('plan').notNull().default('free'),
   createdAt: timestampColumn('created_at'),
   updatedAt: timestampColumn('updated_at'),
 });

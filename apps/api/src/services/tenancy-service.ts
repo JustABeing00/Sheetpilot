@@ -37,6 +37,7 @@ export class TenancyService {
       id: newId(),
       name,
       slug,
+      plan: 'free',
       createdAt: now,
       updatedAt: now,
     });

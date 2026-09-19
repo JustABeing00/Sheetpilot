@@ -12,6 +12,7 @@ export * from './domain/run-snapshot.js';
 export * from './domain/output.js';
 export * from './domain/saved-workflow.js';
 export * from './domain/tenancy.js';
+export * from './domain/plans.js';
 export * from './api/contracts.js';
 export * from './api/workspaces.js';
 export * from './ports/clock.js';

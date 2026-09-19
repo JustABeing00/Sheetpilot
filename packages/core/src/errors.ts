@@ -49,6 +49,12 @@ export class ForbiddenError extends AppError {
   }
 }
 
+export class QuotaExceededError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super(message, { code: 'quota_exceeded', statusCode: 402, details });
+  }
+}
+
 export class PayloadTooLargeError extends AppError {
   constructor(message: string, details?: unknown) {
     super(message, { code: 'payload_too_large', statusCode: 413, details });

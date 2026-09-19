@@ -117,6 +117,12 @@ export const envSourceSchema = z.object({
   AUTH_RESEND_KEY: z.string().default(''),
   AUTH_EMAIL_FROM: z.string().default(''),
   BOOTSTRAP_TENANT_NAME: z.string().min(1).default('SheetPilot'),
+  QUOTAS_ENFORCED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  BILLING_PROVIDER: z.enum(['none', 'stripe']).default('none'),
+  STRIPE_WEBHOOK_SECRET: z.string().default(''),
   INBOX_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -212,6 +218,17 @@ export interface AppConfig {
     };
   };
   /**
+   * Per-tenant plan quotas and metering. Enforcement is off by default so local installs and the test
+   * suite are unaffected; hosted deployments turn it on and let billing change a tenant's plan.
+   */
+  plans: {
+    enforced: boolean;
+  };
+  billing: {
+    provider: 'none' | 'stripe';
+    stripeWebhookSecret: string | null;
+  };
+  /**
    * Optional folder inbox: drop a day's files into a folder and a saved workflow runs automatically.
    * Each job is a subdirectory holding a primary and an events file.
    */
@@ -303,6 +320,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (source.STORAGE_DRIVER === 's3' && source.S3_BUCKET.trim().length === 0) {
     throw new ConfigurationError('S3_BUCKET is required when STORAGE_DRIVER=s3', {
       variable: 'S3_BUCKET',
+    });
+  }
+
+  if (source.BILLING_PROVIDER === 'stripe' && source.STRIPE_WEBHOOK_SECRET.trim().length === 0) {
+    throw new ConfigurationError('STRIPE_WEBHOOK_SECRET is required when BILLING_PROVIDER=stripe', {
+      variable: 'STRIPE_WEBHOOK_SECRET',
     });
   }
 
@@ -432,6 +455,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
           ? { apiKey: source.AUTH_RESEND_KEY, from: source.AUTH_EMAIL_FROM }
           : null,
       },
+    },
+    plans: {
+      enforced: source.QUOTAS_ENFORCED,
+    },
+    billing: {
+      provider: source.BILLING_PROVIDER,
+      stripeWebhookSecret:
+        source.STRIPE_WEBHOOK_SECRET.trim().length > 0 ? source.STRIPE_WEBHOOK_SECRET : null,
     },
     inbox: {
       enabled: source.INBOX_ENABLED,

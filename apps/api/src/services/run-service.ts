@@ -38,6 +38,7 @@ import {
   type WorkflowRegistry,
   type WorkflowOutputs,
 } from '@sheetpilot/workflow-engine';
+import type { QuotaService } from './quota-service.js';
 
 export interface RunServiceDeps {
   repositories: Repositories;
@@ -47,6 +48,8 @@ export interface RunServiceDeps {
   maxAttempts: number;
   /** Called after a job is enqueued so an in-process dispatcher can start it immediately. */
   onEnqueued?: () => void;
+  /** Plan-quota gate; omitted in unit tests and when enforcement is disabled. */
+  quotas?: QuotaService;
   clock: Clock;
   logger: Logger;
 }
@@ -114,6 +117,7 @@ export class RunService {
     const workflow = this.deps.registry.require(input.workflowSlug);
     await this.requireFile(input.primaryFileId, 'Primary');
     await this.requireFile(input.eventsFileId, 'Events');
+    await this.deps.quotas?.assertCanCreateRun(input.tenantId ?? null);
 
     const run = workflowRunSchema.parse({
       id: newId(),

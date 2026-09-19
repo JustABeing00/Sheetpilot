@@ -50,6 +50,8 @@ export interface RunRepository {
   getById(id: RunId): Promise<WorkflowRun | null>;
   list(options?: RunListOptions): Promise<WorkflowRun[]>;
   count(): Promise<number>;
+  /** Runs created at/after `since` for a tenant, for plan metering. */
+  countForTenantSince(tenantId: string | null, since: Date): Promise<number>;
   delete(id: RunId): Promise<void>;
 }
 

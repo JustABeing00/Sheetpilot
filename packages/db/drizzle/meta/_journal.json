@@ -71,6 +71,13 @@
       "when": 1789807660192,
       "tag": "0009_smiling_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789812535984,
+      "tag": "0010_panoramic_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

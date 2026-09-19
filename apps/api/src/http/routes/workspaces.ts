@@ -4,6 +4,7 @@ import {
   ForbiddenError,
   invitationDtoSchema,
   invitationListResponseSchema,
+  planUsageDtoSchema,
   updateMemberRoleRequestSchema,
   updateWorkspaceRequestSchema,
   workspaceDetailDtoSchema,
@@ -51,6 +52,15 @@ export function registerWorkspaceRoutes(app: FastifyInstance, container: AppCont
     const workspace = await container.workspaceService.create(userId, body.name);
     reply.status(201);
     return workspace;
+  });
+
+  app.get('/api/v1/usage', async (request) => {
+    requireUser(container, request);
+    const tenantId = tenantOf(request);
+    if (!tenantId) {
+      throw new ForbiddenError('No active workspace.');
+    }
+    return planUsageDtoSchema.parse(await container.quotaService.snapshot(tenantId));
   });
 
   app.get('/api/v1/workspaces/current', async (request) => {

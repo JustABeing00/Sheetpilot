@@ -12,6 +12,7 @@ import {
   useRevokeInvitation,
   useSession,
   useUpdateMemberRole,
+  useUsage,
 } from '../api/hooks.js';
 import { ApiError } from '../api/client.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -25,6 +26,7 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  ProgressBar,
 } from '../components/ui.js';
 import { formatDateTime } from '../lib/format.js';
 
@@ -47,6 +49,7 @@ export function WorkspaceSettingsPage() {
   const current = useCurrentWorkspace(signedIn);
   const canManage = current.data?.role === 'owner' || current.data?.role === 'admin';
   const invitations = useInvitations(signedIn && canManage);
+  const usage = useUsage(signedIn);
   const createWorkspace = useCreateWorkspace();
   const renameWorkspace = useRenameWorkspace();
   const updateMemberRole = useUpdateMemberRole();
@@ -229,6 +232,43 @@ export function WorkspaceSettingsPage() {
           only be changed by an owner or admin.
         </Alert>
       ) : null}
+
+      <Card
+        title="Plan & usage"
+        subtitle="Metering for the current billing period; limits depend on the plan."
+      >
+        {usage.isPending ? <LoadingState label="Loading usage…" /> : null}
+        {usage.isError ? (
+          <ErrorState error={usage.error} onRetry={() => void usage.refetch()} />
+        ) : null}
+        {usage.data ? (
+          <>
+            <div className="workspace-meta">
+              <Badge tone="info">{usage.data.planName} plan</Badge>
+              <span className="muted small">
+                Period started {formatDateTime(usage.data.periodStart)}
+              </span>
+            </div>
+            <ul className="usage-list">
+              <UsageRow
+                label="Members"
+                used={usage.data.usage.members}
+                limit={usage.data.limits.maxMembers}
+              />
+              <UsageRow
+                label="Datasets"
+                used={usage.data.usage.datasets}
+                limit={usage.data.limits.maxDatasets}
+              />
+              <UsageRow
+                label="Runs this month"
+                used={usage.data.usage.runsThisMonth}
+                limit={usage.data.limits.maxRunsPerMonth}
+              />
+            </ul>
+          </>
+        ) : null}
+      </Card>
 
       <Card
         title="Name"
@@ -466,5 +506,31 @@ export function WorkspaceSettingsPage() {
         </Field>
       </ConfirmDialog>
     </div>
+  );
+}
+
+function UsageRow({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+  if (limit === null) {
+    return (
+      <li className="usage-row">
+        <div className="usage-row-head">
+          <span>{label}</span>
+          <span className="muted small">{used} used · unlimited</span>
+        </div>
+      </li>
+    );
+  }
+
+  const percent = Math.min(100, Math.round((used / limit) * 100));
+  return (
+    <li className="usage-row">
+      <div className="usage-row-head">
+        <span>{label}</span>
+        <span className="muted small">
+          {used} of {limit}
+        </span>
+      </div>
+      <ProgressBar value={percent} label={`${label} usage`} />
+    </li>
   );
 }

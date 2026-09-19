@@ -17,11 +17,14 @@ import {
   type WorkspaceDto,
   type WorkspaceMemberDto,
 } from '@sheetpilot/core';
+import type { QuotaService } from './quota-service.js';
 
 export interface WorkspaceServiceDeps {
   repositories: Repositories;
   clock: Clock;
   logger: Logger;
+  /** Plan-quota gate; omitted in unit tests and when enforcement is disabled. */
+  quotas?: QuotaService;
 }
 
 /** How long an invitation stays valid. */
@@ -76,6 +79,7 @@ export class WorkspaceService {
       id: newId(),
       name,
       slug,
+      plan: 'free',
       createdAt: now,
       updatedAt: now,
     });
@@ -165,6 +169,7 @@ export class WorkspaceService {
     if (input.role === 'owner' && actor.role !== 'owner') {
       throw new ForbiddenError('Only an owner can invite someone as an owner.');
     }
+    await this.deps.quotas?.assertCanAddMember(tenantId);
     const email = input.email.trim().toLowerCase();
 
     const memberships = await this.deps.repositories.memberships.listForTenant(tenantId);

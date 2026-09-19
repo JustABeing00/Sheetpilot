@@ -39,6 +39,7 @@ import { WorkspaceService } from './services/workspace-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
 import { InboxService } from './services/inbox-service.js';
+import { QuotaService } from './services/quota-service.js';
 import { RetentionService } from './services/retention-service.js';
 import { ReviewService } from './services/review-service.js';
 import { RuleSetService } from './services/rule-set-service.js';
@@ -70,6 +71,7 @@ export interface AppContainer {
   retentionService: RetentionService;
   inboxService: InboxService | null;
   idempotency: IdempotencyService;
+  quotaService: QuotaService;
   auth: {
     enabled: boolean;
     config: AuthConfig | null;
@@ -198,11 +200,19 @@ export async function createContainer(
   });
   await seedRegisteredWorkflows(repositories, registry, clock, logger);
 
+  const quotaService = new QuotaService({
+    repositories,
+    clock,
+    logger,
+    enforced: config.plans.enforced,
+  });
+
   const datasetService = new DatasetService({
     repositories,
     storage,
     clock,
     logger,
+    quotas: quotaService,
     limits: {
       maxUploadBytes: config.storage.maxUploadBytes,
       maxXlsxUncompressedBytes: config.storage.maxXlsxUncompressedBytes,
@@ -231,6 +241,7 @@ export async function createContainer(
     queue,
     maxAttempts: config.run.maxAttempts,
     onEnqueued: () => dispatcher?.kick(),
+    quotas: quotaService,
     clock,
     logger,
   });
@@ -265,7 +276,12 @@ export async function createContainer(
     bootstrapTenantName: config.auth.bootstrapTenantName,
   });
 
-  const workspaceService = new WorkspaceService({ repositories, clock, logger });
+  const workspaceService = new WorkspaceService({
+    repositories,
+    clock,
+    logger,
+    quotas: quotaService,
+  });
 
   let authConfig: AuthConfig | null = null;
   if (config.auth.enabled) {
@@ -368,6 +384,7 @@ export async function createContainer(
       config: authConfig,
       tenancy: tenancyService,
     },
+    quotaService,
     workspaceService,
     authenticate,
     async readiness() {
