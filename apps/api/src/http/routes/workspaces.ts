@@ -12,6 +12,7 @@ import {
 } from '@sheetpilot/core';
 import type { FastifyInstance } from 'fastify';
 import type { AppContainer } from '../../container.js';
+import { setActiveWorkspace } from '../../auth/workspace-cookie.js';
 import { actorOf, parseOrThrow, tenantOf } from '../http-utils.js';
 
 function toInvitationDto(invitation: Invitation) {
@@ -61,6 +62,15 @@ export function registerWorkspaceRoutes(app: FastifyInstance, container: AppCont
     return workspaceDetailDtoSchema.parse(
       await container.workspaceService.getForUser(userId, tenantId),
     );
+  });
+
+  app.post('/api/v1/workspaces/:workspaceId/activate', async (request, reply) => {
+    const userId = requireUser(container, request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    await container.workspaceService.activate(userId, workspaceId);
+    setActiveWorkspace(reply, workspaceId, container.config.isProduction);
+    reply.status(204);
+    return null;
   });
 
   app.put('/api/v1/workspaces/current', async (request) => {

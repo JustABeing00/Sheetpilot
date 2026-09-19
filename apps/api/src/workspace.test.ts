@@ -173,4 +173,22 @@ describe('WorkspaceService', () => {
     await expect(service.rename('user-1', b.id, 'Nope')).rejects.toThrow();
     expect((await service.getForUser('user-1', a.id)).name).toBe('Alpha');
   });
+
+  it('validates the active workspace and falls back to the default when it is not a membership', async () => {
+    const { service } = makeService();
+    const alpha = await service.create('user-1', 'Alpha');
+    const beta = await service.create('user-2', 'Beta');
+
+    await expect(service.activate('user-1', alpha.id)).resolves.toBeUndefined();
+    await expect(service.activate('user-1', beta.id)).rejects.toThrow();
+
+    // A remembered workspace is honoured while the membership lasts, then the default is used.
+    await expect(service.resolveActiveTenant('user-1', alpha.id, 'Ada')).resolves.toBe(alpha.id);
+    await expect(service.resolveActiveTenant('user-1', beta.id, 'Ada')).resolves.toBe(alpha.id);
+    await expect(service.resolveActiveTenant('user-1', null, 'Ada')).resolves.toBe(alpha.id);
+
+    // A brand-new user gets a personal workspace on their first request.
+    const personal = await service.resolveActiveTenant('user-3', null, 'Newcomer');
+    expect((await service.getForUser('user-3', personal)).role).toBe('owner');
+  });
 });

@@ -28,6 +28,7 @@ import { LocalFileStorage, S3FileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
 import { buildAuthConfig } from './auth/config.js';
 import { readSession } from './auth/session.js';
+import { readActiveWorkspace } from './auth/workspace-cookie.js';
 import type { AuthUser } from './auth/types.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
@@ -294,8 +295,9 @@ export async function createContainer(
     }
     // A pending invitation is accepted the moment the invited person signs in.
     await workspaceService.acceptPendingInvitations(claims.userId, claims.email);
-    const tenantId = await workspaceService.ensureWorkspace(
+    const tenantId = await workspaceService.resolveActiveTenant(
       claims.userId,
+      readActiveWorkspace(request),
       claims.name ?? claims.email,
     );
     return { id: claims.userId, email: claims.email, name: claims.name, tenantId };

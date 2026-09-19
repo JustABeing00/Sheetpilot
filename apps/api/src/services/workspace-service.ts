@@ -238,6 +238,32 @@ export class WorkspaceService {
     }
   }
 
+  /** Validates that the user may open the given workspace (404 when they are not a member). */
+  async activate(userId: string, tenantId: string): Promise<void> {
+    await this.requireMembership(userId, tenantId);
+  }
+
+  /**
+   * Resolves the workspace a request should act in: the requested one when the user is still a member,
+   * otherwise their default workspace (provisioning a personal one on first use).
+   */
+  async resolveActiveTenant(
+    userId: string,
+    requestedTenantId: string | null,
+    label: string | null,
+  ): Promise<string> {
+    if (requestedTenantId) {
+      const membership = await this.deps.repositories.memberships.getForUserAndTenant(
+        userId,
+        requestedTenantId,
+      );
+      if (membership) {
+        return membership.tenantId;
+      }
+    }
+    return this.ensureWorkspace(userId, label);
+  }
+
   /** Ensures a user has at least one workspace (a personal one) and returns the active tenant id. */
   async ensureWorkspace(userId: string, label: string | null): Promise<string> {
     const existing = await this.deps.repositories.memberships.getDefaultForUser(userId);
