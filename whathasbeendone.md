@@ -1,93 +1,97 @@
-# What Has Been Done — Session Handoff
+# What Has Been Done — Project Handoff
 
-> Purpose: let a new session resume with zero missing context.
-> Written: 2026-09-19. Branch: `main`. Repo: SheetPilot (Excel workflow automation SaaS).
+> Purpose: the complete record of the SheetPilot build. All planned phases (A–K) are implemented,
+> verified and committed. Written: 2026-09-19. Branch: `main`. Repo: SheetPilot (Excel workflow
+> automation SaaS).
 
-## 0. Current state (verified this session)
+## 0. Current state
 
-- **Working tree is NOT clean.** It contains the complete **Phase D backend** (workspace/member management API + React Query hooks), finished and tested but **not yet committed**.
-- **HEAD:** `0670b13` — "Phase F: durable run queue, dispatcher and dedicated worker".
+- **Working tree is clean.**
+- **HEAD at the time of writing:** `cc5381d` — "Phase K: legal templates, compliance, residency and
+  i18n decisions" (this handoff file is the next commit).
 - **Verification (run 2026-09-19, all green):**
-  - `npm run format:check` — clean (I ran `prettier --write` on the 5 drifted files; formatting-only change)
+  - `npm run format:check` — clean
   - `npm run lint` — clean
-  - `npm run typecheck` — clean (all workspaces, incl. `@sheetpilot/web`)
-  - `npm test` — **41 files / 346 tests, all passing** (incl. `workspace.test.ts`: 7 tests)
+  - `npm run typecheck` — clean (all workspaces incl. `@sheetpilot/web`)
+  - `npm test` — **47 files / 376 tests passing**
   - `npm run build` — clean (API bundle + web `dist/`)
-  - `npm audit --omit=dev` — **0 vulnerabilities**
-- **Migrations:** `0000`–`0009` present in `packages/db/drizzle/` (`0009_smiling_raider.sql` creates `invitations`; uncommitted).
-- A pasted "garbled edit" transcript about duplicate imports in `apps/web/src/api/hooks.ts` / `client.ts` was investigated and is a **false alarm**: `hooks.ts` has exactly one `from './client.js'` import (line 50, includes `apiSend`); `client.ts` has exactly one `apiSend` definition (line 115); no duplicates exist.
+  - `npm audit --omit=dev` — **0 vulnerabilities** (4 moderate dev-only advisories in drizzle-kit's
+    esbuild chain; `npm audit fix --force` would downgrade drizzle-kit and is not applied)
+  - `npm run e2e` — **3 Playwright tests passing** (app shell, auth-disabled workspace notice,
+    upload → run → review → export download)
+  - Production bundle smoke: `node apps/api/dist/index.js` served `/healthz`, `/readyz`,
+    `/api/v1/meta`; `npm run smoke` passed end to end against it
+  - `npx wrangler deploy --dry-run` (apps/web) — Worker + 35 assets upload cleanly
+- **Migrations:** `0000`–`0010` present in `packages/db/drizzle/` (latest: `0010_panoramic_gamma_corps`
+  adds `tenants.plan`).
 
 ## 1. Project snapshot
 
-- **Product:** SheetPilot — spreadsheet-workflow automation (upload → inspect → map → match/group → latest event → rules → AI assist → human review queue → export). Monorepo: `apps/api` (Fastify), `apps/web` (React + Vite SPA), `packages/*` (`core`, `config`, `db`, `file-processing`, `matching-engine`, `rule-engine`, `ai`, `workflow-engine`).
-- **Chosen production topology (locked):** Cloudflare Workers frontend (static assets + `/api` proxy that injects `x-api-key` server-side) + Render API service + Render Postgres 16 + persistent disk, moving to R2 object storage for multi-instance. See `docs/deployment.md`, `render.yaml`, `Dockerfile`, `apps/web/wrangler.jsonc`, `apps/web/worker/index.js`.
-- **Auth choice (locked): Auth.js (`@auth/core`) mounted inside Fastify** (no separate auth service), Drizzle adapter, JWT sessions, providers = email magic link (Resend) + Google + GitHub. Rejected: Clerk (vendor lock-in/cost), separate auth service (extra infra).
+- **Product:** SheetPilot — spreadsheet-workflow automation (upload → inspect → map → match/group →
+  latest event → rules → AI assist → human review queue → export). Monorepo: `apps/api` (Fastify),
+  `apps/web` (React + Vite SPA), `packages/*` (`core`, `config`, `db`, `file-processing`,
+  `matching-engine`, `rule-engine`, `ai`, `workflow-engine`).
+- **Production topology (locked):** Cloudflare Worker (static assets + `/api` proxy injecting
+  `x-api-key`) + Render API + Render Postgres 16 + disk (R2 for multi-instance) + Render worker.
+- **Auth (locked):** Auth.js (`@auth/core`) inside Fastify, Drizzle adapter, JWT sessions, magic link
+  (Resend) + Google + GitHub. `AUTH_ENABLED=false` by default.
 
-## 2. Locked design decisions (do not re-litigate without cause)
+## 2. Locked design decisions (unchanged)
 
-1. **Tenant = organization; solo users get a personal org** (`personalTenantName`). Tenancy unit question resolved this way.
-2. **Enforcement in code, not RLS:** every read/list/update/delete is scoped by `tenantId`; cross-tenant access returns **404** (never 403, to avoid confirming existence).
-3. **Single shared-secret service key** remains as Worker↔API transport trust (`x-api-key`); user identity comes from the Auth.js session. These are two separate layers.
-4. **`AUTH_ENABLED=false` by default** so local dev and the whole test suite run unchanged; all new auth/tenant behavior is additive and opt-in.
-5. **Memory driver defaults to a bootstrap tenant** (`BOOTSTRAP_TENANT_NAME`, default `SheetPilot`) so the 300+ pre-existing tests stay green without fixtures.
-6. **Runs execute via a durable queue** (`RunQueue` port; in-memory impl for dev/tests, Postgres impl for prod) drained by a `RunDispatcher` that runs in-process on the API and/or as a dedicated `--worker` process. In-process dispatch + immediate `kick()` on enqueue preserves the old latency/tests.
-7. **Object storage behind the existing `FileStorage` port** (`S3FileStorage`; R2-compatible). Local disk remains the default.
-8. **Forward-only migrations**, applied once at deploy (`npm run db:migrate` / `--migrate` bundle flag / `DB_AUTO_MIGRATE=true` single-instance only). Never from two processes at once.
-9. **Checkpoints per phase, verify-then-commit discipline** (`format:check` + `lint` + `typecheck` + `test` + `build` + `npm audit --omit=dev` before each commit).
+1. Tenant = organization; solo users get a personal org (`personalTenantName`).
+2. Enforcement in code, not RLS; cross-tenant access returns 404.
+3. Single shared-secret service key for Worker↔API trust; user identity from the session.
+4. `AUTH_ENABLED=false` by default; auth/tenant behavior is additive and opt-in.
+5. Memory driver bootstraps a tenant (`BOOTSTRAP_TENANT_NAME`) so the suite stays fixture-free.
+6. Runs execute via a durable queue (in-memory or Postgres) drained by a dispatcher in-process or in
+   the dedicated worker.
+7. Object storage behind `FileStorage` (`S3FileStorage` for R2); local disk default.
+8. Forward-only migrations, applied once at deploy; never from two processes at once.
+9. Checkpoints per phase with verify-then-commit discipline.
+10. **New:** quotas are opt-in (`QUOTAS_ENFORCED=false` default); plans are stored on the tenant and
+    changed by the Stripe webhook (metadata contract) or an operator.
+11. **New:** active workspace is remembered in a membership-validated `sp_workspace` cookie.
 
 ## 3. Phase-by-phase status
 
-| Phase | Status | Commit / location | Notes |
+| Phase | Status | Commit | Notes |
 |---|---|---|---|
-| A — Hygiene (prettier, uuid, auth-aware smoke, prod-smoke workflow) | ✅ Done | part of `ddf1360` | uuid advisory genuinely eliminated: root `overrides` + hoisted `exceljs` (npm's workspace-override bug worked around); prod audit 0 vulns |
-| B — Auth.js backend (mount, adapter, sessions, tenancy domain/repos, guard) | ✅ Done | `ddf1360` | Migration `0006` (`users`, `accounts`, `sessions`, `verification_tokens`, `tenants`, `memberships`). `resolvedBy` no longer hardcoded null in the resolve path |
-| B UI — login page, session gating, account controls | ✅ Done | `549a2f8` | `AuthGate`, `LoginPage`, `useSession`, `authEnabled`/`authProviders` on `/meta`, cookie-credentialed API client |
-| C — Tenant isolation (model → repos → services → routes + suite) | ✅ Done | `357ed73` | `tenantId` on 11 tenant-scoped entities + migration `0007`; per-tenant rule sets; isolation test suite (`tenancy-isolation.test.ts`) |
-| E — Delete/erasure | ✅ Done | `23f0c6d` | Repository deletes, `DeletionService` cascade, `DELETE` run/dataset routes, `deletion.test.ts` |
-| G — S3/R2 object storage | ✅ Done | `23f0c6d` | `S3FileStorage` (AWS SDK v3), `STORAGE_DRIVER=s3`, R2 config |
-| H — Observability | ✅ Done | `e355f92` | `x-request-id` tracing + structured request logs |
-| I — Backups/DR/migrations docs | ✅ Done | `e355f92` + `docs/deployment.md` | RPO/RTO, restore drill, object versioning |
-| F — Durable queue + worker | ✅ Done | `0670b13` (HEAD) | `jobs` table + migration `0008` (`FOR UPDATE SKIP LOCKED` claims), dispatcher, `--worker` entry, Render `sheetpilot-worker`, `run-queue.test.ts` |
-| D — Tenant/member backend (workspaces API) | ✅ Done, **UNCOMMITTED** | working tree (see §4) | 9 new endpoints, `WorkspaceService`, `workspace.test.ts` (7 tests, passing), migration `0009` |
-| D — Tenant UI (switcher, members/invites pages, settings) | ⬜ Next | — | Start here after committing §4. Hooks already exist (see §5) |
-| J — E2E / load / restart testing | ⬜ Not started | — | Playwright E2E, load test on large XLSX, restart-behavior tests |
-| K — Compliance / billing / i18n | ⬜ Not started | — | Privacy/ToS/DPA, Stripe/plans, email templates, data-residency decision |
+| A — Hygiene | ✅ | `ddf1360` | prettier, uuid advisory removed, prod-smoke workflow |
+| B — Auth.js backend | ✅ | `ddf1360` | users/accounts/sessions/tenants/memberships, migration 0006 |
+| B UI — login/gating | ✅ | `549a2f8` | AuthGate, LoginPage, `authEnabled` on `/meta` |
+| C — Tenant isolation | ✅ | `357ed73` | `tenantId` across entities, migration 0007, isolation suite |
+| E — Delete/erasure | ✅ | `23f0c6d` | cascade deletion + routes + tests |
+| G — S3/R2 storage | ✅ | `23f0c6d` | `S3FileStorage`, `STORAGE_DRIVER=s3` |
+| H — Observability | ✅ | `e355f92` | `x-request-id`, structured request logs |
+| I — Backups/DR docs | ✅ | `e355f92` | RPO/RTO, restore drill in `docs/deployment.md` |
+| F — Durable queue + worker | ✅ | `0670b13` | jobs table + migration 0008, dispatcher, `--worker` |
+| D — Workspace/member API | ✅ | `e858ea1` | 9 endpoints, `WorkspaceService`, invitations, migration 0009; owner protection hardened |
+| D — Active workspace | ✅ | `4b0acaa` | `POST /workspaces/:id/activate`, `sp_workspace` cookie, migration-free |
+| D — Workspace UI | ✅ | `6d1e06f` | switcher in AppShell, `/workspace` settings page (rename, members, invites, create dialog) |
+| J — Restart/recovery + load | ✅ | `79460cb` | in-memory queue `recoverStale` parity, crash/restart tests, 10k-account/30k-event XLSX load guard |
+| Fix — run detail refresh | ✅ | `0d40527` | run-scoped queries refresh when a run finishes |
+| J — Playwright E2E | ✅ | `55faefe` | 3 browser tests incl. upload→run→review→export download |
+| K — Plans/quotas/metering | ✅ | `b2ba3f8` | plans in core, `tenants.plan` + migration 0010, `QuotaService`, enforcement hooks, `GET /api/v1/usage`, UI card |
+| K — Stripe billing | ✅ | `1417fdc` | signature-verified webhook, plan sync, `docs/billing.md` |
+| K — Emails | ✅ | `678f39b` | `EmailSender` port, Resend sender + log fallback, invitation email, `docs/email.md` |
+| K — Legal/compliance | ✅ | `cc5381d` | privacy/ToS/DPA templates, `docs/compliance.md` (residency + i18n decisions) |
 
-## 4. Uncommitted work: exact contents (Phase D backend)
+## 4. What exists now (operator view)
 
-**New files (untracked):**
-- `apps/api/src/http/routes/workspaces.ts` — 9 endpoints: `GET /api/v1/workspaces`, `POST /api/v1/workspaces`, `GET|PUT /api/v1/workspaces/current`, `PUT|DELETE /api/v1/workspaces/current/members/:membershipId`, `GET|POST /api/v1/workspaces/current/invitations`, `DELETE /api/v1/workspaces/current/invitations/:invitationId`. All require auth + manager role for admin actions; last-owner demotion/removal is refused.
-- `apps/api/src/services/workspace-service.ts` — `listForUser`, `getForUser`, `create`, `rename`, `setMemberRole`, `removeMember`, invitations CRUD, `acceptPendingInvitations` (join-on-sign-in), `ensureWorkspace`.
-- `apps/api/src/workspace.test.ts` — 7 tests, all passing.
-- `packages/core/src/api/workspaces.ts` — zod contracts + DTOs (`workspaceDtoSchema`, `workspaceDetailDtoSchema`, member/invitation schemas, create/update/invite request schemas).
-- `packages/core/src/ports/identity.ts` — `UserRepository`, `InvitationRepository` ports.
-- `packages/db/drizzle/0009_smiling_raider.sql` + `meta/0009_snapshot.json` — `invitations` table (FK → `tenants`, cascade; indexes on `tenant_id`, `email`).
+- **Workspaces:** list/create/rename, member roles with owner protection, invitations (7-day TTL,
+  emailed, auto-accepted at sign-in), workspace switcher, plan & usage card.
+- **Runs:** durable queue with retries, stale-lock recovery, cancel flag, in-process or dedicated
+  worker, reproducibility snapshots, review queue, Excel/CSV export with validation.
+- **Plans:** free (3 members / 25 datasets / 100 runs per month), pro (25 / 500 / 5,000), enterprise
+  (unlimited). `402 quota_exceeded` when enforced.
+- **Billing:** `POST /api/v1/billing/webhook` verifies Stripe signatures, maps
+  `metadata.tenantId` + `metadata.plan`, downgrades on subscription deletion. No SDK, no card data.
+- **Compliance:** retention sweep, cascade deletion, tenant isolation tests, request tracing,
+  documented sub-processors and residency decision, DSAR/closure runbook gap noted.
+- **Testing:** 376 unit/integration tests + 3 Playwright journeys + smoke script + large-XLSX load
+  guard.
 
-**Modified (tracked) files:**
-- `apps/api/src/container.ts` — wires `workspaceService`; `authenticate()` now accepts pending invitations and ensures a workspace (personal tenant fallback via `TenancyService`).
-- `apps/api/src/http/routes/index.ts` — registers `registerWorkspaceRoutes`.
-- `apps/web/src/api/client.ts` — added `apiSend()` (PUT/DELETE, credentials included) for 204-style actions; `apiDownloadUrl` retained for artifact downloads.
-- `apps/web/src/api/hooks.ts` — added `useWorkspaces`, `useCurrentWorkspace`, `useCreateWorkspace`, `useRenameWorkspace`, `useUpdateMemberRole`, `useRemoveMember`, `useInvitations`, `useInviteMember`, `useRevokeInvitation`; added `workspaces`/`currentWorkspace` query keys; imports extended for the new schemas (no duplicates — verified).
-- `packages/core/src/domain/tenancy.ts` — added `invitationSchema`/`Invitation`.
-- `packages/core/src/errors.ts` — added `ForbiddenError` (403).
-- `packages/core/src/index.ts` — exports `api/workspaces.js`, `ports/identity.js`.
-- `packages/core/src/ports/repositories.ts` — `Repositories` gains `users` + `invitations`.
-- `packages/db/src/schema/tables.ts` — `invitations` table definition.
-- `packages/db/src/repositories/memory/index.ts` — `users` (no-op stubs: Auth.js needs Postgres; memory mode has no identities) + `invitations` (full in-memory impl).
-- `packages/db/src/repositories/postgres/index.ts` — `users` + `invitations` implementations.
-- `packages/db/drizzle/meta/_journal.json` — 0009 journal entry.
-
-**How to land it:** review the diff (`git diff` + new files), run the §6 commands, then `git add -A && git commit -m "Phase D backend: workspace/member management API"`.
-
-## 5. What's next (ordered checklist for the new session)
-
-1. **Commit §4** after a final review + full verification (§6). Suggested message: `"Phase D backend: workspace/member management API"`.
-2. **Phase D UI:** org/workspace switcher in `AppShell`, workspace settings page (rename, members table with role editor + remove, invitations list with invite form + revoke, create-workspace dialog) wired to the §5 hooks; show active workspace name; keep working with auth disabled (hooks take `enabled`, guard with `authEnabled` from `/meta`).
-3. **Phase J:** Playwright signup→run→review→export E2E; large-XLSX load test; restart/resume behavior test for dispatcher + worker.
-4. **Phase K:** legal/compliance docs, Stripe plans + metering hooks, quota enforcement per tenant, data-residency decision.
-5. **Deploy verification:** Render Blueprint (`render.yaml`) + Cloudflare Worker (`wrangler.jsonc` + `apps/web/worker/index.js`); health `/healthz`, readiness `/readyz`; worker proxies `/api/*` and injects the key.
-
-## 6. Canonical verification commands (run from repo root)
+## 5. Canonical verification commands (run from repo root)
 
 ```powershell
 npm run format:check
@@ -96,20 +100,52 @@ npm run typecheck
 npm test
 npm run build
 npm audit --omit=dev
-npx wrangler deploy --dry-run --outdir .wrangler-dist   # from apps/web; then delete .wrangler-dist
+npm run e2e                                          # starts API + web servers itself
+npx wrangler deploy --dry-run --outdir .wrangler-dist # from apps/web; delete .wrangler-dist after
 ```
 
-Current known-good results: format clean, lint clean, typecheck clean (all workspaces), **41 files / 346 tests passing**, build clean, prod audit **0 vulnerabilities**.
+## 6. Environment variables (complete list)
 
-## 7. Environment variables added across phases
+`PORT` · `API_HOST`/`API_PORT` · `LOG_LEVEL`/`LOG_PRETTY` · `CORS_ORIGIN` · `REPOSITORY_DRIVER` ·
+`DATABASE_URL` · `DB_AUTO_MIGRATE` · `DB_MIGRATIONS_DIR` · `ALLOW_INSECURE` · `API_KEY` ·
+`RATE_LIMIT_*` · `TRUST_PROXY` · `JSON_BODY_LIMIT_MB` · `MAX_UPLOAD_MB` · `MAX_XLSX_*` ·
+`DATASET_*` · `RETENTION_*` · `STORAGE_DRIVER` · `STORAGE_LOCAL_DIR` · `S3_*` · `AI_*` ·
+`RUN_DISPATCH_IN_PROCESS` · `RUN_WORKER_POLL_MS` · `RUN_MAX_ATTEMPTS` · `RUN_STALE_LOCK_MS` ·
+`RUN_RETRY_DELAY_MS` · `AUTH_ENABLED` · `AUTH_SECRET` · `AUTH_URL` · `AUTH_TRUST_HOST` ·
+`AUTH_GOOGLE_ID/SECRET` · `AUTH_GITHUB_ID/SECRET` · `AUTH_RESEND_KEY` · `AUTH_EMAIL_FROM` ·
+`BOOTSTRAP_TENANT_NAME` · `INBOX_*` · `QUOTAS_ENFORCED` · `BILLING_PROVIDER` ·
+`STRIPE_WEBHOOK_SECRET`. Documented in `.env.example`.
 
-`PORT` · `DB_AUTO_MIGRATE` · `DB_MIGRATIONS_DIR` · `ALLOW_INSECURE` · `AUTH_ENABLED` · `AUTH_SECRET` · `AUTH_URL` · `AUTH_TRUST_HOST` · `AUTH_GOOGLE_ID/SECRET` · `AUTH_GITHUB_ID/SECRET` · `AUTH_RESEND_KEY` · `AUTH_EMAIL_FROM` · `BOOTSTRAP_TENANT_NAME` · `STORAGE_DRIVER` (`local`|`s3`) · `S3_BUCKET/REGION/ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY/FORCE_PATH_STYLE` · `RUN_DISPATCH_IN_PROCESS` · `RUN_WORKER_POLL_MS` · `RUN_MAX_ATTEMPTS` · `RUN_STALE_LOCK_MS` · `RUN_RETRY_DELAY_MS`. Documented in `.env.example` and `docs/deployment.md`.
+## 7. Known gaps / future work
+
+1. **Workspace deletion API + DSAR tooling** — run/dataset deletion exists; closing a whole workspace
+   or account is a manual operator procedure (`docs/compliance.md`).
+2. **Postgres queue tests** — stale-lock recovery is covered against the in-memory queue; the SQL
+   implementation needs a real Postgres integration test (no DB in CI yet).
+3. **Stripe self-serve checkout** — the webhook and metadata contract are ready; an in-app "Upgrade"
+   button that creates Checkout Sessions is not built.
+4. **Cookie consent** — only a session cookie is set; revisit if analytics are added.
+5. **Pen test / SOC 2** — not started.
+6. **i18n** — English-only by decision; see `docs/compliance.md` for revisit triggers.
+7. **Render region** — deliberately not pinned in `render.yaml`; choose the region per deployment
+   (recommended `frankfurt` for EU) and keep Postgres/API/worker/R2 consistent.
 
 ## 8. Gotchas for the next agent
 
-- PowerShell 5.1 shell: no `grep` — use `Select-String` or the Read/Grep tools.
-- Drizzle migration workflow: edit `packages/db/src/schema/tables.ts`, then `npm run db:generate`; check the SQL + `meta/` snapshot into git. Never run migrations from two processes at once.
-- `POST /runs/:id/cancel` sets a queue flag; the in-process controller aborts only same-process work.
-- Retried runs are reset via `prepareForExecution` (partial results deleted) to avoid duplicates; review the queue `fail`/`recoverStale` semantics in `postgres-run-queue.ts` before touching retries.
-- Web auth is cookie-based, same-origin through the Worker; downloads use `apiDownloadUrl` (plain anchor), everything else via `apiGet/apiPost/apiPut/apiSend` with `credentials: 'include'`.
-- Do not re-add a second `from './client.js'` import in `hooks.ts` or a second `apiSend` in `client.ts` — both already exist exactly once (verified 2026-09-19).
+- PowerShell 5.1 shell: no `grep`; use `Select-String` or the Read/Grep tools.
+- Drizzle workflow: edit `packages/db/src/schema/tables.ts`, `npm run db:generate`, commit SQL +
+  `meta/` snapshot. Never run migrations from two processes at once.
+- Playwright: Vite binds `localhost` (IPv6) — the config polls `http://localhost:5173`, not
+  `127.0.0.1`. First run needs `npx playwright install chromium`. E2E uses in-memory repositories;
+  each run starts fresh.
+- Run-detail data is fetched while a run is queued; `RunDetailPage` refetches review items,
+  decisions and artifacts when `finishedAt` appears. Keep that behavior when touching the page.
+- `POST /runs/:id/cancel` sets a queue flag; only same-process work is aborted.
+- Retried runs reset partial results via `prepareForExecution`; review `postgres-run-queue.ts`
+  `fail`/`recoverStale` semantics before touching retries.
+- The Stripe webhook needs the raw body; its content-type parser is scoped to the billing plugin and
+  the route is exempt from the session guard (signature is the authentication).
+- Billing plan changes come only from `metadata.tenantId` + `metadata.plan` on Stripe events; keep
+  the metadata contract in sync with `docs/billing.md`.
+- Web auth is cookie-based, same-origin through the Worker; downloads use `apiDownloadUrl` (plain
+  anchor), everything else via `apiGet/apiPost/apiPut/apiSend` with `credentials: 'include'`.

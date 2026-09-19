@@ -132,6 +132,7 @@ value is exposed to rules as `combinedDescription`, so a rule can match against 
 | `npm run lint` | ESLint (type-aware) across the monorepo |
 | `npm run format` / `format:check` | Prettier write / verify |
 | `npm test` / `test:watch` | Vitest unit + integration tests |
+| `npm run e2e` | Playwright browser journey (starts API + web itself; first run: `npx playwright install chromium`) |
 | `npm run smoke` | End-to-end smoke test against a running API |
 | `npm run benchmark -w @sheetpilot/matching-engine` | Synthetic primary↔event join benchmark (10k–250k entities) |
 | `npm run db:generate` | Generate SQL migrations from the Drizzle schema |
