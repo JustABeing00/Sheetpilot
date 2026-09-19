@@ -235,7 +235,9 @@ describe('end-to-end workflow journey', () => {
     expect(status.summary.unresolved).toBe(5);
 
     const decisions = decisionListResponseSchema.parse(
-      (await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })).json(),
+      (
+        await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })
+      ).json(),
     );
     const reasonsFor = (key: string) =>
       decisions.items.find((decision) => decision.entityKey === key)?.reviewReasons ?? [];
@@ -290,7 +292,9 @@ describe('end-to-end workflow journey', () => {
 
   it('7. keeps a historical run unchanged when the setup and rules change later', async () => {
     const before = decisionListResponseSchema.parse(
-      (await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })).json(),
+      (
+        await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })
+      ).json(),
     );
 
     // Change the saved setup (version bump) ...
@@ -303,9 +307,13 @@ describe('end-to-end workflow journey', () => {
     expect(workflowConfigurationDtoSchema.parse(updated.json()).version).toBe(2);
 
     // ... and replace the active rule set with one that drops the generic fallback rule.
-    const active = ruleSetListResponseSchema.parse(
-      (await app.inject({ method: 'GET', url: `/api/v1/rule-sets?workflowSlug=${WORKFLOW}` })).json(),
-    ).items.find((ruleSet) => ruleSet.active);
+    const active = ruleSetListResponseSchema
+      .parse(
+        (
+          await app.inject({ method: 'GET', url: `/api/v1/rule-sets?workflowSlug=${WORKFLOW}` })
+        ).json(),
+      )
+      .items.find((ruleSet) => ruleSet.active);
     expect(active).toBeDefined();
     const activeDetail = ruleSetDtoSchema.parse(
       (await app.inject({ method: 'GET', url: `/api/v1/rule-sets/${active!.id}` })).json(),
@@ -326,7 +334,9 @@ describe('end-to-end workflow journey', () => {
 
     // The historical run must be untouched: identical decisions and the original frozen versions.
     const after = decisionListResponseSchema.parse(
-      (await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })).json(),
+      (
+        await app.inject({ method: 'GET', url: `/api/v1/runs/${run.id}/decisions?limit=200` })
+      ).json(),
     );
     expect(after).toEqual(before);
 
@@ -359,7 +369,9 @@ describe('end-to-end workflow journey', () => {
     expect(nextRun.snapshot?.configurationVersion).toBe(2);
 
     const decisions = decisionListResponseSchema.parse(
-      (await app.inject({ method: 'GET', url: `/api/v1/runs/${nextRun.id}/decisions?limit=200` })).json(),
+      (
+        await app.inject({ method: 'GET', url: `/api/v1/runs/${nextRun.id}/decisions?limit=200` })
+      ).json(),
     );
     const generic = decisions.items.find((decision) => decision.entityKey === '00106');
     expect(generic?.reviewReasons).toContain('no_rule_match');

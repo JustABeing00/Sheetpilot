@@ -4,11 +4,13 @@ import {
   datasetProfileSchema,
   decisionRecordSchema,
   fileAssetSchema,
+  membershipSchema,
   reviewItemSchema,
   reviewResolutionLogSchema,
   runSnapshotSchema,
   storedRuleSetSchema,
   stepRunSchema,
+  tenantSchema,
   workflowConfigurationSchema,
   workflowRunSchema,
   workflowSchema,
@@ -16,7 +18,10 @@ import {
   type DatasetProfile,
   type DecisionRecord,
   type FileAsset,
+  type Membership,
+  type MembershipRole,
   type Repositories,
+  type Tenant,
   type ReviewCounts,
   type ReviewItem,
   type ReviewListOptions,
@@ -34,6 +39,7 @@ import {
   artifacts,
   datasets,
   files,
+  memberships,
   reviewItems,
   reviewResolutions,
   ruleSets,
@@ -41,6 +47,7 @@ import {
   runs,
   runSnapshots,
   runSteps,
+  tenants,
   workflowConfigurations,
   workflows,
 } from '../../schema/tables.js';
@@ -91,6 +98,9 @@ const toReviewResolution = (row: typeof reviewResolutions.$inferSelect): ReviewR
 const toArtifact = (row: typeof artifacts.$inferSelect): Artifact => artifactSchema.parse(row);
 const toRuleSet = (row: typeof ruleSets.$inferSelect): StoredRuleSet =>
   storedRuleSetSchema.parse(row);
+const toTenant = (row: typeof tenants.$inferSelect): Tenant => tenantSchema.parse(row);
+const toMembership = (row: typeof memberships.$inferSelect): Membership =>
+  membershipSchema.parse(row);
 
 /**
  * The frozen configuration/rule-set payloads are stored as JSON, so their embedded `createdAt`/
@@ -120,6 +130,104 @@ const toRunSnapshot = (row: typeof runSnapshots.$inferSelect): RunSnapshot =>
 
 export function createPostgresRepositories(db: Database): Repositories {
   return {
+    tenants: {
+      async create(tenant) {
+        const [row] = await db.insert(tenants).values(tenant).returning();
+        return toTenant(row!);
+      },
+      async update(tenant) {
+        const [row] = await db
+          .update(tenants)
+          .set({ name: tenant.name, slug: tenant.slug, updatedAt: tenant.updatedAt })
+          .where(eq(tenants.id, tenant.id))
+          .returning();
+        return toTenant(row!);
+      },
+      async getById(id) {
+        const [row] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1);
+        return row ? toTenant(row) : null;
+      },
+      async getBySlug(slug) {
+        const [row] = await db.select().from(tenants).where(eq(tenants.slug, slug)).limit(1);
+        return row ? toTenant(row) : null;
+      },
+      async listForUser(userId) {
+        const rows = await db
+          .select({ tenant: tenants })
+          .from(memberships)
+          .innerJoin(tenants, eq(memberships.tenantId, tenants.id))
+          .where(eq(memberships.userId, userId))
+          .orderBy(desc(memberships.createdAt));
+        return rows.map((row) => toTenant(row.tenant));
+      },
+      async count() {
+        const [row] = await db.select({ value: count() }).from(tenants);
+        return row?.value ?? 0;
+      },
+    },
+
+    memberships: {
+      async create(membership) {
+        const [row] = await db.insert(memberships).values(membership).returning();
+        return toMembership(row!);
+      },
+      async update(membership) {
+        const [row] = await db
+          .update(memberships)
+          .set({ role: membership.role, updatedAt: membership.updatedAt })
+          .where(eq(memberships.id, membership.id))
+          .returning();
+        return toMembership(row!);
+      },
+      async delete(id) {
+        await db.delete(memberships).where(eq(memberships.id, id));
+      },
+      async getForUserAndTenant(userId, tenantId) {
+        const [row] = await db
+          .select()
+          .from(memberships)
+          .where(and(eq(memberships.userId, userId), eq(memberships.tenantId, tenantId)))
+          .limit(1);
+        return row ? toMembership(row) : null;
+      },
+      async listForUser(userId) {
+        const rows = await db.select().from(memberships).where(eq(memberships.userId, userId));
+        return rows.map(toMembership);
+      },
+      async listForTenant(tenantId) {
+        const rows = await db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.tenantId, tenantId))
+          .orderBy(asc(memberships.createdAt));
+        return rows.map(toMembership);
+      },
+      async countForTenant(tenantId) {
+        const [row] = await db
+          .select({ value: count() })
+          .from(memberships)
+          .where(eq(memberships.tenantId, tenantId));
+        return row?.value ?? 0;
+      },
+      async getDefaultForUser(userId) {
+        const [row] = await db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.userId, userId))
+          .orderBy(asc(memberships.createdAt))
+          .limit(1);
+        return row ? toMembership(row) : null;
+      },
+      async setRole(id, role: MembershipRole, updatedAt) {
+        const [row] = await db
+          .update(memberships)
+          .set({ role, updatedAt })
+          .where(eq(memberships.id, id))
+          .returning();
+        return toMembership(row!);
+      },
+    },
+
     files: {
       async create(asset) {
         const [row] = await db.insert(files).values(asset).returning();

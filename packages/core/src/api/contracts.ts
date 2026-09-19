@@ -493,9 +493,7 @@ export type RebindPlanDto = z.infer<typeof rebindPlanDtoSchema>;
 export const prepareSavedWorkflowRunRequestSchema = z.object({
   assignments: z.array(datasetAssignmentSchema).min(1),
 });
-export type PrepareSavedWorkflowRunRequest = z.infer<
-  typeof prepareSavedWorkflowRunRequestSchema
->;
+export type PrepareSavedWorkflowRunRequest = z.infer<typeof prepareSavedWorkflowRunRequestSchema>;
 
 export const prepareSavedWorkflowRunResponseSchema = z.object({
   valid: z.boolean(),
@@ -503,9 +501,7 @@ export const prepareSavedWorkflowRunResponseSchema = z.object({
   resolvedConfig: resolvedRunConfigSchema.nullable(),
   plan: rebindPlanSchema,
 });
-export type PrepareSavedWorkflowRunResponse = z.infer<
-  typeof prepareSavedWorkflowRunResponseSchema
->;
+export type PrepareSavedWorkflowRunResponse = z.infer<typeof prepareSavedWorkflowRunResponseSchema>;
 
 export const runSavedWorkflowRequestSchema = z.object({
   assignments: z.array(datasetAssignmentSchema).min(1),

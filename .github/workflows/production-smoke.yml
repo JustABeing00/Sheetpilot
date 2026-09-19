@@ -1,0 +1,32 @@
+name: Production smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Smoke test the deployed API
+        env:
+          SMOKE_API_URL: ${{ secrets.SMOKE_API_URL }}
+          SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+        run: |
+          if [ -z "$SMOKE_API_URL" ]; then
+            echo "SMOKE_API_URL is not configured; skipping production smoke."
+            exit 0
+          fi
+          npm run smoke

@@ -55,7 +55,10 @@ export function pipelineStageIndex(key: PipelineStageKey): number {
 
 export type PipelineStageState = 'done' | 'current' | 'upcoming';
 
-export function pipelineStateFor(step: PipelineStageKey, current: PipelineStageKey): PipelineStageState {
+export function pipelineStateFor(
+  step: PipelineStageKey,
+  current: PipelineStageKey,
+): PipelineStageState {
   const stepIndex = pipelineStageIndex(step);
   const currentIndex = pipelineStageIndex(current);
   if (stepIndex === currentIndex) {

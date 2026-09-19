@@ -66,9 +66,7 @@ export function toSavedWorkflowRunDto(run: SavedWorkflowLastRun): SavedWorkflowR
   };
 }
 
-export function toSavedWorkflowSummaryDto(
-  summary: SavedWorkflowSummary,
-): SavedWorkflowSummaryDto {
+export function toSavedWorkflowSummaryDto(summary: SavedWorkflowSummary): SavedWorkflowSummaryDto {
   return {
     id: summary.id,
     name: summary.name,

@@ -26,11 +26,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Format check
+        run: npm run format:check
+
       - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
+
+      - name: Resolve dependency versions
+        run: npm ls uuid || true
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high

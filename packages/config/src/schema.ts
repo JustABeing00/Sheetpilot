@@ -82,6 +82,23 @@ export const envSourceSchema = z.object({
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(15_000),
   AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
   AI_EXCLUDED_FIELDS: z.string().default(''),
+  AUTH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  AUTH_SECRET: z.string().default(''),
+  AUTH_URL: z.string().default(''),
+  AUTH_TRUST_HOST: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  AUTH_GOOGLE_ID: z.string().default(''),
+  AUTH_GOOGLE_SECRET: z.string().default(''),
+  AUTH_GITHUB_ID: z.string().default(''),
+  AUTH_GITHUB_SECRET: z.string().default(''),
+  AUTH_RESEND_KEY: z.string().default(''),
+  AUTH_EMAIL_FROM: z.string().default(''),
+  BOOTSTRAP_TENANT_NAME: z.string().min(1).default('SheetPilot'),
   INBOX_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -143,6 +160,22 @@ export interface AppConfig {
     maxAttempts: number;
     excludedFields: string[];
     configured: boolean;
+  };
+  /**
+   * End-user authentication (Auth.js): signup/login, sessions, and the identity used to scope data to
+   * a tenant. Disabled by default so local development and the existing test suite need no provider.
+   */
+  auth: {
+    enabled: boolean;
+    secret: string | null;
+    url: string | null;
+    trustHost: boolean;
+    bootstrapTenantName: string;
+    providers: {
+      google: { clientId: string; clientSecret: string } | null;
+      github: { clientId: string; clientSecret: string } | null;
+      email: { apiKey: string; from: string } | null;
+    };
   };
   /**
    * Optional folder inbox: drop a day's files into a folder and a saved workflow runs automatically.
@@ -212,6 +245,27 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     });
   }
 
+  const googleConfigured =
+    source.AUTH_GOOGLE_ID.trim().length > 0 && source.AUTH_GOOGLE_SECRET.trim().length > 0;
+  const githubConfigured =
+    source.AUTH_GITHUB_ID.trim().length > 0 && source.AUTH_GITHUB_SECRET.trim().length > 0;
+  const emailConfigured =
+    source.AUTH_RESEND_KEY.trim().length > 0 && source.AUTH_EMAIL_FROM.trim().length > 0;
+
+  if (source.AUTH_ENABLED) {
+    if (source.AUTH_SECRET.trim().length === 0) {
+      throw new ConfigurationError('AUTH_SECRET is required when AUTH_ENABLED=true', {
+        variable: 'AUTH_SECRET',
+      });
+    }
+    if (!googleConfigured && !githubConfigured && !emailConfigured) {
+      throw new ConfigurationError(
+        'AUTH_ENABLED=true requires at least one sign-in method: email magic link (AUTH_RESEND_KEY + AUTH_EMAIL_FROM), Google, or GitHub',
+        { variable: 'AUTH_RESEND_KEY' },
+      );
+    }
+  }
+
   if (source.INBOX_ENABLED) {
     if (source.INBOX_DIR.trim().length === 0) {
       throw new ConfigurationError('INBOX_DIR is required when INBOX_ENABLED=true', {
@@ -239,6 +293,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
     if (source.API_KEY.trim().length === 0) {
       problems.push('API_KEY must be set');
+    }
+    if (source.AUTH_ENABLED && source.AUTH_URL.trim().length === 0) {
+      problems.push('AUTH_URL must be set');
     }
     if (problems.length > 0) {
       throw new ConfigurationError(
@@ -297,6 +354,24 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         .map((field) => field.trim())
         .filter((field) => field.length > 0),
       configured: source.AI_PROVIDER === 'openai' && source.OPENAI_API_KEY.trim().length > 0,
+    },
+    auth: {
+      enabled: source.AUTH_ENABLED,
+      secret: source.AUTH_SECRET.trim().length > 0 ? source.AUTH_SECRET : null,
+      url: source.AUTH_URL.trim().length > 0 ? source.AUTH_URL.trim().replace(/\/$/, '') : null,
+      trustHost: source.AUTH_TRUST_HOST,
+      bootstrapTenantName: source.BOOTSTRAP_TENANT_NAME,
+      providers: {
+        google: googleConfigured
+          ? { clientId: source.AUTH_GOOGLE_ID, clientSecret: source.AUTH_GOOGLE_SECRET }
+          : null,
+        github: githubConfigured
+          ? { clientId: source.AUTH_GITHUB_ID, clientSecret: source.AUTH_GITHUB_SECRET }
+          : null,
+        email: emailConfigured
+          ? { apiKey: source.AUTH_RESEND_KEY, from: source.AUTH_EMAIL_FROM }
+          : null,
+      },
     },
     inbox: {
       enabled: source.INBOX_ENABLED,

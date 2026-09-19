@@ -1,11 +1,17 @@
 import { timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { AuthUser } from '../auth/types.js';
 
 export interface SecurityOptions {
   /** When set, every route other than the health probe requires a matching `x-api-key` header. */
   apiKey: string | null;
   rateLimit: { max: number; windowMs: number };
   isProduction: boolean;
+  /**
+   * When provided (AUTH_ENABLED), every `/api/v1/*` route requires a valid session; the resolved user +
+   * active tenant is attached to the request. `/api/auth/*` and the health probes are exempt.
+   */
+  authenticate?: (request: FastifyRequest) => Promise<AuthUser | null>;
 }
 
 interface RateBucket {
@@ -59,6 +65,17 @@ export function registerSecurityHooks(app: FastifyInstance, options: SecurityOpt
           .send({ error: { code: 'unauthorized', message: 'A valid API key is required.' } });
         return reply;
       }
+    }
+
+    if (options.authenticate && request.url.startsWith('/api/v1/')) {
+      const user = await options.authenticate(request);
+      if (!user) {
+        reply
+          .status(401)
+          .send({ error: { code: 'unauthorized', message: 'Sign in to continue.' } });
+        return reply;
+      }
+      request.authUser = user;
     }
 
     const { max, windowMs } = options.rateLimit;

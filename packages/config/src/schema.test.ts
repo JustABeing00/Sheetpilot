@@ -74,4 +74,36 @@ describe('loadConfig', () => {
 
     expect(() => loadConfig({ NODE_ENV: 'production', ALLOW_INSECURE: 'true' })).not.toThrow();
   });
+
+  it('requires a secret and at least one provider when auth is enabled', () => {
+    expect(() => loadConfig({ AUTH_ENABLED: 'true' })).toThrow(ConfigurationError);
+    expect(() => loadConfig({ AUTH_ENABLED: 'true', AUTH_SECRET: 'secret' })).toThrow(
+      ConfigurationError,
+    );
+
+    const config = loadConfig({
+      AUTH_ENABLED: 'true',
+      AUTH_SECRET: 'secret',
+      AUTH_RESEND_KEY: 'resend-key',
+      AUTH_EMAIL_FROM: 'no-reply@example.com',
+    });
+    expect(config.auth.enabled).toBe(true);
+    expect(config.auth.providers.email?.from).toBe('no-reply@example.com');
+    expect(config.auth.providers.google).toBeNull();
+  });
+
+  it('requires postgres and AUTH_URL for auth in production', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        REPOSITORY_DRIVER: 'postgres',
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
+        API_KEY: 'key',
+        AUTH_ENABLED: 'true',
+        AUTH_SECRET: 'secret',
+        AUTH_GITHUB_ID: 'id',
+        AUTH_GITHUB_SECRET: 'secret',
+      }),
+    ).toThrow(ConfigurationError);
+  });
 });

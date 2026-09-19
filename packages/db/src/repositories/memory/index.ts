@@ -1,3 +1,4 @@
+import { NotFoundError } from '@sheetpilot/core';
 import type {
   Artifact,
   ArtifactRepository,
@@ -9,8 +10,13 @@ import type {
   DecisionRepository,
   FileAsset,
   FileRepository,
+  Membership,
+  MembershipRepository,
+  MembershipRole,
   Repositories,
   ReviewCounts,
+  Tenant,
+  TenantRepository,
   ReviewItem,
   ReviewItemRepository,
   ReviewListOptions,
@@ -123,6 +129,88 @@ export function createInMemoryRepositories(): Repositories {
   const resolutionStore = new Map<string, ReviewResolutionLog>();
   const artifactStore = new Map<string, Artifact>();
   const ruleSetStore = new Map<string, StoredRuleSet>();
+  const tenantStore = new Map<string, Tenant>();
+  const membershipStore = new Map<string, Membership>();
+
+  const tenants: TenantRepository = {
+    create: (tenant) => {
+      tenantStore.set(tenant.id, tenant);
+      return Promise.resolve(tenant);
+    },
+    update: (tenant) => {
+      tenantStore.set(tenant.id, tenant);
+      return Promise.resolve(tenant);
+    },
+    getById: (id) => Promise.resolve(tenantStore.get(id) ?? null),
+    getBySlug: (slug) =>
+      Promise.resolve([...tenantStore.values()].find((tenant) => tenant.slug === slug) ?? null),
+    listForUser: (userId) => {
+      const tenantIds = new Set(
+        [...membershipStore.values()]
+          .filter((membership) => membership.userId === userId)
+          .map((membership) => membership.tenantId),
+      );
+      return Promise.resolve(
+        byDateDesc(
+          [...tenantStore.values()].filter((tenant) => tenantIds.has(tenant.id)),
+          (tenant) => tenant.createdAt,
+        ),
+      );
+    },
+    count: () => Promise.resolve(tenantStore.size),
+  };
+
+  const memberships: MembershipRepository = {
+    create: (membership) => {
+      membershipStore.set(membership.id, membership);
+      return Promise.resolve(membership);
+    },
+    update: (membership) => {
+      membershipStore.set(membership.id, membership);
+      return Promise.resolve(membership);
+    },
+    delete: (id) => {
+      membershipStore.delete(id);
+      return Promise.resolve();
+    },
+    getForUserAndTenant: (userId, tenantId) =>
+      Promise.resolve(
+        [...membershipStore.values()].find(
+          (membership) => membership.userId === userId && membership.tenantId === tenantId,
+        ) ?? null,
+      ),
+    listForUser: (userId) =>
+      Promise.resolve(
+        [...membershipStore.values()].filter((membership) => membership.userId === userId),
+      ),
+    listForTenant: (tenantId) =>
+      Promise.resolve(
+        [...membershipStore.values()].filter((membership) => membership.tenantId === tenantId),
+      ),
+    countForTenant: (tenantId) =>
+      Promise.resolve(
+        [...membershipStore.values()].filter((membership) => membership.tenantId === tenantId)
+          .length,
+      ),
+    getDefaultForUser: (userId) => {
+      const items = [...membershipStore.values()]
+        .filter((membership) => membership.userId === userId)
+        .sort(
+          (left, right) =>
+            left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id),
+        );
+      return Promise.resolve(items[0] ?? null);
+    },
+    setRole: (id, role: MembershipRole, updatedAt) => {
+      const existing = membershipStore.get(id);
+      if (!existing) {
+        return Promise.reject(new NotFoundError('Membership', id));
+      }
+      const next: Membership = { ...existing, role, updatedAt };
+      membershipStore.set(id, next);
+      return Promise.resolve(next);
+    },
+  };
 
   const files: FileRepository = {
     create: (asset) => {
@@ -357,6 +445,8 @@ export function createInMemoryRepositories(): Repositories {
   };
 
   return {
+    tenants,
+    memberships,
     files,
     datasets,
     workflowConfigurations,

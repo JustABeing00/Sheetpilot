@@ -6,8 +6,10 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import type {
   ColumnMapping,
@@ -245,6 +247,92 @@ export const artifacts = pgTable(
   (table) => [index('artifacts_run_idx').on(table.runId)],
 );
 
+// --- Auth.js (identity) ---
+// Column property names match the shapes the @auth/drizzle-adapter reads/writes; the physical
+// names are snake_case. Auth manages these rows; the application only reads them.
+
+export const users = pgTable('users', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text('name'),
+  email: text('email').unique(),
+  emailVerified: timestamp('email_verified', { withTimezone: true, mode: 'date' }),
+  image: text('image'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+});
+
+export const accounts = pgTable(
+  'accounts',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    provider: text('provider').notNull(),
+    providerAccountId: text('provider_account_id').notNull(),
+    refresh_token: text('refresh_token'),
+    access_token: text('access_token'),
+    expires_at: integer('expires_at'),
+    token_type: text('token_type'),
+    scope: text('scope'),
+    id_token: text('id_token'),
+    session_state: text('session_state'),
+  },
+  (account) => [primaryKey({ columns: [account.provider, account.providerAccountId] })],
+);
+
+export const sessions = pgTable('sessions', {
+  sessionToken: text('session_token').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  expires: timestamp('expires', { withTimezone: true, mode: 'date' }).notNull(),
+});
+
+export const verificationTokens = pgTable(
+  'verification_tokens',
+  {
+    identifier: text('identifier').notNull(),
+    token: text('token').notNull(),
+    expires: timestamp('expires', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (verificationToken) => [
+    primaryKey({ columns: [verificationToken.identifier, verificationToken.token] }),
+  ],
+);
+
+// --- tenancy (isolation boundary) ---
+
+export const tenants = pgTable('tenants', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  createdAt: timestampColumn('created_at'),
+  updatedAt: timestampColumn('updated_at'),
+});
+
+export const memberships = pgTable(
+  'memberships',
+  {
+    id: text('id').primaryKey(),
+    tenantId: text('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    createdAt: timestampColumn('created_at'),
+    updatedAt: timestampColumn('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('memberships_tenant_user_idx').on(table.tenantId, table.userId),
+    index('memberships_user_idx').on(table.userId),
+  ],
+);
+
 export const schema = {
   workflows,
   ruleSets,
@@ -258,4 +346,10 @@ export const schema = {
   reviewItems,
   reviewResolutions,
   artifacts,
+  users,
+  accounts,
+  sessions,
+  verificationTokens,
+  tenants,
+  memberships,
 };

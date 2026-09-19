@@ -1,8 +1,11 @@
 import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { isAppError, PayloadTooLargeError, toPublicErrorBody } from '@sheetpilot/core';
 import type { AppContainer } from './container.js';
+import { registerAuthRoutes } from './auth/plugin.js';
+import './auth/types.js';
 import { registerRoutes } from './http/routes/index.js';
 import { registerSecurityHooks } from './http/security.js';
 
@@ -24,10 +27,21 @@ export function buildServer(container: AppContainer, options: ServerOptions): Fa
     ? Fastify({ loggerInstance: options.loggerInstance, ...shared })
     : Fastify({ logger: false, ...shared });
 
+  if (container.auth.config) {
+    app.register(cookie);
+    registerAuthRoutes(app, {
+      authConfig: container.auth.config,
+      baseUrl: container.config.auth.url,
+    });
+  }
+
   registerSecurityHooks(app, {
     apiKey: security.apiKey,
     rateLimit: { max: security.rateLimitMax, windowMs: security.rateLimitWindowMs },
     isProduction: container.config.isProduction,
+    ...(container.auth.config
+      ? { authenticate: (request) => container.authenticate(request) }
+      : {}),
   });
 
   app.register(cors, { origin: container.config.corsOrigins, credentials: false });

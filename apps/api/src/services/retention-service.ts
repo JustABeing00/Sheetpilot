@@ -55,12 +55,18 @@ export class RetentionService {
         removedKeys.push(object.key);
       } catch (error) {
         kept += 1;
-        this.deps.logger.warn({ storageKey: object.key, err: error }, 'retention sweep failed to remove');
+        this.deps.logger.warn(
+          { storageKey: object.key, err: error },
+          'retention sweep failed to remove',
+        );
       }
     }
 
     if (removed > 0) {
-      this.deps.logger.info({ removed, scanned: objects.length }, 'retention sweep removed uploads');
+      this.deps.logger.info(
+        { removed, scanned: objects.length },
+        'retention sweep removed uploads',
+      );
     }
 
     return { scanned: objects.length, removed, kept, removedKeys };
@@ -71,11 +77,14 @@ export class RetentionService {
     if (this.timer || this.deps.uploadTtlMs <= 0) {
       return;
     }
-    this.timer = setInterval(() => {
-      void this.sweep().catch((error: unknown) => {
-        this.deps.logger.warn({ err: error }, 'scheduled retention sweep failed');
-      });
-    }, Math.max(60_000, this.deps.sweepIntervalMs));
+    this.timer = setInterval(
+      () => {
+        void this.sweep().catch((error: unknown) => {
+          this.deps.logger.warn({ err: error }, 'scheduled retention sweep failed');
+        });
+      },
+      Math.max(60_000, this.deps.sweepIntervalMs),
+    );
     this.timer.unref?.();
   }
 

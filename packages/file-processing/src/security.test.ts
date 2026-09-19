@@ -142,7 +142,9 @@ describe('workbook archive guard', () => {
   it('accepts a small archive and tolerates unreadable ones', () => {
     const archive = buildZipDirectory([{ name: 'a', compressed: 1, uncompressed: 2 }]);
     expect(() => assertWorkbookArchiveSafe(archive, 'ok.xlsx', limits)).not.toThrow();
-    expect(() => assertWorkbookArchiveSafe(Buffer.from('not a zip'), 'x.xlsx', limits)).not.toThrow();
+    expect(() =>
+      assertWorkbookArchiveSafe(Buffer.from('not a zip'), 'x.xlsx', limits),
+    ).not.toThrow();
   });
 
   it('does not reject a genuine workbook written by the reader', async () => {
@@ -162,9 +164,7 @@ describe('InMemoryFileStorage list', () => {
     await storage.put('uploads/csv/a.csv', Buffer.from('abc'));
     await storage.put('runs/1/out.csv', Buffer.from('de'));
 
-    expect((await storage.list('uploads/')).map((item) => item.key)).toEqual([
-      'uploads/csv/a.csv',
-    ]);
+    expect((await storage.list('uploads/')).map((item) => item.key)).toEqual(['uploads/csv/a.csv']);
     expect(await storage.list()).toHaveLength(2);
   });
 });

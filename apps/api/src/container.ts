@@ -1,4 +1,6 @@
 import path from 'node:path';
+import type { AuthConfig } from '@auth/core';
+import type { FastifyRequest } from 'fastify';
 import {
   ConfigurationError,
   storedRuleSetSchema,
@@ -21,8 +23,12 @@ import {
 import { createInMemoryRepositories } from '@sheetpilot/db';
 import { LocalFileStorage } from '@sheetpilot/file-processing';
 import type { AppConfig } from '@sheetpilot/config';
+import { buildAuthConfig } from './auth/config.js';
+import { readSession } from './auth/session.js';
+import type { AuthUser } from './auth/types.js';
 import { FileService } from './services/file-service.js';
 import { DatasetService } from './services/dataset-service.js';
+import { TenancyService } from './services/tenancy-service.js';
 import { ExportService } from './services/export-service.js';
 import { IdempotencyService } from './services/idempotency-service.js';
 import { InboxService } from './services/inbox-service.js';
@@ -54,6 +60,13 @@ export interface AppContainer {
   retentionService: RetentionService;
   inboxService: InboxService | null;
   idempotency: IdempotencyService;
+  auth: {
+    enabled: boolean;
+    config: AuthConfig | null;
+    tenancy: TenancyService;
+  };
+  /** Resolves the authenticated user + active tenant from the session cookie, or null. */
+  authenticate(request: FastifyRequest): Promise<AuthUser | null>;
   /** Resolves when the backing store is reachable; throws otherwise. Used by the readiness probe. */
   readiness(): Promise<void>;
   close(): Promise<void>;
@@ -205,6 +218,46 @@ export async function createContainer(
   });
   const idempotency = new IdempotencyService(IDEMPOTENCY_TTL_MS, clock);
 
+  const tenancyService = new TenancyService({
+    repositories,
+    clock,
+    logger,
+    bootstrapTenantName: config.auth.bootstrapTenantName,
+  });
+
+  let authConfig: AuthConfig | null = null;
+  if (config.auth.enabled) {
+    if (!databaseHandle) {
+      throw new ConfigurationError(
+        'AUTH_ENABLED=true requires REPOSITORY_DRIVER=postgres (sessions and users are persisted)',
+      );
+    }
+    authConfig = buildAuthConfig(config, databaseHandle.db, {
+      onUserCreated: async (user) => {
+        if (!user.id) {
+          return;
+        }
+        await tenancyService.ensurePersonalTenant(user.id, user.name ?? user.email ?? null);
+      },
+    });
+    await tenancyService.ensureBootstrapTenant();
+  }
+
+  const authenticate = async (request: FastifyRequest): Promise<AuthUser | null> => {
+    if (!authConfig) {
+      return null;
+    }
+    const claims = await readSession(request, config);
+    if (!claims) {
+      return null;
+    }
+    const tenantId = await tenancyService.ensurePersonalTenant(
+      claims.userId,
+      claims.name ?? claims.email,
+    );
+    return { id: claims.userId, email: claims.email, name: claims.name, tenantId };
+  };
+
   // A restart strands in-flight runs (they execute in-process). Mark them failed now so the UI never
   // shows a phantom "processing" run.
   await runService.recoverStaleRuns();
@@ -254,6 +307,12 @@ export async function createContainer(
     retentionService,
     inboxService,
     idempotency,
+    auth: {
+      enabled: config.auth.enabled,
+      config: authConfig,
+      tenancy: tenancyService,
+    },
+    authenticate,
     async readiness() {
       await databaseHandle?.ping();
     },

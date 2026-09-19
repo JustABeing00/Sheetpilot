@@ -4,11 +4,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const baseUrl = (process.env.SMOKE_API_URL ?? 'http://127.0.0.1:4000').replace(/\/$/, '');
+const apiKey = process.env.SMOKE_API_KEY;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const samplesDir = path.join(repoRoot, 'samples', 'account-faults');
 
-async function request(pathname, init) {
-  const response = await fetch(`${baseUrl}${pathname}`, init);
+async function request(pathname, init = {}) {
+  const headers = new Headers(init.headers);
+  if (apiKey) {
+    headers.set('x-api-key', apiKey);
+  }
+  const response = await fetch(`${baseUrl}${pathname}`, { ...init, headers });
   const text = await response.text();
   let body = null;
   try {
@@ -282,7 +287,10 @@ async function main() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ assignments: day2Assignments }),
   });
-  assert(prepared.valid, `rebinding to new files must validate: ${JSON.stringify(prepared.issues)}`);
+  assert(
+    prepared.valid,
+    `rebinding to new files must validate: ${JSON.stringify(prepared.issues)}`,
+  );
   assert(
     prepared.plan.carried.length === 4 && prepared.plan.dropped.length === 0,
     'every remembered column mapping must be carried onto the new files',

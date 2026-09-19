@@ -14,7 +14,13 @@ const rule: Rule = {
   when: {
     mode: 'all',
     conditions: [
-      { field: 'description', operator: 'contains', value: 'power', caseSensitive: false, scope: 'latest' },
+      {
+        field: 'description',
+        operator: 'contains',
+        value: 'power',
+        caseSensitive: false,
+        scope: 'latest',
+      },
     ],
   },
   then: [{ type: 'set', field: 'RootCause', value: 'Power Loss' }],

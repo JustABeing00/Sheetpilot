@@ -30,6 +30,9 @@
     "db:push": "npm run db:push -w @sheetpilot/db",
     "smoke": "node scripts/smoke.mjs"
   },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
   "optionalDependencies": {
     "@rolldown/binding-win32-x64-msvc": "^1.2.8",
     "lightningcss-win32-x64-msvc": "^1.33.0"
@@ -48,5 +51,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0",
     "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "uuid": ">=11.1.1"
   }
 }
