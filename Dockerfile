@@ -21,7 +21,7 @@ ENV NODE_ENV=production
 ENV API_HOST=0.0.0.0
 ENV DB_MIGRATIONS_DIR=/app/packages/db/drizzle
 
-COPY --from=build /app/package.json /app/package-lock.json tsconfig.base.json ./
+COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps ./apps
 COPY --from=build /app/packages ./packages
