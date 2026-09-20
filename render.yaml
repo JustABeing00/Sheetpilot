@@ -5,6 +5,10 @@ databases:
     databaseName: sheetpilot
 
 services:
+  # Disk-only single-service deploy: no R2/S3 at all.
+  # The API serves requests AND executes runs in-process.
+  # Keep this service at 1 instance (no autoscaling): runs are in-process,
+  # so a second instance would mark the first instance's in-flight runs as failed.
   - type: web
     name: sheetpilot-api
     runtime: docker
@@ -24,33 +28,28 @@ services:
         value: postgres
       - key: DB_AUTO_MIGRATE
         value: 'true'
+      # Local disk storage only. Files live on the /data disk below.
+      - key: STORAGE_DRIVER
+        value: local
       - key: STORAGE_LOCAL_DIR
         value: /data/storage
-      # Set STORAGE_DRIVER=s3 and fill the S3_* values (Cloudflare R2) to share files with the worker
-      # and to scale past one instance; the disk below then becomes optional.
-      - key: STORAGE_DRIVER
-        sync: false
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_ENDPOINT
-        sync: false
-      - key: S3_REGION
-        sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: sheetpilot-db
           property: connectionString
       - key: API_KEY
         generateValue: true
+      # Set to https://sheetpilot.online in the Render dashboard.
       - key: CORS_ORIGIN
         sync: false
-      # Runs execute on the dedicated worker below; the API only serves requests.
+      # Single service = runs execute inside the API process.
       - key: RUN_DISPATCH_IN_PROCESS
-        value: 'false'
+        value: 'true'
+      - key: RUN_WORKER_POLL_MS
+        value: '1000'
+      # Auth: pilot default is off so the first deploy succeeds.
+      # For full auth, set AUTH_ENABLED=true plus AUTH_URL=https://sheetpilot.online,
+      # AUTH_SECRET, and one sign-in method (AUTH_GOOGLE_* or AUTH_RESEND_*).
       - key: AUTH_ENABLED
         value: 'false'
       - key: AUTH_SECRET
@@ -73,44 +72,3 @@ services:
       name: sheetpilot-data
       mountPath: /data
       sizeGB: 1
-
-  # Dedicated run executor: drains the durable Postgres queue. The API stays stateless and can scale.
-  # With STORAGE_DRIVER=s3 this service and the API share files; with local storage they must share the
-  # same disk, which Render only supports for a single service — use R2 for multi-service/multi-instance.
-  - type: worker
-    name: sheetpilot-worker
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: node apps/api/dist/index.js --worker
-    plan: starter
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: TRUST_PROXY
-        value: 'true'
-      - key: REPOSITORY_DRIVER
-        value: postgres
-      - key: DB_AUTO_MIGRATE
-        value: 'false'
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sheetpilot-db
-          property: connectionString
-      - key: RUN_WORKER_POLL_MS
-        value: '1000'
-      - key: STORAGE_LOCAL_DIR
-        value: /data/storage
-      - key: STORAGE_DRIVER
-        sync: false
-      - key: S3_BUCKET
-        sync: false
-      - key: S3_ENDPOINT
-        sync: false
-      - key: S3_REGION
-        sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
