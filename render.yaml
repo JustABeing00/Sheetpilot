@@ -1,20 +1,16 @@
-databases:
-  - name: sheetpilot-db
-    plan: basic-256mb
-    postgresMajorVersion: '16'
-    databaseName: sheetpilot
-
 services:
-  # Disk-only single-service deploy: no R2/S3 at all.
+  # Fully-free deploy: Render free web + Neon free Postgres, no R2/S3, no disk.
   # The API serves requests AND executes runs in-process.
   # Keep this service at 1 instance (no autoscaling): runs are in-process,
   # so a second instance would mark the first instance's in-flight runs as failed.
+  # Free-service limits: sleeps after ~15 min idle (slow first wake), and files on the
+  # ephemeral filesystem vanish on sleep/restart — download reports the same day.
   - type: web
     name: sheetpilot-api
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    plan: starter
+    plan: free
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
@@ -28,15 +24,15 @@ services:
         value: postgres
       - key: DB_AUTO_MIGRATE
         value: 'true'
-      # Local disk storage only. Files live on the /data disk below.
+      # Ephemeral local storage only (free services have no disks).
+      # Files survive while the service stays awake; the database (Neon) is permanent.
       - key: STORAGE_DRIVER
         value: local
       - key: STORAGE_LOCAL_DIR
-        value: /data/storage
+        value: /tmp/storage
+      # Neon free Postgres (pooled URL, including ?sslmode=require). Set in the dashboard.
       - key: DATABASE_URL
-        fromDatabase:
-          name: sheetpilot-db
-          property: connectionString
+        sync: false
       - key: API_KEY
         generateValue: true
       # Set to https://sheetpilot.online in the Render dashboard.
@@ -68,7 +64,3 @@ services:
         sync: false
       - key: AUTH_EMAIL_FROM
         sync: false
-    disk:
-      name: sheetpilot-data
-      mountPath: /data
-      sizeGB: 1
