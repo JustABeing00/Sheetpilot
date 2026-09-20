@@ -85,9 +85,9 @@ jobs:
           node apps/api/dist/index.js &
           API_PID=$!
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:4000/readyz > /dev/null; then break; fi
+            if curl --fail --silent http://127.0.0.1:4000/readyz > /dev/null; then break; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:4000/readyz
+          curl --fail --silent http://127.0.0.1:4000/readyz
           npm run smoke
           kill "$API_PID"

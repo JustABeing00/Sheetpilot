@@ -141,7 +141,30 @@ export class RunService {
     // Freeze the configuration + rule-set versions before execution so a later edit can never change
     // what this run produced. Every run is reproducible from its own snapshot.
     await this.captureSnapshot(created, input.configurationOverride ?? null);
-    await this.deps.queue.enqueue(created.id, created.tenantId, this.deps.maxAttempts);
+    try {
+      await this.deps.queue.enqueue(created.id, created.tenantId, this.deps.maxAttempts);
+    } catch (error) {
+      // The API answers POST /runs with a generic 500, so record the underlying database cause here:
+      // Postgres surfaces code/detail/hint/constraint on `cause`, which is what distinguishes a
+      // missing column/table from a constraint violation or a bad value.
+      const cause = error instanceof Error ? error.cause : undefined;
+      const pg = (cause ?? error) as Record<string, unknown>;
+      this.deps.logger.error(
+        {
+          runId: created.id,
+          err: error,
+          cause,
+          pgCode: pg['code'],
+          pgDetail: pg['detail'],
+          pgHint: pg['hint'],
+          pgConstraint: pg['constraint'],
+          pgTable: pg['table'],
+          pgColumn: pg['column'],
+        },
+        'failed to enqueue run',
+      );
+      throw error;
+    }
     this.deps.logger.info(
       { runId: created.id, workflowSlug: created.workflowSlug },
       'run queued for execution',
