@@ -23,7 +23,10 @@ export class PostgresRunQueue implements RunQueue {
   constructor(private readonly db: Database) {}
 
   async enqueue(runId: string, tenantId: string | null, maxAttempts: number): Promise<void> {
-    const now = new Date();
+    // Raw `sql` templates bypass drizzle's column value-mapping, and the postgres-js prepared-statement
+    // path rejects Date instances outright (Buffer.byteLength on a Date throws ERR_INVALID_ARG_TYPE).
+    // Pass an ISO string instead: timestamptz parses it unambiguously as UTC.
+    const now = new Date().toISOString();
     await this.db.execute(sql`
       INSERT INTO jobs (
         id, run_id, tenant_id, status, attempts, max_attempts, available_at, cancel_requested,
